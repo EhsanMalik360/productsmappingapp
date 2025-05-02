@@ -5,7 +5,11 @@ import type { Database } from '../types/database';
 
 type Tables = Database['public']['Tables'];
 type SupplierInsert = Tables['suppliers']['Insert'];
-type SupplierProductInsert = Tables['supplier_products']['Insert'];
+type SupplierProductInsert = Tables['supplier_products']['Insert'] & {
+  mpn?: string;
+  product_name?: string;
+  match_method?: string;
+};
 
 export enum MatchMethod {
   EAN = 'ean',
@@ -146,6 +150,12 @@ export const validateSupplierData = async (data: any): Promise<boolean> => {
     if (!data.supplier_name || typeof data.supplier_name !== 'string') {
       throw new Error('Supplier name is required');
     }
+    
+    // Ensure supplier_name is not empty after trimming
+    if (data.supplier_name.trim() === '') {
+      throw new Error('Supplier name cannot be empty');
+    }
+    
     if (data.ean !== undefined && typeof data.ean !== 'string') {
       throw new Error('Product EAN must be a string if provided');
     }
@@ -185,6 +195,20 @@ export const validateSupplierData = async (data: any): Promise<boolean> => {
   }
 };
 
+// Helper function to generate a unique placeholder EAN for suppliers with missing EANs
+const generatePlaceholderEan = (supplierId: string, productName?: string, mpn?: string): string => {
+  // Use a combination of supplier ID, product name or MPN to create a unique identifier
+  // But ensure it doesn't conflict with real EANs by adding a prefix
+  const uniqueBase = productName || mpn || 'product';
+  // Create a reproducible hash-like value using simple string operations
+  const hash = (supplierId + uniqueBase).split('').reduce((a, b) => {
+    a = ((a << 5) - a) + b.charCodeAt(0);
+    return a & a;
+  }, 0);
+  // Format as a 13-digit EAN-like string but prefix with "SUP" to avoid conflicts with real EANs
+  return `SUP${Math.abs(hash).toString().padStart(10, '0')}`;
+};
+
 export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: string]: string }): Promise<{ 
   data: SupplierData[]; 
   warnings: { 
@@ -204,6 +228,7 @@ export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: stri
   }
   
   let hasCurrencyWarning = false;
+  let missingSupplierNameCount = 0;
   
   // Pre-process all data in a single loop to avoid multiple iterations
   const mappedData = csvData.map(row => {
@@ -213,10 +238,26 @@ export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: stri
       hasCurrencyWarning = true;
     }
     
+    // Get MPN value which may need to be used in multiple places
+    const mpnValue = row[fieldMapping['MPN']]?.trim() || '';
+    
+    // Get supplier name and ensure it's valid
+    let supplierName = row[fieldMapping['Supplier Name']]?.trim() || '';
+    
+    // If supplier name is empty, try to use a different field or generate a placeholder
+    if (!supplierName) {
+      // Try to use another field as fallback
+      supplierName = row[fieldMapping['Product Name']]?.trim() || 'Unknown Supplier';
+      missingSupplierNameCount++;
+    }
+    
+    // Normalize supplier name to avoid issues with case or whitespace
+    supplierName = supplierName.replace(/\s+/g, ' ').trim();
+    
     const supplierData: SupplierData = {
-      supplier_name: row[fieldMapping['Supplier Name']]?.trim() || '',
+      supplier_name: supplierName,
       ean: row[fieldMapping['EAN']]?.trim() || '',
-      mpn: row[fieldMapping['MPN']]?.trim() || '',
+      mpn: mpnValue,
       product_name: row[fieldMapping['Product Name']]?.trim() || '',
       cost: cost,
       moq: row[fieldMapping['MOQ']] ? parseInt(row[fieldMapping['MOQ']]) : undefined,
@@ -255,6 +296,11 @@ export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: stri
           
           customAttrs[attr.name] = value;
           hasCustomAttrs = true;
+          
+          // If this is an MPN attribute, ensure it's also set in the main mpn field
+          if (attr.name === 'MPN' && !supplierData.mpn && value) {
+            supplierData.mpn = value.toString();
+          }
         } else if (attr.required) {
           // For required attributes, use default value if available
           customAttrs[attr.name] = attr.default_value;
@@ -269,6 +315,14 @@ export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: stri
     
     return supplierData;
   });
+  
+  if (missingSupplierNameCount > 0) {
+    console.warn(`Found ${missingSupplierNameCount} rows with missing supplier names that were replaced with fallbacks.`);
+  }
+  
+  // Check if all data has valid supplier_name
+  const validSupplierNameCount = mappedData.filter(item => item.supplier_name && item.supplier_name.trim() !== '').length;
+  console.log(`Mapped ${mappedData.length} rows, ${validSupplierNameCount} with valid supplier names.`);
   
   // Validate all mapped data items in parallel for better performance
   const validationPromises = mappedData.map(validateSupplierData);
@@ -340,8 +394,17 @@ export const importSupplierData = async (
 
     // OPTIMIZATION: Preprocess all data before doing any database operations
     // Group data by supplier - this reduces the number of upsert operations
+    console.log(`Grouping ${mappedData.length} rows by supplier name`);
+    
     const supplierGroups = mappedData.reduce((acc, row) => {
       const { supplier_name, custom_attributes, ...productData } = row;
+      
+      // Debug output to check supplier_name
+      if (!supplier_name || supplier_name.trim() === '') {
+        console.warn('Found row with empty supplier_name:', JSON.stringify(row));
+        return acc; // Skip rows with empty supplier name
+      }
+      
       if (!acc[supplier_name]) {
         acc[supplier_name] = {
           name: supplier_name,
@@ -352,11 +415,16 @@ export const importSupplierData = async (
       acc[supplier_name].products.push(productData);
       return acc;
     }, {} as { [key: string]: { name: string; custom_attributes: Record<string, any>; products: Omit<SupplierData, 'supplier_name' | 'custom_attributes'>[] } });
+    
+    console.log(`Grouped into ${Object.keys(supplierGroups).length} unique suppliers`);
+    console.log('Supplier names:', Object.keys(supplierGroups).slice(0, 5).join(', ') + (Object.keys(supplierGroups).length > 5 ? '...' : ''));
 
     const results = [];
     let processedCount = 0;
     // Allow custom batch size to be passed in
     const batchSize = customBatchSize || 100; // Default to 100 instead of 50 for better performance
+    // Create an array to track batch errors
+    let batchErrors: any[] = [];
 
     // OPTIMIZATION: Get all custom attributes in a single query at the start
     const { data: customAttributes, error: customAttrError } = await supabase
@@ -368,25 +436,59 @@ export const importSupplierData = async (
 
     // OPTIMIZATION: Prepare all supplier upserts at once
     const supplierNames = Object.keys(supplierGroups);
-    const supplierUpsertData = supplierNames.map(name => ({ name }));
+    console.log(`Found ${supplierNames.length} unique suppliers to upsert`);
+    
+    const supplierUpsertData = supplierNames.map(name => {
+      const supplierData = supplierGroups[name];
+      const customAttrs = supplierData.custom_attributes || {};
+      
+      // Convert custom attributes to direct columns
+      const supplierRecord: any = { 
+        name,
+        is_matched: false // Initialize all suppliers as unmatched
+      };
+      
+      // If we have custom attributes, add them directly to the supplier record
+      if (customAttrs) {
+        // Map known custom attributes to their respective columns
+        if (customAttrs['EAN'] !== undefined) supplierRecord.custom_ean = customAttrs['EAN'];
+        if (customAttrs['MPN'] !== undefined) supplierRecord.custom_mpn = customAttrs['MPN'];
+        if (customAttrs['Brand'] !== undefined) supplierRecord.custom_brand = customAttrs['Brand'];
+      }
+      
+      return supplierRecord;
+    });
+    
+    console.log(`Prepared ${supplierUpsertData.length} supplier records for upsert`);
+    console.log('First supplier record example:', JSON.stringify(supplierUpsertData[0]));
 
     // OPTIMIZATION: Upsert all suppliers in a single batch operation
     const { data: upsertedSuppliers, error: suppliersError } = await supabase
-      .from('suppliers')
-      .upsert(supplierUpsertData as SupplierInsert[], { 
-        onConflict: 'name',
-        ignoreDuplicates: false 
-      })
+        .from('suppliers')
+      .upsert(supplierUpsertData as any, { 
+          onConflict: 'name',
+          ignoreDuplicates: false 
+        })
       .select('id,name');
       
-    if (suppliersError) throw suppliersError;
-    if (!upsertedSuppliers) throw new Error('Failed to upsert suppliers');
+    if (suppliersError) {
+      console.error('Error upserting suppliers:', suppliersError);
+      throw suppliersError;
+    }
+    if (!upsertedSuppliers) {
+      console.error('Failed to upsert suppliers: no data returned');
+      throw new Error('Failed to upsert suppliers');
+    }
+    
+    console.log(`Successfully upserted ${upsertedSuppliers.length} suppliers`);
 
     // Create a lookup map for supplier IDs by name for quick access
     const supplierIdsByName: Record<string, string> = {};
     upsertedSuppliers.forEach(s => {
       supplierIdsByName[s.name] = s.id;
     });
+    
+    console.log(`Created lookup map with ${Object.keys(supplierIdsByName).length} supplier IDs`);
 
     // Add progress reporting in the supplier processing loop
     let currentProcessed = 0;
@@ -431,7 +533,10 @@ export const importSupplierData = async (
       }, [] as string[][]);
       
       for (const chunk of mpnChunks) {
+        // Instead of using a complex OR condition, we'll create separate filters
+        // for mpn and custom_mpn to avoid the parsing error
         filter.push(`mpn.in.(${chunk.map(mpn => `"${mpn}"`).join(',')})`);
+        filter.push(`custom_mpn.in.(${chunk.map(mpn => `"${mpn}"`).join(',')})`);
       }
     }
     
@@ -449,14 +554,14 @@ export const importSupplierData = async (
     }
     
     // Only query if we have filters
-    let allProducts: { id: string; ean?: string; mpn?: string; title?: string }[] = [];
+    let allProducts: { id: string; ean?: string; mpn?: string; title?: string; custom_mpn?: string }[] = [];
     
     // OPTIMIZATION: Execute multiple queries in parallel if we have large filter sets
     if (filter.length > 0) {
       const productQueries = filter.map(f => 
         supabase
           .from('products')
-          .select('id, ean, mpn, title')
+          .select('id, ean, mpn, title, custom_mpn')
           .or(f)
       );
       
@@ -466,7 +571,11 @@ export const importSupplierData = async (
       for (const result of productResults) {
         if (result.error) throw result.error;
         if (result.data) {
-          allProducts = [...allProducts, ...result.data];
+          // Filter out duplicates based on product ID before adding to allProducts
+          const newProducts = result.data.filter(newProduct => 
+            !allProducts.some(existingProduct => existingProduct.id === newProduct.id)
+          );
+          allProducts = [...allProducts, ...newProducts];
         }
       }
     }
@@ -478,48 +587,36 @@ export const importSupplierData = async (
     
     allProducts.forEach(product => {
       if (product.ean) productsByEan[product.ean] = product;
+      
+      // Map product by both regular mpn and custom_mpn
       if (product.mpn) productsByMpn[product.mpn] = product;
+      if (product.custom_mpn) productsByMpn[product.custom_mpn] = product;
+      
       if (product.title) productsByName[product.title] = product;
     });
     
-    // OPTIMIZATION: Prepare custom attribute values for all suppliers at once
-    const allAttributeValues = [];
-    
-    if (customAttributes && customAttributes.length > 0) {
-      for (const [supplierName, supplierData] of Object.entries(supplierGroups)) {
-        const supplierId = supplierIdsByName[supplierName];
-        if (!supplierId) continue;
-        
-        for (const attr of customAttributes) {
-          if (supplierData.custom_attributes && supplierData.custom_attributes[attr.name] !== undefined) {
-            allAttributeValues.push({
-              attribute_id: attr.id,
-              entity_id: supplierId,
-              value: supplierData.custom_attributes[attr.name]
-            });
-          }
-        }
-      }
-      
-      // OPTIMIZATION: Upsert all custom attribute values in a single batch
-      if (allAttributeValues.length > 0) {
-        const { error: valuesError } = await supabase
-          .from('custom_attribute_values')
-          .upsert(allAttributeValues, {
-            onConflict: 'attribute_id,entity_id',
-            ignoreDuplicates: false
-          });
-          
-        if (valuesError) throw valuesError;
-      }
-    }
-    
     // Now process all suppliers and their products
+    console.log(`Processing supplier products for ${Object.keys(supplierGroups).length} suppliers`);
+    
     const allSupplierProducts = [];
+    const unmatchedSupplierData: SupplierProductInsert[] = [];
+    // Track which suppliers have matched products
+    const suppliersWithMatches = new Set<string>();
+    
+    // Count how many suppliers have valid IDs and how many don't
+    let validSupplierCount = 0;
+    let missingSuppliersCount = 0;
     
     for (const [supplierName, supplierData] of Object.entries(supplierGroups)) {
       const supplierId = supplierIdsByName[supplierName];
-      if (!supplierId) continue;
+      
+      if (!supplierId) {
+        console.error(`No supplier ID found for supplier name: "${supplierName}"`);
+        missingSuppliersCount++;
+        continue;
+      }
+      
+      validSupplierCount++;
       
       // Match products in priority order
       const matchedProducts: Array<{
@@ -567,16 +664,42 @@ export const importSupplierData = async (
               matchMethod: method
             });
             matchedSupplierProductIndices.add(index);
+            
+            // Mark this supplier as having at least one match
+            suppliersWithMatches.add(supplierId);
+            
+            // Update the product's custom_mpn field if it's matched by MPN but custom_mpn is empty
+            if (method === MatchMethod.MPN && supplierProduct.mpn && !match.custom_mpn) {
+              // Update the product with the supplier's MPN - using void to ignore the result
+              void supabase
+                .from('products')
+                .update({ 
+                  custom_mpn: supplierProduct.mpn,
+                  mpn: supplierProduct.mpn, // Also update the regular mpn column
+                  updated_at: new Date().toISOString() 
+                })
+                .eq('id', match.id)
+                .then(result => {
+                  if (result.error) {
+                    console.error('Error updating product custom_mpn:', result.error);
+                  }
+                });
+            }
           }
         });
       }
       
       // Create supplier-product relationships for matched products
       const supplierProductsForThisSupplier = matchedProducts.map(match => {
+        // Make sure we have a valid EAN - if not, use a placeholder or the product's EAN
+        const ean = match.supplierProduct.ean && match.supplierProduct.ean.trim() !== '' 
+          ? match.supplierProduct.ean 
+          : match.product.ean || generatePlaceholderEan(supplierId, match.supplierProduct.product_name, match.supplierProduct.mpn);
+
         return {
           supplier_id: supplierId,
           product_id: match.product.id,
-          ean: match.supplierProduct.ean || '',
+          ean: ean,
           cost: match.supplierProduct.cost,
           moq: match.supplierProduct.moq || 1,
           lead_time: match.supplierProduct.lead_time || '3 days',
@@ -589,6 +712,30 @@ export const importSupplierData = async (
       // Add to the collection of all supplier products
       allSupplierProducts.push(...supplierProductsForThisSupplier);
       
+      // Now handle unmatched supplier products - store them without a product_id
+      supplierData.products.forEach((supplierProduct, index) => {
+        if (!matchedSupplierProductIndices.has(index)) {
+          // Ensure we have a valid EAN - generate a placeholder EAN if none exists
+          const ean = supplierProduct.ean && supplierProduct.ean.trim() !== '' 
+            ? supplierProduct.ean 
+            : generatePlaceholderEan(supplierId, supplierProduct.product_name, supplierProduct.mpn);
+            
+          unmatchedSupplierData.push({
+            supplier_id: supplierId,
+            product_id: null, // No matching product
+            ean: ean,
+            cost: supplierProduct.cost,
+            moq: supplierProduct.moq || 1,
+            lead_time: supplierProduct.lead_time || '3 days',
+            payment_terms: supplierProduct.payment_terms || 'Net 30',
+            match_method: 'none', // Indicate no match was found
+            product_name: supplierProduct.product_name || '', // Store the original product name
+            mpn: supplierProduct.mpn || '', // Store the original MPN
+            updated_at: new Date().toISOString()
+          } as SupplierProductInsert);
+        }
+      });
+      
       // Update progress after processing each supplier
       currentProcessed += supplierData.products.length;
       if (progressCallback) {
@@ -596,24 +743,136 @@ export const importSupplierData = async (
       }
     }
     
+    // Update is_matched flag for suppliers with matches
+    if (suppliersWithMatches.size > 0) {
+      const { error: matchUpdateError } = await supabase
+        .from('suppliers')
+        .update({ is_matched: true })
+        .in('id', Array.from(suppliersWithMatches));
+      
+      if (matchUpdateError) {
+        console.error('Error updating supplier match status:', matchUpdateError);
+      }
+    }
+    
+    // Now process the unmatched supplier products - store them in supplier_products table too
+    // This ensures we have a record of all products, even those without matches
+    // Group unmatched supplier products by supplier ID to process them in supplier-specific batches
+    const unmatchedBySupplierId: Record<string, SupplierProductInsert[]> = {};
+    
+    unmatchedSupplierData.forEach(item => {
+      const supplierId = item.supplier_id as string;
+      if (!unmatchedBySupplierId[supplierId]) {
+        unmatchedBySupplierId[supplierId] = [];
+      }
+      unmatchedBySupplierId[supplierId].push(item);
+    });
+    
+    // Process each supplier's unmatched products separately
+    for (const [supplierId, supplierProducts] of Object.entries(unmatchedBySupplierId)) {
+      // Process in batches
+          for (let i = 0; i < supplierProducts.length; i += batchSize) {
+            const batch = supplierProducts.slice(i, i + batchSize);
+            
+            if (batch.length > 0) {
+          try {
+            // All items should have a valid EAN at this point, either real or generated
+            // so we don't need to filter by EAN presence anymore
+            const validBatch = batch;
+            
+            if (validBatch.length === 0) {
+              continue;
+            }
+            
+            // First check if there are any existing entries with the same ean/mpn but with a product_id
+            // This can happen if products were matched after initial import
+            const eansToCheck = validBatch.map(item => item.ean);
+            const mpnsToCheck = validBatch.filter(item => item.mpn).map(item => item.mpn);
+            
+            // Delete any existing records that match the same supplier_id and ean but don't have a product_id
+            if (eansToCheck.length > 0) {
+              try {
+                // Delete any previous unmatched entries for this supplier and these EANs
+                await supabase
+                  .from('supplier_products')
+                  .delete()
+                  .eq('supplier_id', supplierId)
+                  .is('product_id', null)
+                  .in('ean', eansToCheck);
+              } catch (deleteError) {
+                console.error('Error deleting existing unmatched supplier products:', deleteError);
+              }
+            }
+            
+            // Now insert the new unmatched records
+            const { data: insertedUnmatched, error: unmatchedError } = await supabase
+              .from('supplier_products')
+              .insert(validBatch)
+              .select();
+              
+            if (unmatchedError) {
+              console.error('Error inserting unmatched supplier products batch:', unmatchedError);
+              batchErrors.push(unmatchedError);
+            } else if (insertedUnmatched) {
+              // Count these as processed even though they didn't match to a product
+              processedCount += insertedUnmatched.length;
+            }
+          } catch (err) {
+            console.error('Exception processing unmatched supplier products batch:', err);
+            batchErrors.push(err);
+          }
+        }
+      }
+    }
+    
     // OPTIMIZATION: Process all supplier products in larger batches for better throughput
     for (let i = 0; i < allSupplierProducts.length; i += batchSize) {
       const batch = allSupplierProducts.slice(i, i + batchSize);
-      
+            
       if (batch.length > 0) {
-        const { data: insertedData, error: relationError } = await supabase
-          .from('supplier_products')
-          .upsert(batch, {
-            onConflict: 'supplier_id,product_id',
-            ignoreDuplicates: false
-          })
-          .select();
+        try {
+          // Ensure all batch items have required fields properly set
+          const validBatch = batch.filter(item => 
+            item.supplier_id && 
+            item.product_id && 
+            item.ean && 
+            item.ean.trim() !== ''
+          );
+          
+          if (validBatch.length === 0) {
+            continue; // Skip this batch if all items were filtered out
+          }
+          
+              const { data: insertedData, error: relationError } = await supabase
+                .from('supplier_products')
+            .upsert(validBatch, {
+                  onConflict: 'supplier_id,product_id',
+                  ignoreDuplicates: false
+                })
+                .select();
 
-        if (relationError) throw relationError;
-        if (insertedData) results.push(...insertedData);
-
-        processedCount += batch.length;
+          if (relationError) {
+            console.error('Error upserting supplier products batch:', relationError);
+            batchErrors.push(relationError);
+            // Continue with next batch despite error
+          } else if (insertedData) {
+            results.push(...insertedData);
+            processedCount += insertedData.length;
+          }
+        } catch (err) {
+          console.error('Exception processing supplier products batch:', err);
+          batchErrors.push(err);
+          // Continue with next batch despite error
+        }
       }
+    }
+    
+    // If we had errors but still processed some records, log the errors but don't fail the entire import
+    if (batchErrors.length > 0 && processedCount > 0) {
+      console.warn(`Completed import with ${batchErrors.length} batch errors, but processed ${processedCount} records successfully.`);
+    } else if (batchErrors.length > 0) {
+      // If we had errors and didn't process any records, throw the first error
+      throw batchErrors[0];
     }
 
     // Calculate match method statistics
@@ -623,6 +882,18 @@ export const importSupplierData = async (
       return acc;
     }, {});
 
+    // Log summary of the import operation
+    console.log('=== IMPORT SUMMARY ===');
+    console.log(`Total suppliers found in input: ${Object.keys(supplierGroups).length}`);
+    console.log(`Suppliers successfully upserted: ${upsertedSuppliers.length}`);
+    console.log(`Supplier IDs in lookup map: ${Object.keys(supplierIdsByName).length}`);
+    console.log(`Suppliers with valid IDs: ${validSupplierCount}`);
+    console.log(`Suppliers with missing IDs: ${missingSuppliersCount}`);
+    console.log(`Matched supplier products: ${results.length}`);
+    console.log(`Unmatched supplier products: ${unmatchedSupplierData.length}`);
+    console.log(`Suppliers with product matches: ${suppliersWithMatches.size}`);
+    console.log('=====================');
+
     return {
       results,
       processedCount,
@@ -630,7 +901,8 @@ export const importSupplierData = async (
       warnings,
       matchStats: {
         totalMatched: processedCount,
-        byMethod: matchMethodStats
+        byMethod: matchMethodStats,
+        unmatchedCount: unmatchedSupplierData.length
       }
     };
   } catch (error) {

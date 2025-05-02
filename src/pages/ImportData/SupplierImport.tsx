@@ -76,6 +76,10 @@ const SupplierImport: React.FC = () => {
   // Combined required fields including custom attributes
   const allRequiredFields = [...REQUIRED_FIELDS, ...requiredCustomAttributes];
 
+  // Get custom attribute to column mapping
+
+  // Get the mapping of custom attribute names to column names
+
   // Reset form to initial state
   const resetForm = () => {
     setCurrentStep(1);

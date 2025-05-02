@@ -233,10 +233,30 @@ export const importProductData = async (mappedDataPromise: Promise<ProductData[]
     for (let i = 0; i < mappedData.length; i += batchSize) {
       const batch = mappedData.slice(i, i + batchSize).map(product => {
         const { custom_attributes, ...productData } = product;
-        return {
+        
+        // Build the product record with both standard fields and custom fields
+        const productRecord: any = {
           ...productData,
           updated_at: new Date().toISOString()
         };
+        
+        // If we have custom attributes, add them directly to the product record
+        if (custom_attributes) {
+          // Map known custom attributes to their respective columns
+          if (custom_attributes['Title'] !== undefined) productRecord.custom_title = custom_attributes['Title'];
+          if (custom_attributes['EAN'] !== undefined) productRecord.custom_ean = custom_attributes['EAN'];
+          if (custom_attributes['MPN'] !== undefined) {
+            productRecord.custom_mpn = custom_attributes['MPN'];
+            // Also store in the regular mpn column
+            productRecord.mpn = custom_attributes['MPN'];
+          }
+          if (custom_attributes['Units Sold in 30 days'] !== undefined) 
+            productRecord.custom_units_sold_in_30_days = custom_attributes['Units Sold in 30 days'];
+          if (custom_attributes['FBA Fee'] !== undefined) 
+            productRecord.custom_fba_fee = parseFloat(custom_attributes['FBA Fee']) || 0;
+        }
+        
+        return productRecord;
       });
       
       const { data: insertedProducts, error } = await supabase
@@ -249,39 +269,6 @@ export const importProductData = async (mappedDataPromise: Promise<ProductData[]
       
       if (error) throw error;
       if (insertedProducts) results.push(...insertedProducts);
-      
-      // Save custom attribute values if any
-      if (customAttributes && customAttributes.length > 0 && insertedProducts) {
-        for (let j = 0; j < insertedProducts.length; j++) {
-          const product = insertedProducts[j];
-          const productData = mappedData[i + j];
-          
-          if (productData.custom_attributes) {
-            const attributeValues = [];
-            
-            for (const attr of customAttributes) {
-              if (productData.custom_attributes[attr.name] !== undefined) {
-                attributeValues.push({
-                  attribute_id: attr.id,
-                  entity_id: product.id,
-                  value: productData.custom_attributes[attr.name]
-                });
-              }
-            }
-            
-            if (attributeValues.length > 0) {
-              const { error: valuesError } = await supabase
-                .from('custom_attribute_values')
-                .upsert(attributeValues, {
-                  onConflict: 'attribute_id,entity_id',
-                  ignoreDuplicates: false
-                });
-                
-              if (valuesError) throw valuesError;
-            }
-          }
-        }
-      }
       
       // Add a small delay between batches
       if (i + batchSize < mappedData.length) {

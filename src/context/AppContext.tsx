@@ -45,6 +45,7 @@ export interface CustomAttribute {
   defaultValue: string | number | boolean | null;
   required: boolean;
   forType: 'product' | 'supplier';
+  hasColumnMapping?: boolean;
 }
 
 export interface CustomAttributeValue {
@@ -168,7 +169,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           type: attr.type as 'Text' | 'Number' | 'Date' | 'Yes/No' | 'Selection',
           defaultValue: attr.default_value,
           required: attr.required,
-          forType: attr.for_type as 'product' | 'supplier'
+          forType: attr.for_type as 'product' | 'supplier',
+          hasColumnMapping: attr.has_column_mapping || false
         }));
         
         setCustomAttributes(formattedAttributes);
@@ -261,7 +263,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           required: attribute.required,
           for_type: attribute.forType,
           created_at: now,
-          updated_at: now
+          updated_at: now,
+          has_column_mapping: true // All new attributes will get column mappings
         })
         .select()
         .single();
@@ -274,8 +277,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: data.type as 'Text' | 'Number' | 'Date' | 'Yes/No' | 'Selection',
         defaultValue: data.default_value,
         required: data.required,
-        forType: data.for_type as 'product' | 'supplier'
+        forType: data.for_type as 'product' | 'supplier',
+        hasColumnMapping: data.has_column_mapping || true
       };
+
+      // Add the new column to the respective table
+      const columnName = `custom_${attribute.name.toLowerCase().replace(/\s+/g, '_')}`;
+      let dataType = 'TEXT';
+      
+      // Determine SQL data type based on attribute type
+      switch (attribute.type) {
+        case 'Number':
+          dataType = 'NUMERIC';
+          break;
+        case 'Date':
+          dataType = 'TIMESTAMP WITH TIME ZONE';
+          break;
+        case 'Yes/No':
+          dataType = 'BOOLEAN';
+          break;
+        default:
+          dataType = 'TEXT';
+      }
+      
+      // Determine which table to add the column to
+      const tableName = attribute.forType === 'product' ? 'products' : 'suppliers';
+      
+      try {
+        // Execute the ALTER TABLE query to add the column
+        await supabase.rpc('execute_sql', {
+          query: `ALTER TABLE ${tableName} ADD COLUMN IF NOT EXISTS ${columnName} ${dataType}`
+        });
+        
+        // Create an index for the new column for better performance
+        await supabase.rpc('execute_sql', {
+          query: `CREATE INDEX IF NOT EXISTS idx_${tableName}_${columnName} ON ${tableName}(${columnName})`
+        });
+      } catch (sqlError) {
+        console.error('Error modifying database schema:', sqlError);
+        // Continue anyway, as the custom attribute has been created
+      }
 
       setCustomAttributes([...customAttributes, newAttribute]);
       return newAttribute;
@@ -297,6 +338,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           default_value: updates.defaultValue,
           required: updates.required,
           for_type: updates.forType,
+          has_column_mapping: updates.hasColumnMapping !== undefined ? updates.hasColumnMapping : true,
           updated_at: now
         })
         .eq('id', id)
@@ -311,7 +353,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: data.type as 'Text' | 'Number' | 'Date' | 'Yes/No' | 'Selection',
         defaultValue: data.default_value,
         required: data.required,
-        forType: data.for_type as 'product' | 'supplier'
+        forType: data.for_type as 'product' | 'supplier',
+        hasColumnMapping: data.has_column_mapping || false
       };
 
       setCustomAttributes(customAttributes.map(attr => 
@@ -344,6 +387,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Get attribute value
   const getAttributeValue = (attributeId: string, entityId: string) => {
+    // First get the attribute definition
+    const attribute = customAttributes.find(attr => attr.id === attributeId);
+    if (!attribute) {
+      return null; // Attribute not found
+    }
+    
+    // Look for the value in the entity tables (this is now the primary storage)
+    const fieldName = `custom_${attribute.name.toLowerCase().replace(/\s+/g, '_')}`;
+    
+    if (attribute.forType === 'product') {
+      // Find the product
+      const product = dbProducts.find(p => p.id === entityId);
+      if (product) {
+        // Check the corresponding custom_* field in the products table
+        if (fieldName in product && (product as any)[fieldName] !== null) {
+          return (product as any)[fieldName];
+        }
+      }
+    } else if (attribute.forType === 'supplier') {
+      // Find the supplier
+      const supplier = dbSuppliers.find(s => s.id === entityId);
+      if (supplier) {
+        // Check the corresponding custom_* field in the suppliers table
+        if (fieldName in supplier && (supplier as any)[fieldName] !== null) {
+          return (supplier as any)[fieldName];
+        }
+      }
+    }
+    
+    // For backward compatibility, still check in attributeValues (local state)
+    // This helps maintain UI consistency until data is refreshed from the server
     const attributeValue = attributeValues.find(
       av => av.attributeId === attributeId && av.entityId === entityId
     );
@@ -352,31 +426,80 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return attributeValue.value;
     }
     
-    // Return default value if no value set
-    const attribute = customAttributes.find(attr => attr.id === attributeId);
-    return attribute ? attribute.defaultValue : null;
+    // Return default value if no value found anywhere
+    return attribute.defaultValue;
   };
 
   // Set attribute value
   const setAttributeValue = async (attributeId: string, entityId: string, value: any) => {
     try {
       const now = new Date().toISOString();
-      const { error } = await supabase
-        .from('custom_attribute_values')
-        .upsert({
-          attribute_id: attributeId,
-          entity_id: entityId,
-          value,
-          created_at: now,
-          updated_at: now
-        }, {
-          onConflict: 'attribute_id,entity_id'
-        })
-        .select();
-
-      if (error) throw error;
-
-      // Update local state
+      const attribute = customAttributes.find(attr => attr.id === attributeId);
+      
+      if (!attribute) {
+        throw new Error('Attribute not found');
+      }
+      
+      // Store the value directly in the column of the respective table
+      const fieldName = `custom_${attribute.name.toLowerCase().replace(/\s+/g, '_')}`;
+      
+      if (attribute.forType === 'product') {
+        const { error: productError } = await supabase
+          .from('products')
+          .update({ 
+            [fieldName]: value, 
+            // If this is the MPN attribute, also update the regular mpn field
+            ...(attribute.name === 'MPN' ? { mpn: value } : {}),
+            updated_at: now 
+          })
+          .eq('id', entityId);
+          
+        if (productError) {
+          console.error('Error updating product with custom attribute:', productError);
+          throw productError;
+        }
+        
+        // Update local state for products
+        const productIndex = dbProducts.findIndex(p => p.id === entityId);
+        if (productIndex >= 0) {
+          const updatedProducts = [...dbProducts];
+          updatedProducts[productIndex] = {
+            ...updatedProducts[productIndex],
+            [fieldName]: value,
+            ...(attribute.name === 'MPN' ? { mpn: value } : {}),
+            updated_at: now
+          };
+          // This will be refreshed on the next data fetch
+        }
+      } else if (attribute.forType === 'supplier') {
+        const { error: supplierError } = await supabase
+          .from('suppliers')
+          .update({ [fieldName]: value, updated_at: now })
+          .eq('id', entityId);
+          
+        if (supplierError) {
+          console.error('Error updating supplier with custom attribute:', supplierError);
+          throw supplierError;
+        }
+        
+        // Update local state for suppliers
+        const supplierIndex = dbSuppliers.findIndex(s => s.id === entityId);
+        if (supplierIndex >= 0) {
+          const updatedSuppliers = [...dbSuppliers];
+          updatedSuppliers[supplierIndex] = {
+            ...updatedSuppliers[supplierIndex],
+            [fieldName]: value,
+            updated_at: now
+          };
+          // This will be refreshed on the next data fetch
+        }
+      }
+      
+      // We no longer store values in custom_attribute_values table
+      // Instead we update the local state to reflect the changes
+      
+      // Update UI state when a value is changed directly in the UI
+      // Find the index of the attribute value in the current state
       const existingIndex = attributeValues.findIndex(
         av => av.attributeId === attributeId && av.entityId === entityId
       );
@@ -460,12 +583,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Refresh all data
   const refreshData = async () => {
     try {
-    await Promise.all([
-      refreshProducts(),
-      refreshSuppliers()
-    ]);
-    
-    // Refresh supplier products
+      await Promise.all([
+        refreshProducts(),
+        refreshSuppliers()
+      ]);
+      
+      // Refresh supplier products
       const { data: supplierProductsData, error: supplierProductsError } = await supabase
         .from('supplier_products')
         .select(`
@@ -492,25 +615,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: attr.type as 'Text' | 'Number' | 'Date' | 'Yes/No' | 'Selection',
         defaultValue: attr.default_value,
         required: attr.required,
-        forType: attr.for_type as 'product' | 'supplier'
+        forType: attr.for_type as 'product' | 'supplier',
+        hasColumnMapping: attr.has_column_mapping || false
       }));
       
       setCustomAttributes(formattedAttributes);
       
-      // Refresh attribute values
-      const { data: valuesData, error: valuesError } = await supabase
-        .from('custom_attribute_values')
-        .select('*');
-
-      if (valuesError) throw valuesError;
-      
-      const formattedValues = (valuesData || []).map(val => ({
-        attributeId: val.attribute_id,
-        entityId: val.entity_id,
-        value: val.value
-      }));
-      
-      setAttributeValues(formattedValues);
+      // We don't need to refresh attribute values from custom_attribute_values table anymore
+      // since we're storing them directly in their respective tables
+      // This just maintains the local state for UI consistency
+      setAttributeValues([]);
     } catch (err) {
       console.error('Error refreshing data:', err);
       throw err;
