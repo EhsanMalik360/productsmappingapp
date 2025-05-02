@@ -1,6 +1,5 @@
 import React from 'react';
 import Tabs, { Tab } from '../../components/UI/Tabs';
-import Button from '../../components/UI/Button';
 import AmazonImport from './AmazonImport';
 import SupplierImport from './SupplierImport';
 import ImportHistory from './ImportHistory';

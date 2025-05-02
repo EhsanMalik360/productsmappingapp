@@ -2,6 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Eye } from 'lucide-react';
 import { useAppContext, Product, SupplierProduct } from '../../context/AppContext';
+import ProductMatchBadge from './ProductMatchBadge';
 
 interface ProductRowProps {
   product: Product;
@@ -34,9 +35,14 @@ const ProductRow: React.FC<ProductRowProps> = ({ product }) => {
       <td className="px-4 py-3">{product.unitsSold.toLocaleString()}</td>
       <td className="px-4 py-3">${product.amazonFee.toFixed(2)}</td>
       <td className="px-4 py-3">
-        <span className="supplier-badge bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-semibold">
-          {suppliers.length} supplier{suppliers.length !== 1 ? 's' : ''}
-        </span>
+        <div className="flex flex-col space-y-1">
+          <span className="supplier-badge bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-semibold">
+            {suppliers.length} supplier{suppliers.length !== 1 ? 's' : ''}
+          </span>
+          {bestSupplier?.match_method && (
+            <ProductMatchBadge matchMethod={bestSupplier.match_method} />
+          )}
+        </div>
       </td>
       <td className="px-4 py-3">{bestCost}</td>
       <td className="px-4 py-3">

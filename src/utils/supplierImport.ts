@@ -2,15 +2,29 @@ import { supabase } from '../lib/supabase';
 import type { Database } from '../types/database';
 
 // Import app context to access required attributes
-import { CustomAttribute } from '../context/AppContext';
 
 type Tables = Database['public']['Tables'];
 type SupplierInsert = Tables['suppliers']['Insert'];
 type SupplierProductInsert = Tables['supplier_products']['Insert'];
 
+export enum MatchMethod {
+  EAN = 'ean',
+  MPN = 'mpn',
+  NAME = 'name'
+}
+
+export interface MatchOptions {
+  useEan: boolean;
+  useMpn: boolean;
+  useName: boolean;
+  priority: MatchMethod[];
+}
+
 export interface SupplierData {
   supplier_name: string;
-  ean: string;
+  ean?: string;
+  mpn?: string;
+  product_name?: string;
   cost: number;
   moq?: number;
   lead_time?: string;
@@ -26,11 +40,45 @@ const normalizeColumnName = (name: string): string => {
     .replace(/^_|_$/g, '');
 };
 
+// Function to process cost values with currency symbols
+export const processCostValue = (value: string): { cost: number; currencyWarning: boolean } => {
+  if (!value) return { cost: 0, currencyWarning: false };
+  
+  // Remove whitespace
+  const trimmedValue = value.trim();
+  
+  // Check for currency symbols
+  if (/^[$]/.test(trimmedValue)) {
+    // USD symbol - remove it and parse the number
+    const numericValue = trimmedValue.replace(/[$]/g, '').trim();
+    return { 
+      cost: parseFloat(numericValue) || 0, 
+      currencyWarning: false 
+    };
+  } else if (/^[€£¥₹₽₩₺₴₦₱₲₪₸₼₾₿]/.test(trimmedValue) || /[^\d.-]/.test(trimmedValue)) {
+    // Other currency symbol or non-numeric character detected
+    // Try to parse it anyway to get some value
+    const numericValue = trimmedValue.replace(/[^\d.-]/g, '').trim();
+    return { 
+      cost: parseFloat(numericValue) || 0, 
+      currencyWarning: true 
+    };
+  }
+  
+  // No currency symbol detected
+  return { 
+    cost: parseFloat(trimmedValue) || 0, 
+    currencyWarning: false 
+  };
+};
+
 // Function to automatically map supplier CSV columns to system fields
 export const autoMapSupplierColumns = async (csvHeaders: string[]): Promise<{ [key: string]: string }> => {
   const fieldMappings: { [key: string]: string[] } = {
     'Supplier Name': ['supplier_name', 'supplier', 'vendor_name', 'vendor', 'company_name', 'company'],
-    'EAN': ['ean', 'barcode', 'upc', 'product_id', 'sku'],
+    'EAN': ['ean', 'barcode', 'upc', 'product_id', 'sku', 'asin', 'gtin'],
+    'MPN': ['mpn', 'manufacturer_part_number', 'part_number', 'part_no', 'manufacturer_number'],
+    'Product Name': ['product_name', 'title', 'item_name', 'product_title', 'product', 'item'],
     'Cost': ['cost', 'unit_cost', 'price', 'supplier_cost', 'wholesale_price'],
     'MOQ': ['moq', 'minimum_order_quantity', 'min_order', 'minimum_qty'],
     'Lead Time': ['lead_time', 'leadtime', 'delivery_time', 'processing_time'],
@@ -98,8 +146,8 @@ export const validateSupplierData = async (data: any): Promise<boolean> => {
     if (!data.supplier_name || typeof data.supplier_name !== 'string') {
       throw new Error('Supplier name is required');
     }
-    if (!data.ean || typeof data.ean !== 'string') {
-      throw new Error('Product EAN is required');
+    if (data.ean !== undefined && typeof data.ean !== 'string') {
+      throw new Error('Product EAN must be a string if provided');
     }
     if (typeof data.cost !== 'number' || data.cost <= 0) {
       throw new Error('Cost must be a positive number');
@@ -137,8 +185,14 @@ export const validateSupplierData = async (data: any): Promise<boolean> => {
   }
 };
 
-export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: string]: string }): Promise<SupplierData[]> => {
-  // Get all custom attributes to map them
+export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: string]: string }): Promise<{ 
+  data: SupplierData[]; 
+  warnings: { 
+    currencyWarning: boolean; 
+    message: string; 
+  }
+}> => {
+  // Get all custom attributes to map them - only once for all data
   const { data: customAttributes, error } = await supabase
     .from('custom_attributes')
     .select('*')
@@ -149,26 +203,37 @@ export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: stri
     throw error;
   }
   
+  let hasCurrencyWarning = false;
+  
+  // Pre-process all data in a single loop to avoid multiple iterations
   const mappedData = csvData.map(row => {
+    // Process cost value and check for currency warnings
+    const { cost, currencyWarning } = processCostValue(row[fieldMapping['Cost']]?.trim());
+    if (currencyWarning) {
+      hasCurrencyWarning = true;
+    }
+    
     const supplierData: SupplierData = {
       supplier_name: row[fieldMapping['Supplier Name']]?.trim() || '',
       ean: row[fieldMapping['EAN']]?.trim() || '',
-      cost: parseFloat(row[fieldMapping['Cost']]) || 0,
-      moq: parseInt(row[fieldMapping['MOQ']]) || 1,
-      lead_time: row[fieldMapping['Lead Time']]?.trim() || '3 days',
-      payment_terms: row[fieldMapping['Payment Terms']]?.trim() || 'Net 30',
-      custom_attributes: {}
+      mpn: row[fieldMapping['MPN']]?.trim() || '',
+      product_name: row[fieldMapping['Product Name']]?.trim() || '',
+      cost: cost,
+      moq: row[fieldMapping['MOQ']] ? parseInt(row[fieldMapping['MOQ']]) : undefined,
+      lead_time: row[fieldMapping['Lead Time']]?.trim(),
+      payment_terms: row[fieldMapping['Payment Terms']]?.trim()
     };
     
-    // Map any custom attributes found in the CSV
-    if (customAttributes) {
-      customAttributes.forEach(attr => {
+    // Map custom attributes in a single pass
+    if (customAttributes && customAttributes.length > 0) {
+      const customAttrs: Record<string, any> = {};
+      let hasCustomAttrs = false;
+      
+      for (const attr of customAttributes) {
+        let value = null;
+        
         if (fieldMapping[attr.name] && row[fieldMapping[attr.name]]) {
-          if (!supplierData.custom_attributes) {
-            supplierData.custom_attributes = {};
-          }
-          
-          let value = row[fieldMapping[attr.name]];
+          value = row[fieldMapping[attr.name]];
           
           // Convert value based on attribute type
           switch (attr.type) {
@@ -188,45 +253,93 @@ export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: stri
               value = value.trim();
           }
           
-          supplierData.custom_attributes[attr.name] = value;
+          customAttrs[attr.name] = value;
+          hasCustomAttrs = true;
         } else if (attr.required) {
           // For required attributes, use default value if available
-          if (!supplierData.custom_attributes) {
-            supplierData.custom_attributes = {};
-          }
-          supplierData.custom_attributes[attr.name] = attr.default_value;
+          customAttrs[attr.name] = attr.default_value;
+          hasCustomAttrs = true;
         }
-      });
+      }
+      
+      if (hasCustomAttrs) {
+        supplierData.custom_attributes = customAttrs;
+      }
     }
     
     return supplierData;
   });
   
-  // Validate all mapped data items
-  const validatedData: SupplierData[] = [];
-  for (const item of mappedData) {
-    try {
-      await validateSupplierData(item);
-      validatedData.push(item);
-    } catch (error) {
-      console.warn(`Skipping invalid supplier data: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      // You could handle or report the error here
-    }
-  }
+  // Validate all mapped data items in parallel for better performance
+  const validationPromises = mappedData.map(validateSupplierData);
+  const validationResults = await Promise.allSettled(validationPromises);
   
-  return validatedData;
+  // Filter out failed validations
+  const validatedData: SupplierData[] = mappedData.filter((_, index) => {
+    const result = validationResults[index];
+    if (result.status === 'rejected') {
+      console.warn(`Skipping invalid supplier data: ${result.reason instanceof Error ? result.reason.message : 'Unknown error'}`);
+      return false;
+    }
+    return true;
+  });
+  
+  return {
+    data: validatedData,
+    warnings: {
+      currencyWarning: hasCurrencyWarning,
+      message: hasCurrencyWarning ? 'Non-USD currency symbols detected. Please convert all prices to USD before uploading.' : ''
+    }
+  };
 };
 
-export const importSupplierData = async (mappedDataPromise: Promise<SupplierData[]> | SupplierData[]) => {
+export const importSupplierData = async (
+  mappedDataPromise: Promise<{ data: SupplierData[]; warnings: { currencyWarning: boolean; message: string; } }> | SupplierData[],
+  matchOptions: MatchOptions = {
+    useEan: true,
+    useMpn: true,
+    useName: false,
+    priority: [MatchMethod.EAN, MatchMethod.MPN, MatchMethod.NAME]
+  },
+  progressCallback?: (current: number, total: number) => void,
+  customBatchSize?: number
+) => {
   try {
-    // Ensure mappedData is resolved if it's a Promise
-    const mappedData = Array.isArray(mappedDataPromise) ? mappedDataPromise : await mappedDataPromise;
+    // Handle both old and new return types for backward compatibility
+    let mappedData: SupplierData[];
+    let warnings = { currencyWarning: false, message: '' };
+    
+    if (Array.isArray(mappedDataPromise)) {
+      // Old format - just an array of data
+      mappedData = mappedDataPromise;
+    } else {
+      // New format - object with data and warnings
+      const result = await mappedDataPromise;
+      if ('data' in result && Array.isArray(result.data)) {
+        mappedData = result.data;
+        warnings = result.warnings;
+        
+        // If non-USD currency symbols were detected, block the import
+        if (warnings.currencyWarning) {
+          throw new Error('Non-USD currency symbols detected. Please convert all prices to USD before uploading.');
+        }
+      } else {
+        // Fallback in case the structure is unexpected
+        mappedData = result as unknown as SupplierData[];
+      }
+    }
     
     if (!mappedData || mappedData.length === 0) {
       throw new Error('No supplier data to import');
     }
 
-    // Group data by supplier
+    // Report initial progress
+    if (progressCallback) {
+      progressCallback(0, mappedData.length);
+    }
+
+    // OPTIMIZATION: Preprocess all data before doing any database operations
+    // Group data by supplier - this reduces the number of upsert operations
     const supplierGroups = mappedData.reduce((acc, row) => {
       const { supplier_name, custom_attributes, ...productData } = row;
       if (!acc[supplier_name]) {
@@ -242,9 +355,10 @@ export const importSupplierData = async (mappedDataPromise: Promise<SupplierData
 
     const results = [];
     let processedCount = 0;
-    const batchSize = 25;
+    // Allow custom batch size to be passed in
+    const batchSize = customBatchSize || 100; // Default to 100 instead of 50 for better performance
 
-    // Get all custom attributes
+    // OPTIMIZATION: Get all custom attributes in a single query at the start
     const { data: customAttributes, error: customAttrError } = await supabase
       .from('custom_attributes')
       .select('*')
@@ -252,79 +366,241 @@ export const importSupplierData = async (mappedDataPromise: Promise<SupplierData
       
     if (customAttrError) throw customAttrError;
 
-    // Process each supplier
-    for (const [supplierName, supplierData] of Object.entries(supplierGroups)) {
-      // Insert or update supplier
-      const { data: supplier, error: supplierError } = await supabase
-        .from('suppliers')
-        .upsert({ name: supplierName } as SupplierInsert, { 
-          onConflict: 'name',
-          ignoreDuplicates: false 
-        })
-        .select()
-        .single();
+    // OPTIMIZATION: Prepare all supplier upserts at once
+    const supplierNames = Object.keys(supplierGroups);
+    const supplierUpsertData = supplierNames.map(name => ({ name }));
 
-      if (supplierError) throw supplierError;
+    // OPTIMIZATION: Upsert all suppliers in a single batch operation
+    const { data: upsertedSuppliers, error: suppliersError } = await supabase
+      .from('suppliers')
+      .upsert(supplierUpsertData as SupplierInsert[], { 
+        onConflict: 'name',
+        ignoreDuplicates: false 
+      })
+      .select('id,name');
+      
+    if (suppliersError) throw suppliersError;
+    if (!upsertedSuppliers) throw new Error('Failed to upsert suppliers');
 
-      // Save custom attribute values if any
-      if (customAttributes && customAttributes.length > 0 && supplierData.custom_attributes) {
-        const attributeValues = [];
+    // Create a lookup map for supplier IDs by name for quick access
+    const supplierIdsByName: Record<string, string> = {};
+    upsertedSuppliers.forEach(s => {
+      supplierIdsByName[s.name] = s.id;
+    });
+
+    // Add progress reporting in the supplier processing loop
+    let currentProcessed = 0;
+    
+    // OPTIMIZATION: Collect all identifiers up front
+    const eans = new Set<string>();
+    const mpns = new Set<string>();
+    const productNames = new Set<string>();
+    
+    // Collect all possible identifiers for a single database query
+    for (const supplierData of Object.values(supplierGroups)) {
+      supplierData.products.forEach(p => {
+        if (matchOptions.useEan && p.ean) eans.add(p.ean);
+        if (matchOptions.useMpn && p.mpn) mpns.add(p.mpn);
+        if (matchOptions.useName && p.product_name) productNames.add(p.product_name);
+      });
+    }
+    
+    // OPTIMIZATION: Fetch all products that could match in a single query
+    let filter = [];
+    
+    if (matchOptions.useEan && eans.size > 0) {
+      // Split large IN clauses into chunks to avoid query limits
+      const eanChunks = Array.from(eans).reduce((chunks, ean, index) => {
+        const chunkIndex = Math.floor(index / 500); // Max 500 items per IN clause
+        if (!chunks[chunkIndex]) chunks[chunkIndex] = [];
+        chunks[chunkIndex].push(ean);
+        return chunks;
+      }, [] as string[][]);
+      
+      for (const chunk of eanChunks) {
+        filter.push(`ean.in.(${chunk.map(ean => `"${ean}"`).join(',')})`);
+      }
+    }
+    
+    if (matchOptions.useMpn && mpns.size > 0) {
+      const mpnChunks = Array.from(mpns).reduce((chunks, mpn, index) => {
+        const chunkIndex = Math.floor(index / 500);
+        if (!chunks[chunkIndex]) chunks[chunkIndex] = [];
+        chunks[chunkIndex].push(mpn);
+        return chunks;
+      }, [] as string[][]);
+      
+      for (const chunk of mpnChunks) {
+        filter.push(`mpn.in.(${chunk.map(mpn => `"${mpn}"`).join(',')})`);
+      }
+    }
+    
+    if (matchOptions.useName && productNames.size > 0) {
+      const nameChunks = Array.from(productNames).reduce((chunks, name, index) => {
+        const chunkIndex = Math.floor(index / 500);
+        if (!chunks[chunkIndex]) chunks[chunkIndex] = [];
+        chunks[chunkIndex].push(name);
+        return chunks;
+      }, [] as string[][]);
+      
+      for (const chunk of nameChunks) {
+        filter.push(`title.in.(${chunk.map(name => `"${name}"`).join(',')})`);
+      }
+    }
+    
+    // Only query if we have filters
+    let allProducts: { id: string; ean?: string; mpn?: string; title?: string }[] = [];
+    
+    // OPTIMIZATION: Execute multiple queries in parallel if we have large filter sets
+    if (filter.length > 0) {
+      const productQueries = filter.map(f => 
+        supabase
+          .from('products')
+          .select('id, ean, mpn, title')
+          .or(f)
+      );
+      
+      const productResults = await Promise.all(productQueries);
+      
+      // Combine all results
+      for (const result of productResults) {
+        if (result.error) throw result.error;
+        if (result.data) {
+          allProducts = [...allProducts, ...result.data];
+        }
+      }
+    }
+    
+    // OPTIMIZATION: Create a map for faster product lookup
+    const productsByEan: Record<string, any> = {};
+    const productsByMpn: Record<string, any> = {};
+    const productsByName: Record<string, any> = {};
+    
+    allProducts.forEach(product => {
+      if (product.ean) productsByEan[product.ean] = product;
+      if (product.mpn) productsByMpn[product.mpn] = product;
+      if (product.title) productsByName[product.title] = product;
+    });
+    
+    // OPTIMIZATION: Prepare custom attribute values for all suppliers at once
+    const allAttributeValues = [];
+    
+    if (customAttributes && customAttributes.length > 0) {
+      for (const [supplierName, supplierData] of Object.entries(supplierGroups)) {
+        const supplierId = supplierIdsByName[supplierName];
+        if (!supplierId) continue;
         
         for (const attr of customAttributes) {
-          if (supplierData.custom_attributes[attr.name] !== undefined) {
-            attributeValues.push({
+          if (supplierData.custom_attributes && supplierData.custom_attributes[attr.name] !== undefined) {
+            allAttributeValues.push({
               attribute_id: attr.id,
-              entity_id: supplier.id,
+              entity_id: supplierId,
               value: supplierData.custom_attributes[attr.name]
             });
           }
         }
-        
-        if (attributeValues.length > 0) {
-          const { error: valuesError } = await supabase
-            .from('custom_attribute_values')
-            .upsert(attributeValues, {
-              onConflict: 'attribute_id,entity_id',
-              ignoreDuplicates: false
-            });
-            
-          if (valuesError) throw valuesError;
-        }
       }
-
-      // Get all products for this supplier's EANs
-      const eans = supplierData.products.map(p => p.ean);
-      const { data: products, error: productsError } = await supabase
-        .from('products')
-        .select('id, ean')
-        .in('ean', eans);
-
-      if (productsError) throw productsError;
-      if (!products || products.length === 0) continue;
-
-      // Create supplier-product relationships
-      const supplierProducts = supplierData.products
-        .map(p => {
-          const product = products.find(prod => prod.ean === p.ean);
-          if (!product) return null;
-
-          return {
-            supplier_id: supplier.id,
-            product_id: product.id,
-            ean: p.ean, // Add EAN to supplier_products
-            cost: p.cost,
-            moq: p.moq,
-            lead_time: p.lead_time,
-            payment_terms: p.payment_terms,
-            updated_at: new Date().toISOString()
-          } as SupplierProductInsert;
-        })
-        .filter((p): p is SupplierProductInsert => p !== null);
-
-      // Process supplier products in batches
-      for (let i = 0; i < supplierProducts.length; i += batchSize) {
-        const batch = supplierProducts.slice(i, i + batchSize);
+      
+      // OPTIMIZATION: Upsert all custom attribute values in a single batch
+      if (allAttributeValues.length > 0) {
+        const { error: valuesError } = await supabase
+          .from('custom_attribute_values')
+          .upsert(allAttributeValues, {
+            onConflict: 'attribute_id,entity_id',
+            ignoreDuplicates: false
+          });
+          
+        if (valuesError) throw valuesError;
+      }
+    }
+    
+    // Now process all suppliers and their products
+    const allSupplierProducts = [];
+    
+    for (const [supplierName, supplierData] of Object.entries(supplierGroups)) {
+      const supplierId = supplierIdsByName[supplierName];
+      if (!supplierId) continue;
+      
+      // Match products in priority order
+      const matchedProducts: Array<{
+        supplierProduct: Omit<SupplierData, 'supplier_name' | 'custom_attributes'>;
+        product: { id: string; [key: string]: any };
+        matchMethod: MatchMethod;
+      }> = [];
+      
+      // Track which supplier products have been matched already
+      const matchedSupplierProductIndices = new Set<number>();
+      
+      // Perform matching in priority order, but using product maps for faster lookup
+      for (const method of matchOptions.priority) {
+        // Skip methods that are disabled
+        if (
+          (method === MatchMethod.EAN && !matchOptions.useEan) ||
+          (method === MatchMethod.MPN && !matchOptions.useMpn) ||
+          (method === MatchMethod.NAME && !matchOptions.useName)
+        ) {
+          continue;
+        }
         
+        // Match supplier products to the fetched products using maps for O(1) lookup
+        supplierData.products.forEach((supplierProduct, index) => {
+          // Skip if this supplier product has already been matched
+          if (matchedSupplierProductIndices.has(index)) {
+            return;
+          }
+          
+          let match = null;
+          
+          // Find matching product using maps instead of looping through all products
+          if (method === MatchMethod.EAN && supplierProduct.ean) {
+            match = productsByEan[supplierProduct.ean];
+          } else if (method === MatchMethod.MPN && supplierProduct.mpn) {
+            match = productsByMpn[supplierProduct.mpn];
+          } else if (method === MatchMethod.NAME && supplierProduct.product_name) {
+            match = productsByName[supplierProduct.product_name];
+          }
+          
+          if (match) {
+            matchedProducts.push({
+              supplierProduct,
+              product: match,
+              matchMethod: method
+            });
+            matchedSupplierProductIndices.add(index);
+          }
+        });
+      }
+      
+      // Create supplier-product relationships for matched products
+      const supplierProductsForThisSupplier = matchedProducts.map(match => {
+        return {
+          supplier_id: supplierId,
+          product_id: match.product.id,
+          ean: match.supplierProduct.ean || '',
+          cost: match.supplierProduct.cost,
+          moq: match.supplierProduct.moq || 1,
+          lead_time: match.supplierProduct.lead_time || '3 days',
+          payment_terms: match.supplierProduct.payment_terms || 'Net 30',
+          match_method: match.matchMethod,
+          updated_at: new Date().toISOString()
+        } as SupplierProductInsert;
+      });
+      
+      // Add to the collection of all supplier products
+      allSupplierProducts.push(...supplierProductsForThisSupplier);
+      
+      // Update progress after processing each supplier
+      currentProcessed += supplierData.products.length;
+      if (progressCallback) {
+        progressCallback(Math.min(currentProcessed, mappedData.length), mappedData.length);
+      }
+    }
+    
+    // OPTIMIZATION: Process all supplier products in larger batches for better throughput
+    for (let i = 0; i < allSupplierProducts.length; i += batchSize) {
+      const batch = allSupplierProducts.slice(i, i + batchSize);
+      
+      if (batch.length > 0) {
         const { data: insertedData, error: relationError } = await supabase
           .from('supplier_products')
           .upsert(batch, {
@@ -337,18 +613,25 @@ export const importSupplierData = async (mappedDataPromise: Promise<SupplierData
         if (insertedData) results.push(...insertedData);
 
         processedCount += batch.length;
-
-        // Add a small delay between batches
-        if (i + batchSize < supplierProducts.length) {
-          await new Promise(resolve => setTimeout(resolve, 200));
-        }
       }
     }
+
+    // Calculate match method statistics
+    const matchMethodStats = results.reduce((acc: {[key: string]: number}, item) => {
+      const method = item.match_method || MatchMethod.EAN;
+      acc[method] = (acc[method] || 0) + 1;
+      return acc;
+    }, {});
 
     return {
       results,
       processedCount,
-      supplierCount: Object.keys(supplierGroups).length
+      supplierCount: Object.keys(supplierGroups).length,
+      warnings,
+      matchStats: {
+        totalMatched: processedCount,
+        byMethod: matchMethodStats
+      }
     };
   } catch (error) {
     console.error('Error importing supplier data:', error);

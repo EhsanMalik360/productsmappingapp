@@ -31,6 +31,7 @@ export interface SupplierProduct {
   moq?: number | null;
   lead_time?: string | null;
   payment_terms?: string | null;
+  match_method?: string;
   suppliers?: {
     id: string;
     name: string;

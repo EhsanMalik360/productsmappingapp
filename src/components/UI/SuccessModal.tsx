@@ -1,6 +1,8 @@
 import React from 'react';
 import { CheckCircle } from 'lucide-react';
 import Button from './Button';
+import ProductMatchBadge from './ProductMatchBadge';
+import { MatchMethod } from '../../utils/supplierImport';
 
 interface SuccessModalProps {
   isOpen: boolean;
@@ -10,6 +12,8 @@ interface SuccessModalProps {
   details?: {
     label: string;
     value: string | number;
+    color?: string;
+    matchMethod?: MatchMethod;
   }[];
 }
 
@@ -38,7 +42,14 @@ const SuccessModal: React.FC<SuccessModalProps> = ({
               {details.map((detail, index) => (
                 <div key={index} className="flex justify-between mb-2 last:mb-0">
                   <span className="text-gray-600">{detail.label}:</span>
-                  <span className="font-medium">{detail.value}</span>
+                  {detail.matchMethod ? (
+                    <div className="flex items-center">
+                      <span className="font-medium mr-2">{detail.value}</span>
+                      <ProductMatchBadge matchMethod={detail.matchMethod} size="sm" />
+                    </div>
+                  ) : (
+                    <span className={`font-medium ${detail.color || ''}`}>{detail.value}</span>
+                  )}
                 </div>
               ))}
             </div>
