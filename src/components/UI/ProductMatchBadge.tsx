@@ -1,66 +1,46 @@
 import React from 'react';
-import { MatchMethod } from '../../utils/supplierImport';
 
 interface ProductMatchBadgeProps {
-  matchMethod: MatchMethod;
-  size?: 'sm' | 'md' | 'lg';
-  showLabel?: boolean;
+  matchMethod: string | null | undefined;
+  className?: string;
 }
 
-const ProductMatchBadge: React.FC<ProductMatchBadgeProps> = ({ 
-  matchMethod, 
-  size = 'md',
-  showLabel = true
-}) => {
-  // Define styling and labels based on match method
-  let bgColor = '';
-  let textColor = '';
-  let label = '';
-  let confidence = '';
-  
-  switch (matchMethod) {
-    case MatchMethod.EAN:
-      bgColor = 'bg-green-100';
-      textColor = 'text-green-800';
-      label = 'EAN';
-      confidence = 'High';
-      break;
-    case MatchMethod.MPN:
-      bgColor = 'bg-yellow-100';
-      textColor = 'text-yellow-800';
-      label = 'MPN';
-      confidence = 'Medium';
-      break;
-    case MatchMethod.NAME:
-      bgColor = 'bg-red-100';
-      textColor = 'text-red-800';
-      label = 'Name';
-      confidence = 'Low';
-      break;
-    default:
-      bgColor = 'bg-gray-100';
-      textColor = 'text-gray-800';
-      label = 'Unknown';
-      confidence = 'Unknown';
+const ProductMatchBadge: React.FC<ProductMatchBadgeProps> = ({ matchMethod, className }) => {
+  if (!matchMethod || matchMethod === 'none') {
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 ${className}`}>
+        No Match
+      </span>
+    );
   }
-  
-  // Determine size-based styles
-  const sizeClasses = {
-    sm: 'text-xs px-1.5 py-0.5 rounded',
-    md: 'text-xs px-2 py-1 rounded-md',
-    lg: 'text-sm px-3 py-1.5 rounded-md'
-  };
-  
+
+  if (matchMethod === 'ean') {
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 ${className}`}>
+        EAN Match
+      </span>
+    );
+  }
+
+  if (matchMethod === 'mpn') {
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 ${className}`}>
+        MPN Match
+      </span>
+    );
+  }
+
+  if (matchMethod === 'name') {
+    return (
+      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800 ${className}`}>
+        Name Match
+      </span>
+    );
+  }
+
   return (
-    <span className={`inline-flex items-center ${bgColor} ${textColor} ${sizeClasses[size]}`}>
-      {showLabel ? (
-        <span className="flex items-center">
-          <span className="font-medium mr-1">{label}</span>
-          <span className="font-light">({confidence})</span>
-        </span>
-      ) : (
-        <span className="font-medium">{confidence}</span>
-      )}
+    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 ${className}`}>
+      {matchMethod}
     </span>
   );
 };

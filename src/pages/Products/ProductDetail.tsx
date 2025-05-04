@@ -7,6 +7,7 @@ import Button from '../../components/UI/Button';
 import { Bar } from 'react-chartjs-2';
 import LoadingOverlay from '../../components/UI/LoadingOverlay';
 import { Check, ArrowLeft, RefreshCcw } from 'lucide-react';
+import SupplierComparison from '../../components/Suppliers/SupplierComparison';
 import { 
   Chart as ChartJS, 
   CategoryScale, 
@@ -216,82 +217,168 @@ const ProductDetail: React.FC = () => {
   const maxCost = hasCostRange ? Math.max(...supplierCosts) : (supplierCosts[0] || 0);
   
   return (
-    <div>
-      <div className="flex items-center justify-between mb-6">
+    <div className="max-w-7xl mx-auto">
+      <div className="flex items-center justify-between mb-3">
         <div className="flex items-center">
           <Button 
             variant="secondary" 
-            className="mr-4"
+            className="mr-3"
             onClick={() => navigate('/products')}
           >
-            <ArrowLeft size={16} className="mr-2" /> Back
+            <ArrowLeft size={14} className="mr-1.5" /> Back
           </Button>
-          <h1 className="text-3xl font-bold">Product Details</h1>
+          <h1 className="text-xl font-bold">{product.title}</h1>
         </div>
-        <Button onClick={handleRefresh} className="flex items-center">
-          <RefreshCcw size={16} className="mr-2" /> Refresh
+        <Button onClick={handleRefresh} className="flex items-center text-sm py-1.5">
+          <RefreshCcw size={14} className="mr-1.5" /> Refresh
         </Button>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <div className="col-span-2">
+      {/* First row - Product info */}
+      <div className="grid grid-cols-12 gap-3 mb-3">
+        <div className="col-span-12">
           <Card>
-            <h2 className="text-lg font-semibold">{product.title}</h2>
-            <p className="text-gray-500">EAN: {product.ean}</p>
-            <p className="mb-4"><span className="font-medium">Brand:</span> {product.brand}</p>
-            
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div>
-                <div className="text-sm text-gray-500">Sale Price</div>
-                <div className="text-lg font-semibold">${product.salePrice.toFixed(2)}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500">Units Sold (Monthly)</div>
-                <div className="text-lg font-semibold">{product.unitsSold.toLocaleString()}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500">Buy Box Price</div>
-                <div className="text-lg font-semibold">${product.buyBoxPrice.toFixed(2)}</div>
-              </div>
+            <div className="flex justify-between items-start mb-2">
+              <div className="text-sm text-gray-500">EAN: {product.ean}</div>
+              <div className="text-sm text-gray-500">Brand: {product.brand}</div>
+              {product.mpn && <div className="text-sm text-gray-500">MPN: {product.mpn}</div>}
             </div>
             
-            <div className="grid grid-cols-3 gap-4 mb-4">
-              <div>
-                <div className="text-sm text-gray-500">Amazon Fee</div>
-                <div className="text-lg font-semibold">${product.amazonFee.toFixed(2)}</div>
+            <div className="grid grid-cols-6 gap-2">
+              <div className="bg-gray-50 p-2 rounded">
+                <div className="text-xs text-gray-500">Sale Price</div>
+                <div className="text-base font-semibold">${product.salePrice.toFixed(2)}</div>
               </div>
-              <div>
-                <div className="text-sm text-gray-500">Category</div>
-                <div className="text-lg font-semibold">{product.category || 'N/A'}</div>
+              <div className="bg-gray-50 p-2 rounded">
+                <div className="text-xs text-gray-500">Units Sold</div>
+                <div className="text-base font-semibold">{product.unitsSold.toLocaleString()}</div>
               </div>
-              <div>
-                <div className="text-sm text-gray-500">Rating</div>
-                <div className="text-lg font-semibold">
+              <div className="bg-gray-50 p-2 rounded">
+                <div className="text-xs text-gray-500">Buy Box</div>
+                <div className="text-base font-semibold">${product.buyBoxPrice.toFixed(2)}</div>
+              </div>
+              <div className="bg-gray-50 p-2 rounded">
+                <div className="text-xs text-gray-500">Amazon Fee</div>
+                <div className="text-base font-semibold">${product.amazonFee.toFixed(2)}</div>
+              </div>
+              <div className="bg-gray-50 p-2 rounded">
+                <div className="text-xs text-gray-500">Category</div>
+                <div className="text-base font-semibold truncate">{product.category || 'N/A'}</div>
+              </div>
+              <div className="bg-gray-50 p-2 rounded">
+                <div className="text-xs text-gray-500">Rating</div>
+                <div className="text-base font-semibold">
                   {product.rating?.toFixed(1) || 'N/A'} 
-                  {product.reviewCount ? <span className="text-sm text-gray-500 ml-1">({product.reviewCount} reviews)</span> : ''}
+                  {product.reviewCount ? <span className="text-xs text-gray-500 ml-1">({product.reviewCount})</span> : ''}
+                </div>
+              </div>
+            </div>
+          </Card>
+        </div>
+      </div>
+      
+      {/* Second row - Supplier comparison */}
+      <div className="grid grid-cols-12 gap-3 mb-3">
+        <div className="col-span-12">
+          <SupplierComparison productId={product.id} />
+        </div>
+      </div>
+      
+      {/* Third row - Cost comparison, Profit Analysis, Supplier Info */}
+      <div className="grid grid-cols-12 gap-3 mb-3">
+        {/* Cost comparison chart - 4 columns */}
+        <div className="col-span-12 md:col-span-4">
+          <Card>
+            <h3 className="text-sm font-semibold mb-2">Cost Comparison</h3>
+            {suppliers.length === 0 ? (
+              <div className="text-center py-6 text-gray-500 h-[180px] flex items-center justify-center bg-gray-50 rounded">
+                <span className="text-xs">No supplier data available to generate chart</span>
+              </div>
+            ) : (
+              <div className="h-[180px]">
+                <Bar data={chartData} options={chartOptions} />
+              </div>
+            )}
+          </Card>
+        </div>
+        
+        {/* Profit Analysis - 4 columns */}
+        <div className="col-span-12 sm:col-span-4">
+          <Card className="bg-blue-50 h-full">
+            <h3 className="text-sm font-semibold mb-2">Profit Analysis</h3>
+            <div className="grid grid-cols-1 gap-2">
+              <div className="bg-white p-2 rounded shadow-sm flex justify-between items-center">
+                <div className="text-xs text-gray-600">Margin:</div>
+                <div className={`text-sm font-semibold ${profitMargin > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {profitMargin.toFixed(1)}%
+                </div>
+              </div>
+              <div className="bg-white p-2 rounded shadow-sm flex justify-between items-center">
+                <div className="text-xs text-gray-600">Unit Profit:</div>
+                <div className={`text-sm font-semibold ${profitPerUnit > 0 ? 'text-black' : 'text-red-600'}`}>
+                  ${profitPerUnit.toFixed(2)}
+                </div>
+              </div>
+              <div className="bg-white p-2 rounded shadow-sm flex justify-between items-center">
+                <div className="text-xs text-gray-600">Monthly:</div>
+                <div className={`text-sm font-semibold ${monthlyProfit > 0 ? 'text-black' : 'text-red-600'}`}>
+                  ${monthlyProfit.toFixed(2)}
                 </div>
               </div>
             </div>
           </Card>
         </div>
         
-        <div className="col-span-1">
+        {/* Supplier Info - 4 columns */}
+        <div className="col-span-12 sm:col-span-4">
+          <Card className={`${suppliers.length > 0 ? "bg-green-50" : "bg-gray-100"} h-full`}>
+            <h3 className="text-sm font-semibold mb-2">Multi-Supplier Product</h3>
+            {suppliers.length > 0 ? (
+              <div className="text-xs">
+                <p className="flex items-center mb-1.5">
+                  <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
+                  <span className="font-medium">{suppliers.length} supplier{suppliers.length !== 1 ? 's' : ''} available</span>
+                </p>
+                {hasCostRange && (
+                  <p className="flex items-center mb-1.5">
+                    <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
+                    <span><span className="font-medium">Cost range:</span> ${minCost.toFixed(2)} - ${maxCost.toFixed(2)}</span>
+                  </p>
+                )}
+                <p className="flex items-center">
+                  <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
+                  <span><span className="font-medium">Best supplier:</span> {bestSupplier?.suppliers?.name || 'N/A'}</span>
+                </p>
+              </div>
+            ) : (
+              <div className="text-xs text-gray-600">
+                <p>No suppliers available for this product.</p>
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
+      
+      {/* Fourth row - Custom attributes and Profit Calculator */}
+      <div className="grid grid-cols-12 gap-3">
+        {/* Custom attributes - 6 columns */}
+        <div className="col-span-12 md:col-span-6">
           <Card>
-            <h3 className="text-lg font-semibold mb-3">Custom Attributes</h3>
+            <h3 className="text-sm font-semibold mb-2">Custom Attributes</h3>
             
             {(() => {
               const attributes = getEntityAttributes(product.id, 'product');
               
               if (attributes.length === 0) {
                 return (
-                  <div className="text-gray-500 text-sm">
+                  <div className="text-gray-500 text-xs bg-gray-50 p-2 rounded">
                     No custom attributes defined. Add custom attributes in the Settings menu.
                   </div>
                 );
               }
               
               return (
-                <div className="space-y-4">
+                <div className="space-y-2">
                   {attributes.map(({ attribute, value }) => {
                     const handleValueChange = async (newValue: any) => {
                       try {
@@ -310,7 +397,7 @@ const ProductDetail: React.FC = () => {
                             type="number"
                             value={value !== null ? value : ''}
                             onChange={(e) => handleValueChange(Number(e.target.value))}
-                            className="border p-2 rounded w-full"
+                            className="border p-1 rounded w-full text-xs"
                           />
                         );
                         break;
@@ -320,7 +407,7 @@ const ProductDetail: React.FC = () => {
                             type="date"
                             value={value || ''}
                             onChange={(e) => handleValueChange(e.target.value)}
-                            className="border p-2 rounded w-full"
+                            className="border p-1 rounded w-full text-xs"
                           />
                         );
                         break;
@@ -329,40 +416,28 @@ const ProductDetail: React.FC = () => {
                           <select
                             value={value === true ? 'true' : 'false'}
                             onChange={(e) => handleValueChange(e.target.value === 'true')}
-                            className="border p-2 rounded w-full"
+                            className="border p-1 rounded w-full text-xs"
                           >
                             <option value="false">No</option>
                             <option value="true">Yes</option>
                           </select>
                         );
                         break;
-                      case 'Selection':
-                        // For simplicity, using a text input for selections
-                        inputElement = (
-                          <input
-                            type="text"
-                            value={value || ''}
-                            onChange={(e) => handleValueChange(e.target.value)}
-                            className="border p-2 rounded w-full"
-                          />
-                        );
-                        break;
-                      case 'Text':
                       default:
                         inputElement = (
                           <input
                             type="text"
                             value={value || ''}
                             onChange={(e) => handleValueChange(e.target.value)}
-                            className="border p-2 rounded w-full"
+                            className="border p-1 rounded w-full text-xs"
                           />
                         );
                     }
                     
                     return (
                       <div key={attribute.id}>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-sm font-medium">
+                        <div className="flex justify-between items-center mb-0.5">
+                          <label className="text-xs font-medium text-gray-600">
                             {attribute.name}
                             {attribute.required && <span className="text-red-500 ml-1">*</span>}
                           </label>
@@ -376,269 +451,151 @@ const ProductDetail: React.FC = () => {
             })()}
           </Card>
         </div>
-      </div>
-      
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-        <div>
-          <Card className="bg-blue-50 mb-4">
-            <h3 className="font-semibold mb-2">Profit Analysis</h3>
-            <div className="mb-2">
-              <div className="flex justify-between mb-1">
-                <span>Best Margin:</span>
-                <span className={`font-semibold ${profitMargin > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {profitMargin.toFixed(1)}%
-                </span>
-              </div>
-              <div className="flex justify-between mb-1">
-                <span>Profit per Unit:</span>
-                <span className={`font-semibold ${profitPerUnit > 0 ? 'text-black' : 'text-red-600'}`}>
-                  ${profitPerUnit.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span>Monthly Profit:</span>
-                <span className={`font-semibold ${monthlyProfit > 0 ? 'text-black' : 'text-red-600'}`}>
-                  ${monthlyProfit.toFixed(2)}
-                </span>
-              </div>
-            </div>
-          </Card>
-          
-          <Card className={suppliers.length > 0 ? "bg-green-50" : "bg-gray-100"}>
-            <h3 className="font-semibold mb-2">Multi-Supplier Product</h3>
-            {suppliers.length > 0 ? (
-              <div className="text-sm">
-                <p className="mb-1">
-                  <Check size={16} className="text-green-600 inline mr-1" />
-                  <span className="font-medium">{suppliers.length} supplier{suppliers.length !== 1 ? 's' : ''} available</span>
-                </p>
-                {hasCostRange && (
-                  <p className="mb-1">
-                    <Check size={16} className="text-green-600 inline mr-1" />
-                    <span className="font-medium">Cost range:</span> ${minCost.toFixed(2)} - ${maxCost.toFixed(2)}
-                  </p>
-                )}
-                <p>
-                  <Check size={16} className="text-green-600 inline mr-1" />
-                  <span className="font-medium">Best supplier:</span> {bestSupplier?.suppliers?.name || 'N/A'}
-                </p>
-              </div>
-            ) : (
-              <div className="text-sm text-gray-600">
-                <p>No suppliers available for this product.</p>
-              </div>
-            )}
-          </Card>
-        </div>
-      </div>
-      
-      <Card className="mb-6">
-        <h3 className="text-lg font-semibold mb-4">Suppliers Comparison</h3>
-        {suppliers.length === 0 ? (
-          <div className="text-center py-5 text-gray-500">
-            No suppliers available for this product
-          </div>
-        ) : (
-          <Table
-            headers={[
-              'Supplier', 
-              'Cost', 
-              'MOQ', 
-              'Lead Time', 
-              'Payment Terms', 
-              'Profit Margin', 
-              'Monthly Profit',
-              ''
-            ]}
-          >
-            {sortedSuppliers.map((supplier, index) => {
-              const supplierProfit = (product.salePrice - product.amazonFee - supplier.cost);
-              const supplierMargin = (product.salePrice > 0) ? (supplierProfit / product.salePrice) * 100 : 0;
-              const monthlySupplierProfit = supplierProfit * product.unitsSold;
-              
-              return (
-                <tr 
-                  key={supplier.id} 
-                  className={`border-t ${index === 0 ? 'bg-green-50' : ''}`}
-                >
-                  <td className="px-4 py-3 font-medium">{supplier.suppliers?.name || 'Unknown'}</td>
-                  <td className="px-4 py-3">${supplier.cost.toFixed(2)}</td>
-                  <td className="px-4 py-3">{supplier.moq || 'N/A'}</td>
-                  <td className="px-4 py-3">{supplier.lead_time || 'N/A'}</td>
-                  <td className="px-4 py-3">{supplier.payment_terms || 'N/A'}</td>
-                  <td className={`px-4 py-3 ${supplierMargin > 0 ? '' : 'text-red-600'}`}>
-                    {supplierMargin.toFixed(1)}%
-                  </td>
-                  <td className={`px-4 py-3 ${monthlySupplierProfit > 0 ? '' : 'text-red-600'}`}>
-                    ${monthlySupplierProfit.toFixed(2)}
-                  </td>
-                  <td className="px-4 py-3">
-                    {index === 0 && (
-                      <span className="text-green-600 font-medium">Best Value</span>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </Table>
-        )}
-      </Card>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <Card>
-          <h3 className="text-lg font-semibold mb-3">Cost Comparison</h3>
-          {suppliers.length === 0 ? (
-            <div className="text-center py-10 text-gray-500 h-[250px] flex items-center justify-center">
-              No supplier data available to generate chart
-            </div>
-          ) : (
-            <div className="h-[250px]">
-              <Bar data={chartData} options={chartOptions} />
-            </div>
-          )}
-        </Card>
         
-        <Card>
-          <h3 className="text-lg font-semibold mb-3">Profit Calculation</h3>
-          <div className="bg-gray-50 p-4 rounded">
-            <table className="w-full text-sm">
-              <tbody>
-                <tr>
-                  <td className="font-medium py-1">Sale Price:</td>
-                  <td className="text-right">${product.salePrice.toFixed(2)}</td>
-                </tr>
-                <tr>
-                  <td className="font-medium py-1">Amazon Fee:</td>
-                  <td className="text-right">-${product.amazonFee.toFixed(2)}</td>
-                </tr>
-                <tr>
-                  <td className="font-medium py-1">Cost ({bestSupplier?.suppliers?.name || 'N/A'}):</td>
-                  <td className="text-right">-${costBestSupplier.toFixed(2)}</td>
-                </tr>
-                <tr className="border-t">
-                  <td className="font-medium py-2">Profit per Unit:</td>
-                  <td className={`text-right font-bold ${profitPerUnit > 0 ? '' : 'text-red-600'}`}>
-                    ${profitPerUnit.toFixed(2)}
-                  </td>
-                </tr>
-                <tr>
-                  <td className="font-medium py-1">Monthly Units Sold:</td>
-                  <td className="text-right">{product.unitsSold.toLocaleString()}</td>
-                </tr>
-                <tr className="border-t">
-                  <td className="font-medium py-2">Monthly Profit:</td>
-                  <td className={`text-right font-bold ${monthlyProfit > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    ${monthlyProfit.toFixed(2)}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-            
-            <div className="mt-4">
-              <div className="flex justify-between items-center mb-2">
-                <h4 className="font-medium">Custom Profit Calculator</h4>
-                <div className="flex items-center space-x-4">
-                  <label className="flex items-center text-sm cursor-pointer">
-                    <input 
-                      type="checkbox" 
-                      checked={autoCalculate}
-                      onChange={() => setAutoCalculate(!autoCalculate)}
-                      className="mr-2"
-                    />
-                    Auto-calculate
-                  </label>
-                  <Button 
-                    variant="secondary" 
-                    onClick={resetCalculator}
-                    className="text-sm py-1"
-                  >
-                    Reset
-                  </Button>
-                </div>
-              </div>
+        {/* Profit calculator - 6 columns */}
+        <div className="col-span-12 md:col-span-6">
+          <Card>
+            <h3 className="text-sm font-semibold mb-2">Profit Calculation</h3>
+            <div className="bg-gray-50 p-2 rounded">
+              <table className="w-full text-xs">
+                <tbody>
+                  <tr>
+                    <td className="font-medium py-0.5">Sale Price:</td>
+                    <td className="text-right">${product.salePrice.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td className="font-medium py-0.5">Amazon Fee:</td>
+                    <td className="text-right">-${product.amazonFee.toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td className="font-medium py-0.5">Cost ({bestSupplier?.suppliers?.name || 'N/A'}):</td>
+                    <td className="text-right">-${costBestSupplier.toFixed(2)}</td>
+                  </tr>
+                  <tr className="border-t">
+                    <td className="font-medium py-1">Profit per Unit:</td>
+                    <td className={`text-right font-bold ${profitPerUnit > 0 ? '' : 'text-red-600'}`}>
+                      ${profitPerUnit.toFixed(2)}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="font-medium py-0.5">Monthly Units Sold:</td>
+                    <td className="text-right">{product.unitsSold.toLocaleString()}</td>
+                  </tr>
+                  <tr className="border-t">
+                    <td className="font-medium py-1">Monthly Profit:</td>
+                    <td className={`text-right font-bold ${monthlyProfit > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      ${monthlyProfit.toFixed(2)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
               
-              <div className="bg-gray-100 p-3 rounded mb-3">
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Sale Price ($)</label>
-                    <input 
-                      type="number" 
-                      value={customSalePrice || ''}
-                      onChange={(e) => handleInputChange(setCustomSalePrice, e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      step="0.01" 
-                      min="0"
-                      placeholder="Sale Price"
-                      className="border p-2 rounded w-full" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Amazon Fee ($)</label>
-                    <input 
-                      type="number" 
-                      value={customAmazonFee || ''}
-                      onChange={(e) => handleInputChange(setCustomAmazonFee, e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      step="0.01"
-                      min="0"
-                      placeholder="Amazon Fee" 
-                      className="border p-2 rounded w-full" 
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs text-gray-600 mb-1">Supplier Cost ($)</label>
-                    <input 
-                      type="number" 
-                      value={customSupplierCost || ''}
-                      onChange={(e) => handleInputChange(setCustomSupplierCost, e.target.value)}
-                      onKeyDown={handleKeyDown}
-                      step="0.01"
-                      min="0"
-                      placeholder="Supplier Cost" 
-                      className="border p-2 rounded w-full" 
-                    />
+              <div className="mt-2">
+                <div className="flex justify-between items-center mb-1">
+                  <h4 className="font-medium text-xs">Custom Profit Calculator</h4>
+                  <div className="flex items-center space-x-2">
+                    <label className="flex items-center text-xs cursor-pointer">
+                      <input 
+                        type="checkbox" 
+                        checked={autoCalculate}
+                        onChange={() => setAutoCalculate(!autoCalculate)}
+                        className="mr-1 h-3 w-3"
+                      />
+                      Auto
+                    </label>
+                    <Button 
+                      variant="secondary" 
+                      onClick={resetCalculator}
+                      className="text-xs py-0.5 px-1.5"
+                    >
+                      Reset
+                    </Button>
                   </div>
                 </div>
                 
-                <div className="mt-3 flex justify-end">
-                  <Button 
-                    onClick={calculateCustomProfit}
-                    disabled={autoCalculate}
-                    className={`${autoCalculate ? 'opacity-50' : ''}`}
-                  >
-                    Calculate
-                  </Button>
+                <div className="bg-white p-1.5 rounded mb-1.5 border border-gray-100">
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-0.5">Sale Price ($)</label>
+                      <input 
+                        type="number" 
+                        value={customSalePrice || ''}
+                        onChange={(e) => handleInputChange(setCustomSalePrice, e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        step="0.01" 
+                        min="0"
+                        placeholder="Sale Price"
+                        className="border p-1 rounded w-full text-xs" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-0.5">Amazon Fee ($)</label>
+                      <input 
+                        type="number" 
+                        value={customAmazonFee || ''}
+                        onChange={(e) => handleInputChange(setCustomAmazonFee, e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        step="0.01"
+                        min="0"
+                        placeholder="Amazon Fee" 
+                        className="border p-1 rounded w-full text-xs" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-0.5">Supplier Cost ($)</label>
+                      <input 
+                        type="number" 
+                        value={customSupplierCost || ''}
+                        onChange={(e) => handleInputChange(setCustomSupplierCost, e.target.value)}
+                        onKeyDown={handleKeyDown}
+                        step="0.01"
+                        min="0"
+                        placeholder="Supplier Cost" 
+                        className="border p-1 rounded w-full text-xs" 
+                      />
+                    </div>
+                  </div>
+                  
+                  <div className="mt-1.5 flex justify-end">
+                    <Button 
+                      onClick={calculateCustomProfit}
+                      disabled={autoCalculate}
+                      className={`text-xs py-0.5 px-2 ${autoCalculate ? 'opacity-50' : ''}`}
+                    >
+                      Calculate
+                    </Button>
+                  </div>
                 </div>
-              </div>
-              
-              {(customProfit.perUnit !== 0 || customProfit.monthly !== 0 || customProfit.margin !== 0) && (
-                <div className="p-3 bg-blue-50 rounded">
-                  <h5 className="font-medium mb-2">Calculation Results</h5>
-                  <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <div className="text-gray-600">Profit per Unit</div>
-                      <div className={`font-semibold ${customProfit.perUnit > 0 ? 'text-black' : 'text-red-600'}`}>
-                        ${customProfit.perUnit.toFixed(2)}
+                
+                {(customProfit.perUnit !== 0 || customProfit.monthly !== 0 || customProfit.margin !== 0) && (
+                  <div className="p-1.5 bg-blue-50 rounded border border-blue-100">
+                    <h5 className="font-medium text-xs mb-1 text-blue-800">Calculation Results</h5>
+                    <div className="grid grid-cols-3 gap-1.5 text-xs">
+                      <div>
+                        <div className="text-gray-600">Profit per Unit</div>
+                        <div className={`font-semibold ${customProfit.perUnit > 0 ? 'text-black' : 'text-red-600'}`}>
+                          ${customProfit.perUnit.toFixed(2)}
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <div className="text-gray-600">Monthly Profit</div>
-                      <div className={`font-semibold ${customProfit.monthly > 0 ? 'text-black' : 'text-red-600'}`}>
-                        ${customProfit.monthly.toFixed(2)}
+                      <div>
+                        <div className="text-gray-600">Monthly Profit</div>
+                        <div className={`font-semibold ${customProfit.monthly > 0 ? 'text-black' : 'text-red-600'}`}>
+                          ${customProfit.monthly.toFixed(2)}
+                        </div>
                       </div>
-                    </div>
-                    <div>
-                      <div className="text-gray-600">Profit Margin</div>
-                      <div className={`font-semibold ${customProfit.margin > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                        {customProfit.margin.toFixed(1)}%
+                      <div>
+                        <div className="text-gray-600">Profit Margin</div>
+                        <div className={`font-semibold ${customProfit.margin > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                          {customProfit.margin.toFixed(1)}%
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+        </div>
       </div>
     </div>
   );

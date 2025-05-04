@@ -1,13 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, RefreshCcw, Edit, Package } from 'lucide-react';
+import { ArrowLeft, RefreshCcw, Edit } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
-import Table from '../../components/UI/Table';
 import LoadingOverlay from '../../components/UI/LoadingOverlay';
 import EmptyState from '../../components/Dashboard/EmptyState';
 import SupplierModal from './SupplierModal';
+import SupplierProducts from '../../components/Suppliers/SupplierProducts';
 
 const SupplierDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -27,24 +27,28 @@ const SupplierDetail: React.FC = () => {
 
   const supplier = suppliers.find(s => s.id === id);
   
-  // Get supplier products
+  // Get supplier products for statistics calculation
   const supplierProductsList = supplierProducts.filter(sp => sp.supplier_id === id);
   
-  // Join with product data
-  const productsWithDetails = supplierProductsList.map(sp => {
-    const product = products.find(p => p.id === sp.product_id);
-    if (!product) return null;
-    
-    const profitPerUnit = product.salePrice - product.amazonFee - sp.cost;
-    const profitMargin = (profitPerUnit / product.salePrice) * 100;
-    
-    return {
-      ...sp,
-      product,
-      profitPerUnit,
-      profitMargin
-    };
-  }).filter(Boolean);
+  // Join with product data for statistics
+  const productsWithDetails = useMemo(() => {
+    return supplierProductsList
+      .filter(sp => sp.product_id) // Only consider matched products for stats
+      .map(sp => {
+        const product = products.find(p => p.id === sp.product_id);
+        if (!product) return null;
+        
+        const profitPerUnit = product.salePrice - product.amazonFee - sp.cost;
+        const profitMargin = (profitPerUnit / product.salePrice) * 100;
+        
+        return {
+          ...sp,
+          product,
+          profitPerUnit,
+          profitMargin
+        };
+      }).filter(Boolean);
+  }, [supplierProductsList, products]);
   
   const handleRefresh = async () => {
     try {
@@ -296,53 +300,7 @@ const SupplierDetail: React.FC = () => {
         </div>
       </div>
       
-      <Card>
-        <h3 className="text-lg font-semibold mb-4">Products from this Supplier</h3>
-        
-        {productsWithDetails.length === 0 ? (
-          <EmptyState
-            message="No products found for this supplier"
-            suggestion="Add products through product import or manually associate products with this supplier."
-          />
-        ) : (
-          <Table
-            headers={[
-              'Product', 
-              'EAN', 
-              'Cost', 
-              'Sale Price', 
-              'Profit', 
-              'Margin', 
-              'Actions'
-            ]}
-          >
-            {productsWithDetails.map((item: any) => (
-              <tr key={item.id} className="border-t">
-                <td className="px-4 py-3 font-medium">{item.product.title}</td>
-                <td className="px-4 py-3">{item.product.ean}</td>
-                <td className="px-4 py-3">${item.cost.toFixed(2)}</td>
-                <td className="px-4 py-3">${item.product.salePrice.toFixed(2)}</td>
-                <td className={`px-4 py-3 ${item.profitPerUnit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  ${item.profitPerUnit.toFixed(2)}
-                </td>
-                <td className={`px-4 py-3 ${item.profitMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                  {item.profitMargin.toFixed(1)}%
-                </td>
-                <td className="px-4 py-3">
-                  <Button
-                    onClick={() => navigate(`/products/${item.product.id}`)}
-                    variant="secondary"
-                    className="flex items-center gap-2 text-sm py-1"
-                  >
-                    <Package size={14} />
-                    View
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </Table>
-        )}
-      </Card>
+      <SupplierProducts supplierId={supplier.id} />
       
       {isModalOpen && (
         <SupplierModal

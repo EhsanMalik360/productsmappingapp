@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useAppContext } from '../../context/AppContext';
 import { Calculator, BarChart, BarChart3 } from 'lucide-react';
 import ProfitFormulaEditor from './ProfitFormulaEditor';
 import ProfitDistributionChart from './ProfitDistributionChart';

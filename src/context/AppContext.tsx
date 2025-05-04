@@ -15,6 +15,7 @@ export interface Product {
   category?: string | null;
   rating?: number | null;
   reviewCount?: number | null;
+  mpn?: string | null;
 }
 
 export interface Supplier {
@@ -25,13 +26,15 @@ export interface Supplier {
 export interface SupplierProduct {
   id: string;
   supplier_id: string;
-  product_id: string;
+  product_id: string | null;
   cost: number;
   ean: string;
   moq?: number | null;
   lead_time?: string | null;
   payment_terms?: string | null;
   match_method?: string;
+  mpn?: string | null;
+  product_name?: string | null;
   suppliers?: {
     id: string;
     name: string;
@@ -115,7 +118,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     buyBoxPrice: dbProduct.buy_box_price,
     category: dbProduct.category,
     rating: dbProduct.rating,
-    reviewCount: dbProduct.review_count
+    reviewCount: dbProduct.review_count,
+    mpn: dbProduct.mpn
   })), [dbProducts]);
 
   // Convert DB suppliers to app format
@@ -222,7 +226,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       buy_box_price: product.buyBoxPrice,
       category: product.category,
       rating: product.rating,
-      review_count: product.reviewCount
+      review_count: product.reviewCount,
+      mpn: product.mpn
     });
 
     return {
@@ -231,7 +236,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       unitsSold: newProduct.units_sold,
       amazonFee: newProduct.amazon_fee,
       buyBoxPrice: newProduct.buy_box_price,
-      reviewCount: newProduct.review_count
+      reviewCount: newProduct.review_count,
+      mpn: newProduct.mpn
     };
   };
 
