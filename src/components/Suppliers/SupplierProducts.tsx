@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, ExternalLink, Link, Info } from 'lucide-react';
+import { Package, ExternalLink, Link, Info, Search, Filter, X, ArrowDownAZ, DollarSign, TrendingUp, Tag } from 'lucide-react';
 import Card from '../UI/Card';
 import Table from '../UI/Table';
 import Button from '../UI/Button';
@@ -13,20 +13,44 @@ interface SupplierProductsProps {
 }
 
 type FilterOption = 'all' | 'matched' | 'unmatched';
+type SortField = 'name' | 'cost' | 'price' | 'profit' | 'margin' | '';
+type SortOrder = 'asc' | 'desc';
 
 const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const navigate = useNavigate();
   const { supplierProducts, products } = useAppContext();
   const [filterOption, setFilterOption] = useState<FilterOption>('all');
   const [selectedUnmatchedProduct, setSelectedUnmatchedProduct] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [sortField, setSortField] = useState<SortField>('');
+  const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
+  const [costRange, setCostRange] = useState<{min: number, max: number}>({min: 0, max: 1000});
+  const [matchMethodFilter, setMatchMethodFilter] = useState<string | null>(null);
 
   // Get all supplier products
   const allSupplierProducts = useMemo(() => {
     return supplierProducts.filter(sp => sp.supplier_id === supplierId);
   }, [supplierProducts, supplierId]);
+  
+  // Get cost range for all products
+  const costStats = useMemo(() => {
+    if (allSupplierProducts.length === 0) return { min: 0, max: 100 };
+    
+    const costs = allSupplierProducts.map(p => p.cost);
+    return {
+      min: Math.floor(Math.min(...costs)),
+      max: Math.ceil(Math.max(...costs, 10)) // Ensure at least 10 for the slider
+    };
+  }, [allSupplierProducts]);
+
+  // Initialize cost filter with full range
+  useState(() => {
+    setCostRange(costStats);
+  });
 
   // Apply filtering based on matched/unmatched status
-  const filteredProducts = useMemo(() => {
+  const filteredByMatchStatus = useMemo(() => {
     if (filterOption === 'matched') {
       return allSupplierProducts.filter(sp => sp.product_id !== null);
     } else if (filterOption === 'unmatched') {
@@ -35,9 +59,9 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     return allSupplierProducts;
   }, [allSupplierProducts, filterOption]);
 
-  // Get product details for matched products
+  // Get product details for all filtered products
   const productsWithDetails = useMemo(() => {
-    return filteredProducts.map(sp => {
+    return filteredByMatchStatus.map(sp => {
       // For matched products, include product details and calculate profit metrics
       if (sp.product_id) {
         const product = products.find(p => p.id === sp.product_id);
@@ -67,7 +91,62 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         profitMargin: 0
       };
     });
-  }, [filteredProducts, products]);
+  }, [filteredByMatchStatus, products]);
+
+  // Apply additional filters and search
+  const filteredProducts = useMemo(() => {
+    return productsWithDetails.filter(item => {
+      // Text search
+      const matchesSearch = searchTerm === '' || 
+        item.productName.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        item.productEan.includes(searchTerm) || 
+        (item.mpn && item.mpn.toLowerCase().includes(searchTerm.toLowerCase()));
+      
+      // Cost range filter
+      const matchesCost = 
+        item.cost >= costRange.min && 
+        item.cost <= costRange.max;
+      
+      // Match method filter
+      const matchesMethod = matchMethodFilter === null || 
+        item.match_method === matchMethodFilter;
+      
+      return matchesSearch && matchesCost && matchesMethod;
+    });
+  }, [productsWithDetails, searchTerm, costRange, matchMethodFilter]);
+
+  // Apply sorting
+  const sortedProducts = useMemo(() => {
+    if (!sortField) return filteredProducts;
+
+    return [...filteredProducts].sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortField) {
+        case 'name':
+          comparison = a.productName.localeCompare(b.productName);
+          break;
+        case 'cost':
+          comparison = a.cost - b.cost;
+          break;
+        case 'price':
+          const aPrice = a.product ? a.product.salePrice : 0;
+          const bPrice = b.product ? b.product.salePrice : 0;
+          comparison = aPrice - bPrice;
+          break;
+        case 'profit':
+          comparison = a.profitPerUnit - b.profitPerUnit;
+          break;
+        case 'margin':
+          comparison = a.profitMargin - b.profitMargin;
+          break;
+        default:
+          break;
+      }
+      
+      return sortOrder === 'asc' ? comparison : -comparison;
+    });
+  }, [filteredProducts, sortField, sortOrder]);
 
   const matchStats = useMemo(() => {
     const total = allSupplierProducts.length;
@@ -75,6 +154,12 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     const unmatched = total - matched;
     
     return { total, matched, unmatched };
+  }, [allSupplierProducts]);
+
+  // Get unique match methods for filtering
+  const matchMethods = useMemo(() => {
+    const methods = new Set(allSupplierProducts.map(sp => sp.match_method));
+    return Array.from(methods).filter(Boolean) as string[];
   }, [allSupplierProducts]);
 
   // Determine the headers based on the current filter
@@ -88,9 +173,41 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     setSelectedUnmatchedProduct(productId === selectedUnmatchedProduct ? null : productId);
   };
 
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+  };
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Toggle sort order if same field
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      // Set new field and default to ascending
+      setSortField(field);
+      setSortOrder('asc');
+    }
+  };
+
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setMatchMethodFilter(null);
+    setCostRange(costStats);
+    setSortField('');
+    setSortOrder('asc');
+  };
+
+  const getActiveFilterCount = () => {
+    let count = 0;
+    if (searchTerm) count++;
+    if (costRange.min > costStats.min || costRange.max < costStats.max) count++;
+    if (matchMethodFilter !== null) count++;
+    if (sortField) count++;
+    return count;
+  };
+
   return (
     <Card>
-      <div className="flex justify-between items-center mb-4">
+      <div className="flex justify-between items-center mb-3">
         <h3 className="text-lg font-semibold">Products from this Supplier</h3>
         <div className="flex space-x-2">
           <Button 
@@ -117,22 +234,179 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         </div>
       </div>
       
-      {productsWithDetails.length === 0 ? (
+      {/* Search and filter toggle row */}
+      <div className="flex justify-between items-center mb-3">
+        <form onSubmit={handleSearch} className="flex w-full md:w-auto relative">
+          <input
+            type="text"
+            placeholder="Search by name, EAN, or MPN..."
+            className="border pl-9 pr-4 py-2 rounded w-full md:w-80"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+          {searchTerm && (
+            <button 
+              type="button" 
+              className="absolute right-10 top-2.5 text-gray-400 hover:text-gray-700"
+              onClick={() => setSearchTerm('')}
+            >
+              <X size={16} />
+            </button>
+          )}
+        </form>
+        
+        <div className="flex items-center">
+          <div className="flex items-center mr-2 text-sm">
+            <span className="text-gray-600 mr-1">Found:</span>
+            <span className="font-medium">{sortedProducts.length}</span>
+            {getActiveFilterCount() > 0 && (
+              <span className="ml-1 text-blue-600">({getActiveFilterCount()} filter{getActiveFilterCount() !== 1 ? 's' : ''})</span>
+            )}
+          </div>
+          <Button 
+            variant={showFilters ? "primary" : "secondary"} 
+            className="flex items-center text-sm"
+            onClick={() => setShowFilters(!showFilters)}
+          >
+            <Filter size={14} className="mr-1.5" /> 
+            {showFilters ? 'Hide Filters' : 'Show Filters'}
+          </Button>
+        </div>
+      </div>
+      
+      {/* Expanded filters section */}
+      {showFilters && (
+        <div className="p-3 bg-gray-50 rounded-md mb-3 border border-gray-200">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Cost Range (${costRange.min} - ${costRange.max})
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min={costStats.min}
+                  max={costStats.max}
+                  value={costRange.min}
+                  onChange={(e) => setCostRange({...costRange, min: Number(e.target.value)})}
+                  className="w-full"
+                />
+                <input
+                  type="range"
+                  min={costStats.min}
+                  max={costStats.max}
+                  value={costRange.max}
+                  onChange={(e) => setCostRange({...costRange, max: Number(e.target.value)})}
+                  className="w-full"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Match Method</label>
+              <div className="grid grid-cols-2 gap-2">
+                <Button 
+                  variant={matchMethodFilter === null ? 'primary' : 'secondary'} 
+                  className="text-xs py-1"
+                  onClick={() => setMatchMethodFilter(null)}
+                >
+                  All Methods
+                </Button>
+                {matchMethods.map(method => (
+                  <Button 
+                    key={method}
+                    variant={matchMethodFilter === method ? 'primary' : 'secondary'} 
+                    className="text-xs py-1"
+                    onClick={() => setMatchMethodFilter(method)}
+                  >
+                    {method.charAt(0).toUpperCase() + method.slice(1)} Match
+                  </Button>
+                ))}
+                {filterOption === 'unmatched' && (
+                  <Button 
+                    variant={matchMethodFilter === 'none' ? 'primary' : 'secondary'} 
+                    className="text-xs py-1"
+                    onClick={() => setMatchMethodFilter('none')}
+                  >
+                    No Match
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
+            <div className="text-sm font-medium">Sort By:</div>
+            <div className="flex gap-2">
+              <Button 
+                variant={sortField === 'name' ? 'primary' : 'secondary'} 
+                className="flex items-center text-xs px-2 py-1"
+                onClick={() => handleSort('name')}
+              >
+                <ArrowDownAZ size={14} className="mr-1" /> 
+                Name
+                {sortField === 'name' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+              </Button>
+              <Button 
+                variant={sortField === 'cost' ? 'primary' : 'secondary'} 
+                className="flex items-center text-xs px-2 py-1"
+                onClick={() => handleSort('cost')}
+              >
+                <DollarSign size={14} className="mr-1" /> 
+                Cost
+                {sortField === 'cost' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+              </Button>
+              <Button 
+                variant={sortField === 'price' ? 'primary' : 'secondary'} 
+                className="flex items-center text-xs px-2 py-1"
+                onClick={() => handleSort('price')}
+              >
+                <Tag size={14} className="mr-1" /> 
+                Price
+                {sortField === 'price' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+              </Button>
+              <Button 
+                variant={sortField === 'profit' ? 'primary' : 'secondary'} 
+                className="flex items-center text-xs px-2 py-1"
+                onClick={() => handleSort('profit')}
+              >
+                <TrendingUp size={14} className="mr-1" /> 
+                Profit
+                {sortField === 'profit' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+              </Button>
+              {getActiveFilterCount() > 0 && (
+                <Button 
+                  variant="secondary" 
+                  className="flex items-center text-xs px-2 py-1 ml-2 border-red-300 text-red-700 hover:bg-red-50"
+                  onClick={handleClearFilters}
+                >
+                  <X size={14} className="mr-1" /> Clear All
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {sortedProducts.length === 0 ? (
         <EmptyState
-          message={`No ${filterOption} products found for this supplier`}
+          message={`No ${filterOption} products found matching your criteria`}
           suggestion={
-            filterOption === 'matched' 
-              ? "This supplier doesn't have any matched products. Try importing products or manually associating them."
-              : filterOption === 'unmatched'
-                ? "All products for this supplier have been matched."
-                : "Add products through product import or manually associate products with this supplier."
+            getActiveFilterCount() > 0 
+              ? "Try adjusting your filters or search term"
+              : filterOption === 'matched' 
+                ? "This supplier doesn't have any matched products. Try importing products or manually associating them."
+                : filterOption === 'unmatched'
+                  ? "All products for this supplier have been matched."
+                  : "Add products through product import or manually associate products with this supplier."
           }
         />
       ) : (
         <Table headers={tableHeaders}>
-          {productsWithDetails.map((item: any) => (
+          {sortedProducts.map((item: any) => (
             <React.Fragment key={item.id}>
-              <tr className={`border-t ${selectedUnmatchedProduct === item.id ? 'bg-blue-50' : ''}`}>
+              <tr className={`border-t ${selectedUnmatchedProduct === item.id ? 'bg-blue-50' : ''} hover:bg-gray-50`}>
                 <td className="px-4 py-3 font-medium">
                   {item.productName}
                 </td>
@@ -248,15 +522,18 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
                       </div>
                       
                       <div className="mt-3 pt-2 border-t border-blue-100 flex justify-between items-center">
-                        <p className="text-xs text-blue-600">
-                          This product is not yet matched to an existing product in your database.
+                        <p className="text-sm text-blue-700 flex items-center">
+                          <ExternalLink size={14} className="mr-1.5" />
+                          This product needs to be matched with a catalog product
                         </p>
-                        <Button
-                          variant="secondary"
-                          className="text-xs py-1 px-2 bg-white border-blue-200 text-blue-700 hover:bg-blue-50"
-                          onClick={() => handleViewUnmatchedProduct(item.id)}
+                        
+                        <Button 
+                          variant="primary" 
+                          className="flex items-center gap-2 text-sm"
+                          // Functionality to be implemented
+                          onClick={() => alert('This functionality will be implemented soon')}
                         >
-                          Close
+                          <Link size={14} /> Find Matches
                         </Button>
                       </div>
                     </div>
