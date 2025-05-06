@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
+import { useProfitFormula } from '../../context/ProfitFormulaContext';
 import Card from '../../components/UI/Card';
-import Table from '../../components/UI/Table';
 import Button from '../../components/UI/Button';
 import { Bar } from 'react-chartjs-2';
 import LoadingOverlay from '../../components/UI/LoadingOverlay';
-import { Check, ArrowLeft, RefreshCcw } from 'lucide-react';
+import { Check, ArrowLeft, RefreshCcw, Calculator } from 'lucide-react';
 import SupplierComparison from '../../components/Suppliers/SupplierComparison';
 import { 
   Chart as ChartJS, 
@@ -37,10 +37,12 @@ const ProductDetail: React.FC = () => {
     getBestSupplierForProduct,
     loading, 
     refreshData,
-    customAttributes,
     getEntityAttributes,
     setAttributeValue
   } = useAppContext();
+  
+  // Use the shared profit formula context
+  const { formulaItems, evaluateFormula } = useProfitFormula();
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [customSalePrice, setCustomSalePrice] = useState<number>(0);
@@ -85,7 +87,24 @@ const ProductDetail: React.FC = () => {
       return;
     }
 
-    const profitPerUnit = customSalePrice - customAmazonFee - customSupplierCost;
+    // Use the formula context to evaluate profit
+    const values: Record<string, number> = {
+      salePrice: customSalePrice,
+      amazonFee: customAmazonFee,
+      supplierCost: customSupplierCost,
+      buyBoxPrice: product?.buyBoxPrice || 0,
+      unitsSold: product?.unitsSold || 0
+    };
+    
+    // Add any custom attributes that might be used in the formula
+    const customAttrs = getEntityAttributes(product?.id || '', 'product');
+    customAttrs.forEach(({ attribute, value }) => {
+      if (attribute.type === 'Number') {
+        values[`attr_${attribute.id}`] = typeof value === 'number' ? value : 0;
+      }
+    });
+    
+    const profitPerUnit = evaluateFormula(values);
     const monthlyProfit = product ? profitPerUnit * product.unitsSold : 0;
     const profitMargin = customSalePrice > 0 ? (profitPerUnit / customSalePrice) * 100 : 0;
     
@@ -203,12 +222,30 @@ const ProductDetail: React.FC = () => {
     }
   };
   
-  // Calculate profit values
+  // Calculate profit values using the shared formula
   const revenue = product.salePrice;
   const amazonFee = product.amazonFee;
   const costBestSupplier = bestSupplier ? bestSupplier.cost : 0;
   
-  const profitPerUnit = revenue - amazonFee - costBestSupplier;
+  // Create values object for formula evaluation
+  const formulaValues: Record<string, number> = {
+    salePrice: revenue,
+    amazonFee: amazonFee,
+    supplierCost: costBestSupplier,
+    buyBoxPrice: product.buyBoxPrice,
+    unitsSold: product.unitsSold
+  };
+  
+  // Add any custom attributes that might be used in the formula
+  const productAttrs = getEntityAttributes(product.id, 'product');
+  productAttrs.forEach(({ attribute, value }) => {
+    if (attribute.type === 'Number') {
+      formulaValues[`attr_${attribute.id}`] = typeof value === 'number' ? value : 0;
+    }
+  });
+  
+  // Calculate profit using the formula
+  const profitPerUnit = evaluateFormula(formulaValues);
   const monthlyProfit = profitPerUnit * product.unitsSold;
   const profitMargin = revenue > 0 ? (profitPerUnit / revenue) * 100 : 0;
   
@@ -305,7 +342,13 @@ const ProductDetail: React.FC = () => {
         {/* Profit Analysis - 4 columns */}
         <div className="col-span-12 sm:col-span-4">
           <Card className="bg-blue-50 h-full">
-            <h3 className="text-sm font-semibold mb-2">Profit Analysis</h3>
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-sm font-semibold">Profit Analysis</h3>
+              <div className="text-xs text-blue-700 flex items-center">
+                <Calculator size={12} className="mr-1" />
+                Using shared formula
+              </div>
+            </div>
             <div className="grid grid-cols-1 gap-2">
               <div className="bg-white p-2 rounded shadow-sm flex justify-between items-center">
                 <div className="text-xs text-gray-600">Margin:</div>
@@ -455,28 +498,97 @@ const ProductDetail: React.FC = () => {
         {/* Profit calculator - 6 columns */}
         <div className="col-span-12 md:col-span-6">
           <Card>
-            <h3 className="text-sm font-semibold mb-2">Profit Calculation</h3>
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="text-sm font-semibold">Profit Calculation</h3>
+              <Button 
+                variant="secondary" 
+                onClick={() => navigate('/profit-analysis')} 
+                className="text-xs flex items-center text-blue-600"
+              >
+                <Calculator size={12} className="mr-1" />
+                Edit Formula
+              </Button>
+            </div>
             <div className="bg-gray-50 p-2 rounded">
               <table className="w-full text-xs">
                 <tbody>
-                  <tr>
-                    <td className="font-medium py-0.5">Sale Price:</td>
-                    <td className="text-right">${product.salePrice.toFixed(2)}</td>
-                  </tr>
-                  <tr>
-                    <td className="font-medium py-0.5">Amazon Fee:</td>
-                    <td className="text-right">-${product.amazonFee.toFixed(2)}</td>
-                  </tr>
-                  <tr>
-                    <td className="font-medium py-0.5">Cost ({bestSupplier?.suppliers?.name || 'N/A'}):</td>
-                    <td className="text-right">-${costBestSupplier.toFixed(2)}</td>
-                  </tr>
+                  {/* Dynamically generate formula steps based on formula items */}
+                  {formulaItems.map((item, index) => {
+                    // Skip operators in the table view
+                    if (item.type === 'operator') return null;
+                    
+                    // Get the value for this item
+                    let value = 0;
+                    let prefix = '';
+                    
+                    if (item.type === 'field') {
+                      switch (item.value) {
+                        case 'salePrice':
+                          value = product.salePrice;
+                          break;
+                        case 'amazonFee':
+                          value = product.amazonFee;
+                          // Add minus sign for costs in the formula, unless it's the first item
+                          prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
+                          break;
+                        case 'supplierCost':
+                          value = costBestSupplier;
+                          // Add minus sign for costs in the formula, unless it's the first item
+                          prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
+                          break;
+                        case 'buyBoxPrice':
+                          value = product.buyBoxPrice;
+                          break;
+                        case 'unitsSold':
+                          value = product.unitsSold;
+                          break;
+                        default:
+                          value = 0;
+                      }
+                    } else if (item.type === 'customAttribute') {
+                      // Find custom attribute value
+                      const attrId = item.value.replace('attr_', '');
+                      const attr = productAttrs.find(a => a.attribute.id === attrId);
+                      value = attr && typeof attr.value === 'number' ? attr.value : 0;
+                      
+                      // Add minus sign if the previous operator was subtraction
+                      prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
+                    } else if (item.type === 'constant') {
+                      value = parseFloat(item.value);
+                      
+                      // Add minus sign if the previous operator was subtraction
+                      prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
+                    }
+                    
+                    // Only render table rows for non-operator items
+                    return (
+                      <tr key={item.id}>
+                        <td className="font-medium py-0.5">
+                          {item.displayValue || item.value}
+                          {item.type === 'field' && item.value === 'supplierCost' && 
+                            ` (${bestSupplier?.suppliers?.name || 'N/A'})`}:
+                        </td>
+                        <td className="text-right">
+                          {prefix}{prefix === '-' ? '' : (index > 0 && ['*', '/'].includes(formulaItems[index-1]?.value as string) ? '' : '$')}
+                          {typeof value === 'number' ? (
+                            item.value === 'unitsSold' ? 
+                              value.toLocaleString() : 
+                              value.toFixed(2)
+                          ) : value}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  
+                  {/* Result row */}
                   <tr className="border-t">
                     <td className="font-medium py-1">Profit per Unit:</td>
                     <td className={`text-right font-bold ${profitPerUnit > 0 ? '' : 'text-red-600'}`}>
                       ${profitPerUnit.toFixed(2)}
                     </td>
                   </tr>
+                  
+                  {/* Monthly calculation */}
                   <tr>
                     <td className="font-medium py-0.5">Monthly Units Sold:</td>
                     <td className="text-right">{product.unitsSold.toLocaleString()}</td>

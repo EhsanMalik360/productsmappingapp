@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
 
 interface LoadingOverlayProps {
   message?: string;
@@ -6,34 +7,128 @@ interface LoadingOverlayProps {
 }
 
 const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ message = 'Loading...', progress }) => {
-  // Show progress bar only if we have a progress value
-  const showProgress = progress !== undefined && progress >= 0;
+  // Show progress bar even if we don't have a value, but show as indeterminate
+  const hasProgress = progress !== undefined && progress >= 0;
+  
+  // State for smooth progress transitions
+  const [displayProgress, setDisplayProgress] = useState(progress || 0);
+  
+  // Use effect to animate progress changes
+  useEffect(() => {
+    if (hasProgress && progress !== undefined) {
+      // If progress jumps by more than 5%, animate it smoothly
+      if (progress > displayProgress + 5) {
+        // Animate the progress in smaller increments
+        const interval = setInterval(() => {
+          setDisplayProgress(prev => {
+            const next = Math.min(prev + 1, progress);
+            if (next >= progress) {
+              clearInterval(interval);
+            }
+            return next;
+          });
+        }, 50); // Update every 50ms for smooth animation
+        
+        return () => clearInterval(interval);
+      } else {
+        // For small changes, update directly
+        setDisplayProgress(progress);
+      }
+    }
+  }, [progress, hasProgress]);
+  
+  // State for elapsed time tracking
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  
+  // Start a timer to track elapsed time
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setElapsedSeconds(prev => prev + 1);
+    }, 1000);
+    
+    return () => clearInterval(timer);
+  }, []);
+  
+  // Calculate estimated time remaining if we have progress > 10%
+  const showEta = hasProgress && displayProgress > 10 && elapsedSeconds > 5;
+  
+  // Simple estimated time calculation based on elapsed time and current progress
+  const calculateEta = () => {
+    if (!showEta) return '';
+    
+    const totalEstimatedSeconds = (elapsedSeconds / displayProgress) * 100;
+    const remainingSeconds = Math.max(0, totalEstimatedSeconds - elapsedSeconds);
+    
+    if (remainingSeconds < 60) {
+      return `${Math.ceil(remainingSeconds)} seconds remaining`;
+    } else if (remainingSeconds < 3600) {
+      return `${Math.ceil(remainingSeconds / 60)} minutes remaining`;
+    } else {
+      const hours = Math.floor(remainingSeconds / 3600);
+      const minutes = Math.ceil((remainingSeconds % 3600) / 60);
+      return `${hours}h ${minutes}m remaining`;
+    }
+  };
+
+  // Add a status color based on progress
+  const getStatusColor = () => {
+    if (!hasProgress) return 'bg-gray-400';
+    if (displayProgress < 30) return 'bg-blue-500';
+    if (displayProgress < 70) return 'bg-sky-600';
+    if (displayProgress < 100) return 'bg-blue-700';
+    return 'bg-green-600'; // 100% complete
+  };
   
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white p-8 rounded-lg shadow-xl flex flex-col items-center" style={{ minWidth: '300px' }}>
-        {!showProgress ? (
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mb-4"></div>
-        ) : (
-          <div className="w-full mb-4">
-            <div className="relative pt-1">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <span className="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-blue-600 bg-blue-200">
-                    {progress}%
-                  </span>
-                </div>
-              </div>
-              <div className="overflow-hidden h-2 mb-4 text-xs flex rounded bg-blue-200">
-                <div 
-                  style={{ width: `${progress}%` }} 
-                  className="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-blue-500 transition-all duration-300"
-                ></div>
-              </div>
+    <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 backdrop-blur-sm">
+      <div className="bg-white p-8 rounded-lg shadow-2xl flex flex-col items-center" style={{ minWidth: '400px', maxWidth: '90%' }}>
+        <div className="mb-6 flex items-center justify-center relative">
+          {/* Animated spinner */}
+          <Loader2 className="h-20 w-20 text-blue-600 animate-spin" />
+          
+          {/* Progress percentage in middle of spinner */}
+          {hasProgress && (
+            <div className="absolute">
+              <span className="text-2xl font-bold text-blue-700">{Math.round(displayProgress)}%</span>
+            </div>
+          )}
+        </div>
+        
+        {/* Progress bar */}
+        <div className="w-full mb-4">
+          <div className="relative pt-1">
+            <div className="overflow-hidden h-5 mb-2 text-xs flex rounded-full bg-blue-100 shadow-inner">
+              <div 
+                style={{ width: `${displayProgress}%` }} 
+                className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center rounded-full transition-all duration-500 ease-out ${getStatusColor()} ${!hasProgress ? 'animate-pulse' : ''}`}
+              ></div>
             </div>
           </div>
+        </div>
+        
+        {/* Status message with larger font */}
+        <div className="w-full text-center mb-3">
+          <p className="text-gray-800 font-semibold text-lg">{message}</p>
+          
+          {/* Estimated time remaining with better styling */}
+          {showEta && (
+            <p className="text-blue-600 font-medium text-sm mt-1">{calculateEta()}</p>
+          )}
+        </div>
+        
+        {/* Elapsed time indicator */}
+        <div className="w-full border-t border-gray-200 pt-3 mt-2">
+          <p className="text-gray-500 text-sm text-center">
+            Time elapsed: {Math.floor(elapsedSeconds / 60)}m {elapsedSeconds % 60}s
+          </p>
+        </div>
+        
+        {/* Processing message */}
+        {!showEta && elapsedSeconds > 10 && (
+          <p className="text-gray-500 text-sm mt-2 italic">
+            {displayProgress < 100 ? "Processing your data, please wait..." : "Almost done!"}
+          </p>
         )}
-        <p className="text-gray-700">{message}</p>
       </div>
     </div>
   );

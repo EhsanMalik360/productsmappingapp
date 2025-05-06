@@ -222,7 +222,7 @@ export const importProductData = async (mappedDataPromise: Promise<ProductData[]
     const results = [];
     
     // Get all custom attributes
-    const { data: customAttributes, error: customAttrError } = await supabase
+    const { error: customAttrError } = await supabase
       .from('custom_attributes')
       .select('*')
       .eq('for_type', 'product');

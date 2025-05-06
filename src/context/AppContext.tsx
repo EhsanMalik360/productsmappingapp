@@ -65,6 +65,7 @@ interface AppContextType {
   supplierProducts: SupplierProduct[];
   loading: boolean;
   error: Error | null;
+  totalProductCount: number;
   addProduct: (product: Omit<Product, 'id'>) => Promise<Product>;
   addSupplier: (supplier: Omit<Supplier, 'id'>) => Promise<Supplier>;
   updateSupplier: (id: string, updates: Partial<Supplier>) => Promise<Supplier>;
@@ -93,7 +94,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     loading: productsLoading, 
     error: productsError,
     addProduct: addProductToDb,
-    refreshProducts 
+    refreshProducts,
+    totalProductCount 
   } = useProducts();
 
   const { 
@@ -594,11 +596,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         refreshSuppliers()
       ]);
       
-      // Refresh supplier products
+      // Refresh supplier products with enhanced field selection
       const { data: supplierProductsData, error: supplierProductsError } = await supabase
         .from('supplier_products')
         .select(`
-          *,
+          id,
+          supplier_id,
+          product_id,
+          cost,
+          moq,
+          lead_time,
+          payment_terms,
+          ean,
+          match_method,
+          product_name,
+          mpn,
+          created_at,
+          updated_at,
           suppliers (
             id,
             name
@@ -606,7 +620,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         `);
 
       if (supplierProductsError) throw supplierProductsError;
-      setSupplierProducts(supplierProductsData || []);
+      
+      console.log('Refreshed supplier products data:', supplierProductsData ? supplierProductsData.length : 0, 'records');
+      // Log MPNs if there are any matches
+      const mpnMatches = supplierProductsData?.filter(sp => sp.match_method === 'mpn') || [];
+      if (mpnMatches.length > 0) {
+        console.log(`Found ${mpnMatches.length} products matched by MPN`);
+        if (mpnMatches.length > 0 && mpnMatches.length <= 5) {
+          console.log('Sample MPN matches:', mpnMatches.slice(0, 5).map(sp => ({ 
+            product_id: sp.product_id, 
+            mpn: sp.mpn,
+            match_method: sp.match_method
+          })));
+        }
+      }
+      
+      // Cast the data to the correct type to fix TypeScript error
+      setSupplierProducts(supplierProductsData as unknown as SupplierProduct[] || []);
       
       // Refresh custom attributes
       const { data: attributesData, error: attributesError } = await supabase
@@ -646,6 +676,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         supplierProducts,
         loading,
         error,
+        totalProductCount,
         addProduct,
         addSupplier,
         updateSupplier,

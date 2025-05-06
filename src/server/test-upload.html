@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supabase Upload Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #333;
+        }
+        form {
+            margin-bottom: 20px;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px 0;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        pre {
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+        .logs {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Supabase Upload Test</h1>
+    
+    <div class="container">
+        <h2>1. Test Basic File Upload</h2>
+        <form id="testUploadForm">
+            <div>
+                <input type="file" id="testFile" name="testFile" required>
+            </div>
+            <button type="submit">Test Upload</button>
+        </form>
+        <pre id="testResult">Results will appear here...</pre>
+    </div>
+
+    <div class="container">
+        <h2>2. Test Product Upload</h2>
+        <form id="productUploadForm">
+            <div>
+                <input type="file" id="productFile" name="file" accept=".csv" required>
+            </div>
+            <div>
+                <label for="batchSize">Batch Size:</label>
+                <input type="number" id="batchSize" name="batchSize" value="100">
+            </div>
+            <button type="submit">Upload Product File</button>
+        </form>
+        <pre id="productResult">Results will appear here...</pre>
+    </div>
+
+    <div class="container">
+        <h2>3. Test Network Connectivity</h2>
+        <button id="testConnectivity">Test Network Connectivity</button>
+        <pre id="connectivityResult">Results will appear here...</pre>
+    </div>
+
+    <div class="container">
+        <h2>4. Server Logs</h2>
+        <button id="fetchLogs">Fetch Latest Logs</button>
+        <div class="logs">
+            <pre id="serverLogs">Logs will appear here...</pre>
+        </div>
+    </div>
+
+    <script>
+        // Test upload form
+        document.getElementById('testUploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const resultEl = document.getElementById('testResult');
+            resultEl.textContent = 'Uploading test file...';
+            
+            const formData = new FormData();
+            const fileField = document.getElementById('testFile');
+            
+            if (fileField.files.length === 0) {
+                resultEl.textContent = 'Please select a file first.';
+                return;
+            }
+            
+            formData.append('testFile', fileField.files[0]);
+            
+            try {
+                const response = await fetch('http://localhost:3001/api/upload/test', {
+                    method: 'POST',
+                    body: formData,
+                });
+                
+                const result = await response.json();
+                resultEl.textContent = JSON.stringify(result, null, 2);
+            } catch (error) {
+                resultEl.textContent = `Error: ${error.message}`;
+            }
+        });
+        
+        // Product upload form
+        document.getElementById('productUploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const resultEl = document.getElementById('productResult');
+            resultEl.textContent = 'Uploading product file...';
+            
+            const formData = new FormData();
+            const fileField = document.getElementById('productFile');
+            const batchSize = document.getElementById('batchSize').value;
+            
+            if (fileField.files.length === 0) {
+                resultEl.textContent = 'Please select a file first.';
+                return;
+            }
+            
+            formData.append('file', fileField.files[0]);
+            formData.append('batchSize', batchSize);
+            
+            try {
+                const response = await fetch('http://localhost:3001/api/upload/product', {
+                    method: 'POST',
+                    body: formData,
+                });
+                
+                const result = await response.json();
+                resultEl.textContent = JSON.stringify(result, null, 2);
+            } catch (error) {
+                resultEl.textContent = `Error: ${error.message}`;
+                console.error(error);
+            }
+        });
+        
+        // Test connectivity
+        document.getElementById('testConnectivity').addEventListener('click', async function() {
+            const resultEl = document.getElementById('connectivityResult');
+            resultEl.textContent = 'Testing connectivity...';
+            
+            try {
+                // Test server health
+                const healthResponse = await fetch('http://localhost:3001/api/health');
+                const healthData = await healthResponse.json();
+                
+                // Test main server route
+                const rootResponse = await fetch('http://localhost:3001/');
+                const rootData = await rootResponse.json();
+                
+                resultEl.textContent = 'Server connectivity tests:\n\n' + 
+                    `Health check: ${JSON.stringify(healthData)}\n` +
+                    `Root endpoint: ${JSON.stringify(rootData)}`;
+            } catch (error) {
+                resultEl.textContent = `Error: ${error.message}\n\nPlease make sure the server is running.`;
+            }
+        });
+        
+        // Fetch logs
+        document.getElementById('fetchLogs').addEventListener('click', async function() {
+            const logsEl = document.getElementById('serverLogs');
+            logsEl.textContent = 'Fetching logs...';
+            
+            try {
+                const response = await fetch('http://localhost:3001/api/logs');
+                const data = await response.json();
+                
+                if (data.logs && data.logs.length) {
+                    logsEl.textContent = data.logs.join('\n');
+                } else {
+                    logsEl.textContent = 'No logs found.';
+                }
+            } catch (error) {
+                logsEl.textContent = `Error fetching logs: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+</html> 

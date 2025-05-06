@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, RefreshCcw, Edit } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
@@ -22,13 +22,80 @@ const SupplierDetail: React.FC = () => {
     setAttributeValue
   } = useAppContext();
   
+  // State for component
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [supplierNotFound, setSupplierNotFound] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [dataFetched, setDataFetched] = useState(false);
 
-  const supplier = suppliers.find(s => s.id === id);
+  // Ensure ID is properly formatted - remove any UUID format issues
+  const normalizedId = useMemo(() => {
+    if (!id) return '';
+    // Return the full ID without any processing that might truncate it
+    return id;
+  }, [id]);
+
+  // Memoize the fetchLatestData function to prevent it from changing on every render
+  const fetchLatestData = useCallback(async () => {
+    try {
+      console.log('SupplierDetail: Loading data for supplier ID:', normalizedId);
+      setIsRefreshing(true);
+      setErrorMessage(null);
+      await refreshData();
+      
+      // Check if the supplier exists after data refresh
+      const supplierExists = suppliers.some(s => s.id === normalizedId);
+      setSupplierNotFound(!supplierExists);
+      
+      if (!supplierExists) {
+        console.error(`Supplier with ID ${normalizedId} not found after data refresh`);
+        setErrorMessage(`Supplier with ID ${normalizedId} not found in the database.`);
+      }
+      
+      setDataFetched(true);
+    } catch (error) {
+      console.error('Error refreshing data in SupplierDetail:', error);
+      setErrorMessage('Failed to load supplier data. Please try again.');
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [normalizedId, refreshData, suppliers]);
+
+  // Refresh data when component mounts to ensure we have the latest supplier products
+  useEffect(() => {
+    let isMounted = true;
+    
+    // Only fetch data if we haven't fetched it yet or if manually refreshing
+    if (!dataFetched && normalizedId && isMounted) {
+      console.log('SupplierDetail: Starting data fetch for ID:', normalizedId);
+      fetchLatestData();
+    }
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [normalizedId, fetchLatestData, dataFetched]);
+
+  // Add additional logging for debugging - only run once after data is loaded
+  useEffect(() => {
+    if (dataFetched && suppliers.length > 0) {
+      console.log('SupplierDetail: Current suppliers list:', suppliers);
+      console.log('SupplierDetail: Looking for supplier with ID:', normalizedId);
+      
+      const found = suppliers.find(s => s.id === normalizedId);
+      if (found) {
+        console.log('SupplierDetail: Found supplier:', found);
+      } else {
+        console.error('SupplierDetail: Supplier not found in suppliers list');
+      }
+    }
+  }, [dataFetched, suppliers, normalizedId]);
+
+  const supplier = suppliers.find(s => s.id === normalizedId);
   
   // Get supplier products for statistics calculation
-  const supplierProductsList = supplierProducts.filter(sp => sp.supplier_id === id);
+  const supplierProductsList = supplierProducts.filter(sp => sp.supplier_id === normalizedId);
   
   // Join with product data for statistics
   const productsWithDetails = useMemo(() => {
@@ -53,10 +120,10 @@ const SupplierDetail: React.FC = () => {
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
-      await refreshData();
+      setDataFetched(false); // Reset to trigger a fresh data fetch
+      await fetchLatestData();
     } catch (error) {
       console.error('Error refreshing data:', error);
-    } finally {
       setIsRefreshing(false);
     }
   };
@@ -99,15 +166,37 @@ const SupplierDetail: React.FC = () => {
     );
   }
   
-  if (!supplier) {
+  if (supplierNotFound) {
     return (
       <div className="text-center py-10">
         <h2 className="text-2xl font-bold mb-4">Supplier Not Found</h2>
-        <p className="mb-6">The supplier you're looking for doesn't exist or has been removed.</p>
+        <p className="mb-3">{errorMessage}</p>
+        
+        <div className="bg-amber-50 border border-amber-200 p-4 rounded-md mb-5 text-left max-w-lg mx-auto">
+          <p className="font-semibold text-amber-800 mb-2">Diagnostic Information:</p>
+          <ul className="text-sm text-amber-800 space-y-1">
+            <li><span className="font-medium">Supplier ID:</span> {normalizedId || 'Not provided'}</li>
+            <li><span className="font-medium">Suppliers loaded:</span> {suppliers.length}</li>
+            <li><span className="font-medium">Loading state:</span> {loading ? 'Loading' : 'Not loading'}</li>
+            <li>
+              <span className="font-medium">Available IDs:</span>{' '}
+              {suppliers.length > 0 
+                ? suppliers.slice(0, 3).map(s => s.id).join(', ') + (suppliers.length > 3 ? '...' : '')
+                : 'None'}
+            </li>
+          </ul>
+        </div>
+        
         <Button onClick={() => navigate('/suppliers')} className="flex items-center mx-auto">
           <ArrowLeft size={16} className="mr-2" /> Back to Suppliers
         </Button>
       </div>
+    );
+  }
+  
+  if (!supplier) {
+    return (
+      <LoadingOverlay message="Finding supplier..." />
     );
   }
   

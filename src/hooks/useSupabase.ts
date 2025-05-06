@@ -13,6 +13,7 @@ export function useProducts() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [totalProductCount, setTotalProductCount] = useState<number>(0);
 
   useEffect(() => {
     fetchProducts();
@@ -20,15 +21,50 @@ export function useProducts() {
 
   async function fetchProducts() {
     try {
-      const { data, error } = await supabase
+      setLoading(true);
+      setError(null);
+      
+      // First, get the total count of products
+      const { count, error: countError } = await supabase
         .from('products')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      setProducts(data || []);
+        .select('*', { count: 'exact', head: true });
+      
+      if (countError) throw countError;
+      
+      const totalCount = count || 0;
+      setTotalProductCount(totalCount);
+      console.log(`Total products in database: ${totalCount}`);
+      
+      // Fetch products in batches of 1000 (Supabase limit)
+      const batchSize = 1000;
+      const batches = Math.ceil(totalCount / batchSize);
+      let allProducts: Product[] = [];
+      
+      console.log(`Fetching ${totalCount} products in ${batches} batches of ${batchSize}`);
+      
+      for (let i = 0; i < batches; i++) {
+        console.log(`Fetching batch ${i + 1} of ${batches}...`);
+        
+        const from = i * batchSize;
+        const to = from + batchSize - 1;
+        
+        const { data, error: batchError } = await supabase
+          .from('products')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .range(from, to);
+        
+        if (batchError) throw batchError;
+        
+        allProducts = [...allProducts, ...(data || [])];
+        console.log(`Fetched ${allProducts.length} of ${totalCount} products...`);
+      }
+      
+      console.log(`Successfully fetched all ${allProducts.length} products`);
+      setProducts(allProducts);
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('An error occurred'));
+      console.error('Error fetching products:', err);
+      setError(err instanceof Error ? err : new Error('An error occurred fetching products'));
     } finally {
       setLoading(false);
     }
@@ -85,6 +121,7 @@ export function useProducts() {
     products,
     loading,
     error,
+    totalProductCount,
     addProduct,
     updateProduct,
     deleteProduct,

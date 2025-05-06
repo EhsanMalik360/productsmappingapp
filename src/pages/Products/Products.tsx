@@ -1,17 +1,17 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Table from '../../components/UI/Table';
 import Button from '../../components/UI/Button';
 import ProductRow from '../../components/Products/ProductRow';
-import { Search, Filter, ChevronLeft, ChevronRight, RefreshCcw, X, ArrowDownAZ, ArrowDownUp, Briefcase, DollarSign } from 'lucide-react';
+import { Search, Filter, ChevronLeft, ChevronRight, RefreshCcw, X, ArrowDownAZ, ArrowDownUp, Briefcase, DollarSign, Database, AlertTriangle, Info } from 'lucide-react';
 import LoadingOverlay from '../../components/UI/LoadingOverlay';
 
 type SortField = 'price' | 'units' | 'profit' | 'brand' | '';
 type SortOrder = 'asc' | 'desc';
 
 const Products: React.FC = () => {
-  const { products, loading, error, refreshData } = useAppContext();
+  const { products, loading, error, refreshData, totalProductCount } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedBrand, setSelectedBrand] = useState<string>('');
@@ -22,7 +22,15 @@ const Products: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [showFilters, setShowFilters] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [loadingMessage, setLoadingMessage] = useState("Loading products from database...");
   const itemsPerPage = 10;
+  
+  // Auto-refresh data when component mounts
+  useEffect(() => {
+    // Force a data refresh when the component mounts
+    handleRefresh();
+  }, []);
   
   // Extract unique brands and categories from products
   const brands = useMemo(() => {
@@ -48,6 +56,34 @@ const Products: React.FC = () => {
       max: Math.ceil(Math.max(...prices))
     };
   }, [products]);
+  
+  // Reset price range when products change
+  useEffect(() => {
+    if (products.length > 0) {
+      setPriceRange(priceStats);
+    }
+  }, [priceStats]);
+  
+  // Listen for console logs to update loading message
+  useEffect(() => {
+    const originalConsoleLog = console.log;
+    
+    console.log = function(...args) {
+      // Call original console.log
+      originalConsoleLog.apply(console, args);
+      
+      // Check if the message is related to product loading
+      const message = args.join(' ');
+      if (message.includes('Fetching batch') || message.includes('Fetched')) {
+        setLoadingMessage(message);
+      }
+    };
+    
+    // Restore original console.log on unmount
+    return () => {
+      console.log = originalConsoleLog;
+    };
+  }, []);
   
   // Filter products based on search and filters
   const filteredProducts = useMemo(() => {
@@ -143,7 +179,9 @@ const Products: React.FC = () => {
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
+      setLoadingMessage("Starting to refresh products from database...");
       await refreshData();
+      setLastRefreshed(new Date());
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -173,21 +211,49 @@ const Products: React.FC = () => {
   };
 
   if (loading || isRefreshing) {
-    return <LoadingOverlay message={isRefreshing ? "Refreshing products..." : "Loading products..."} />;
+    return <LoadingOverlay message={isRefreshing ? "Refreshing products from database..." : loadingMessage} />;
   }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-2xl font-bold">Products ({products.length})</h1>
-        <Button onClick={handleRefresh} className="flex items-center text-sm">
-          <RefreshCcw size={14} className="mr-1.5" /> Refresh Data
-        </Button>
+        <div>
+          <h1 className="text-2xl font-bold">Products ({products.length})</h1>
+          {totalProductCount > 0 && totalProductCount > products.length && (
+            <span className="text-sm text-gray-500">
+              Displaying {products.length} of {totalProductCount} total products in database
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {lastRefreshed && (
+            <span className="text-xs text-gray-500">
+              Last refreshed: {lastRefreshed.toLocaleTimeString()}
+            </span>
+          )}
+          <Button onClick={handleRefresh} className="flex items-center text-sm">
+            <RefreshCcw size={14} className="mr-1.5" /> Refresh Data
+          </Button>
+        </div>
       </div>
       
       {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4 flex items-center">
+          <AlertTriangle size={18} className="mr-2" />
           Error loading products: {error.message}
+          <Button onClick={handleRefresh} variant="secondary" className="ml-auto text-xs">
+            Try Again
+          </Button>
+        </div>
+      )}
+      
+      {products.length === 0 && !loading && !error && (
+        <div className="bg-amber-50 border border-amber-200 text-amber-800 px-6 py-4 rounded mb-4 flex items-start">
+          <Database size={20} className="mr-3 mt-1" />
+          <div>
+            <p className="font-medium">No products found in database</p>
+            <p className="text-sm mt-1">Try importing products from the Import menu or create products manually.</p>
+          </div>
         </div>
       )}
       

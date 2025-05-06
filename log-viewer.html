@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Server Log Viewer</title>
+    <style>
+        body {
+            font-family: monospace;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f0f0;
+        }
+        h1 {
+            color: #333;
+        }
+        #logContainer {
+            background-color: #000;
+            color: #00ff00;
+            padding: 10px;
+            border-radius: 5px;
+            height: 600px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .toolbar {
+            margin-bottom: 10px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 8px 12px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .error {
+            color: #ff5555;
+        }
+        .warning {
+            color: #ffff55;
+        }
+        .info {
+            color: #5555ff;
+        }
+    </style>
+</head>
+<body>
+    <h1>Server Log Viewer</h1>
+    <div class="toolbar">
+        <button id="refreshBtn">Refresh Logs</button>
+        <button id="clearBtn">Clear View</button>
+        <span id="status"></span>
+    </div>
+    <div id="logContainer"></div>
+
+    <script>
+        const logContainer = document.getElementById('logContainer');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const status = document.getElementById('status');
+
+        function formatLog(log) {
+            if (log.includes('[ERROR')) {
+                return `<div class="error">${log}</div>`;
+            } else if (log.includes('WARNING')) {
+                return `<div class="warning">${log}</div>`;
+            } else if (log.includes('upload') || log.includes('UPLOAD') || log.includes('file')) {
+                return `<div class="info">${log}</div>`;
+            }
+            return `<div>${log}</div>`;
+        }
+
+        async function fetchLogs() {
+            try {
+                status.textContent = 'Fetching logs...';
+                const response = await fetch('http://localhost:3001/api/logs');
+                const data = await response.json();
+                
+                if (data.logs) {
+                    logContainer.innerHTML = data.logs.map(formatLog).join('');
+                    logContainer.scrollTop = logContainer.scrollHeight;
+                    status.textContent = `Logs refreshed at ${new Date().toLocaleTimeString()}`;
+                } else {
+                    status.textContent = 'No logs found';
+                }
+            } catch (error) {
+                status.textContent = `Error: ${error.message}`;
+                console.error('Error fetching logs:', error);
+            }
+        }
+
+        refreshBtn.addEventListener('click', fetchLogs);
+        clearBtn.addEventListener('click', () => {
+            logContainer.innerHTML = '';
+            status.textContent = 'View cleared';
+        });
+
+        // Initial fetch
+        fetchLogs();
+        
+        // Auto-refresh every 10 seconds
+        setInterval(fetchLogs, 10000);
+    </script>
+</body>
+</html> 

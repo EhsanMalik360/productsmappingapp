@@ -61,6 +61,31 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
 
   // Get product details for all filtered products
   const productsWithDetails = useMemo(() => {
+    // Log supplier products to help debug
+    console.log(`Processing ${filteredByMatchStatus.length} supplier products for display`);
+    
+    // Count matches by method for debugging
+    type MatchMethod = 'ean' | 'mpn' | 'name' | 'none';
+    const matchCounts: Record<MatchMethod, number> = {
+      ean: 0,
+      mpn: 0,
+      name: 0,
+      none: 0
+    };
+    
+    filteredByMatchStatus.forEach(sp => {
+      // Type assertion to make TypeScript happy
+      const method = (sp.match_method || 'none') as MatchMethod;
+      matchCounts[method] = (matchCounts[method] || 0) + 1;
+      
+      // Log MPN matches for debugging
+      if (method === 'mpn') {
+        console.log(`Found MPN match: ${sp.mpn} for product_id: ${sp.product_id}`);
+      }
+    });
+    
+    console.log('Match method counts:', matchCounts);
+    
     return filteredByMatchStatus.map(sp => {
       // For matched products, include product details and calculate profit metrics
       if (sp.product_id) {
@@ -74,6 +99,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
             product,
             productName: product.title || '-',
             productEan: product.ean || '-',
+            productMpn: product.mpn || '-',
             profitPerUnit,
             profitMargin
           };
@@ -86,7 +112,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         product: null,
         productName: sp.product_name || '-',
         productEan: sp.ean || '-',
-        mpn: sp.mpn || '-',
+        productMpn: sp.mpn || '-',
         profitPerUnit: 0,
         profitMargin: 0
       };
@@ -100,7 +126,8 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       const matchesSearch = searchTerm === '' || 
         item.productName.toLowerCase().includes(searchTerm.toLowerCase()) || 
         item.productEan.includes(searchTerm) || 
-        (item.mpn && item.mpn.toLowerCase().includes(searchTerm.toLowerCase()));
+        (item.mpn && item.mpn.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (item.productMpn && item.productMpn.toLowerCase().includes(searchTerm.toLowerCase()));
       
       // Cost range filter
       const matchesCost = 
