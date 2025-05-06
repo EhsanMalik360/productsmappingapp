@@ -6,8 +6,9 @@ import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import { Bar } from 'react-chartjs-2';
 import LoadingOverlay from '../../components/UI/LoadingOverlay';
-import { Check, ArrowLeft, RefreshCcw, Calculator } from 'lucide-react';
+import { Check, ArrowLeft, RefreshCcw, Calculator, Edit2, Save, X } from 'lucide-react';
 import SupplierComparison from '../../components/Suppliers/SupplierComparison';
+import toast from 'react-hot-toast';
 import { 
   Chart as ChartJS, 
   CategoryScale, 
@@ -38,13 +39,17 @@ const ProductDetail: React.FC = () => {
     loading, 
     refreshData,
     getEntityAttributes,
-    setAttributeValue
+    setAttributeValue,
+    updateProduct
   } = useAppContext();
   
   // Use the shared profit formula context
   const { formulaItems, evaluateFormula } = useProfitFormula();
 
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedProduct, setEditedProduct] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
   const [customSalePrice, setCustomSalePrice] = useState<number>(0);
   const [customAmazonFee, setCustomAmazonFee] = useState<number>(0);
   const [customSupplierCost, setCustomSupplierCost] = useState<number>(0);
@@ -57,6 +62,24 @@ const ProductDetail: React.FC = () => {
   
   const product = getProductById(id!);
   
+  // Initialize edited product when product data loads or edit mode is entered
+  useEffect(() => {
+    if (product && (isEditing || !editedProduct)) {
+      setEditedProduct({
+        ...product,
+        title: product.title,
+        ean: product.ean,
+        brand: product.brand,
+        mpn: product.mpn || '',
+        salePrice: product.salePrice,
+        buyBoxPrice: product.buyBoxPrice,
+        amazonFee: product.amazonFee,
+        unitsSold: product.unitsSold,
+        category: product.category || ''
+      });
+    }
+  }, [product, isEditing]);
+
   // Initialize custom calculator values when product is loaded
   useEffect(() => {
     if (product) {
@@ -153,9 +176,90 @@ const ProductDetail: React.FC = () => {
       });
     }
   };
+
+  // New function to handle input changes when editing
+  const handleEditChange = (field: string, value: any) => {
+    setEditedProduct((prev: any) => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  // New function to save changes
+  const handleSave = async () => {
+    if (!editedProduct) return;
+    
+    try {
+      setIsSaving(true);
+      
+      // Validate required fields
+      if (!editedProduct.title || !editedProduct.ean || !editedProduct.brand) {
+        toast.error('Title, EAN, and Brand are required fields');
+        return;
+      }
+      
+      // Validate numeric fields
+      if (
+        isNaN(editedProduct.salePrice) || 
+        isNaN(editedProduct.amazonFee) || 
+        isNaN(editedProduct.buyBoxPrice) || 
+        isNaN(editedProduct.unitsSold)
+      ) {
+        toast.error('Price and quantity fields must be numbers');
+        return;
+      }
+      
+      // Ensure numeric fields are numbers, not strings
+      const productToUpdate = {
+        ...editedProduct,
+        salePrice: parseFloat(editedProduct.salePrice),
+        amazonFee: parseFloat(editedProduct.amazonFee),
+        buyBoxPrice: parseFloat(editedProduct.buyBoxPrice),
+        unitsSold: parseInt(editedProduct.unitsSold)
+      };
+      
+      // Call the update function from context
+      await updateProduct(productToUpdate);
+      
+      // Refresh data to get updated state
+      await refreshData();
+      
+      toast.success('Product updated successfully');
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error updating product:', error);
+      toast.error('Failed to update product');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // New function to cancel editing
+  const handleCancelEdit = () => {
+    // Reset edited product to original values
+    if (product) {
+      setEditedProduct({
+        ...product,
+        title: product.title,
+        ean: product.ean,
+        brand: product.brand,
+        mpn: product.mpn || '',
+        salePrice: product.salePrice,
+        buyBoxPrice: product.buyBoxPrice,
+        amazonFee: product.amazonFee,
+        unitsSold: product.unitsSold,
+        category: product.category || ''
+      });
+    }
+    setIsEditing(false);
+  };
   
-  if (loading || isRefreshing) {
-    return <LoadingOverlay message={isRefreshing ? "Refreshing product data..." : "Loading product details..."} />;
+  if (loading || isRefreshing || isSaving) {
+    return <LoadingOverlay message={
+      isSaving ? "Saving product data..." : 
+      isRefreshing ? "Refreshing product data..." : 
+      "Loading product details..."
+    } />;
   }
   
   if (!product) {
@@ -266,9 +370,41 @@ const ProductDetail: React.FC = () => {
           </Button>
           <h1 className="text-xl font-bold">{product.title}</h1>
         </div>
-        <Button onClick={handleRefresh} className="flex items-center text-sm py-1.5">
-          <RefreshCcw size={14} className="mr-1.5" /> Refresh
-        </Button>
+        <div className="flex items-center space-x-2">
+          {isEditing ? (
+            <>
+              <Button 
+                variant="secondary" 
+                onClick={handleCancelEdit}
+                className="flex items-center text-sm py-1.5"
+              >
+                <X size={14} className="mr-1.5" /> Cancel
+              </Button>
+              <Button 
+                onClick={handleSave}
+                className="flex items-center text-sm py-1.5 bg-green-600 hover:bg-green-700"
+              >
+                <Save size={14} className="mr-1.5" /> Save
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button 
+                variant="secondary"
+                onClick={() => setIsEditing(true)}
+                className="flex items-center text-sm py-1.5"
+              >
+                <Edit2 size={14} className="mr-1.5" /> Edit
+              </Button>
+              <Button 
+                onClick={handleRefresh} 
+                className="flex items-center text-sm py-1.5"
+              >
+                <RefreshCcw size={14} className="mr-1.5" /> Refresh
+              </Button>
+            </>
+          )}
+        </div>
       </div>
       
       {/* First row - Product info */}
@@ -276,31 +412,113 @@ const ProductDetail: React.FC = () => {
         <div className="col-span-12">
           <Card>
             <div className="flex justify-between items-start mb-2">
-              <div className="text-sm text-gray-500">EAN: {product.ean}</div>
-              <div className="text-sm text-gray-500">Brand: {product.brand}</div>
-              {product.mpn && <div className="text-sm text-gray-500">MPN: {product.mpn}</div>}
+              {isEditing ? (
+                <>
+                  <div className="text-sm">
+                    <span className="text-gray-500 mr-1">EAN:</span>
+                    <input
+                      type="text"
+                      value={editedProduct?.ean || ''}
+                      onChange={(e) => handleEditChange('ean', e.target.value)}
+                      className="border p-1 rounded text-sm w-32"
+                    />
+                  </div>
+                  <div className="text-sm">
+                    <span className="text-gray-500 mr-1">Brand:</span>
+                    <input
+                      type="text"
+                      value={editedProduct?.brand || ''}
+                      onChange={(e) => handleEditChange('brand', e.target.value)}
+                      className="border p-1 rounded text-sm w-32"
+                    />
+                  </div>
+                  <div className="text-sm">
+                    <span className="text-gray-500 mr-1">MPN:</span>
+                    <input
+                      type="text"
+                      value={editedProduct?.mpn || ''}
+                      onChange={(e) => handleEditChange('mpn', e.target.value)}
+                      className="border p-1 rounded text-sm w-32"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-sm text-gray-500">EAN: {product.ean}</div>
+                  <div className="text-sm text-gray-500">Brand: {product.brand}</div>
+                  {product.mpn && <div className="text-sm text-gray-500">MPN: {product.mpn}</div>}
+                </>
+              )}
             </div>
             
             <div className="grid grid-cols-6 gap-2">
               <div className="bg-gray-50 p-2 rounded">
                 <div className="text-xs text-gray-500">Sale Price</div>
-                <div className="text-base font-semibold">${product.salePrice.toFixed(2)}</div>
+                {isEditing ? (
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editedProduct?.salePrice || 0}
+                    onChange={(e) => handleEditChange('salePrice', e.target.value)}
+                    className="border p-1 rounded text-sm w-full"
+                  />
+                ) : (
+                  <div className="text-base font-semibold">${product.salePrice.toFixed(2)}</div>
+                )}
               </div>
               <div className="bg-gray-50 p-2 rounded">
                 <div className="text-xs text-gray-500">Units Sold</div>
-                <div className="text-base font-semibold">{product.unitsSold.toLocaleString()}</div>
+                {isEditing ? (
+                  <input
+                    type="number"
+                    value={editedProduct?.unitsSold || 0}
+                    onChange={(e) => handleEditChange('unitsSold', e.target.value)}
+                    className="border p-1 rounded text-sm w-full"
+                  />
+                ) : (
+                  <div className="text-base font-semibold">{product.unitsSold.toLocaleString()}</div>
+                )}
               </div>
               <div className="bg-gray-50 p-2 rounded">
                 <div className="text-xs text-gray-500">Buy Box</div>
-                <div className="text-base font-semibold">${product.buyBoxPrice.toFixed(2)}</div>
+                {isEditing ? (
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editedProduct?.buyBoxPrice || 0}
+                    onChange={(e) => handleEditChange('buyBoxPrice', e.target.value)}
+                    className="border p-1 rounded text-sm w-full"
+                  />
+                ) : (
+                  <div className="text-base font-semibold">${product.buyBoxPrice.toFixed(2)}</div>
+                )}
               </div>
               <div className="bg-gray-50 p-2 rounded">
                 <div className="text-xs text-gray-500">Amazon Fee</div>
-                <div className="text-base font-semibold">${product.amazonFee.toFixed(2)}</div>
+                {isEditing ? (
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={editedProduct?.amazonFee || 0}
+                    onChange={(e) => handleEditChange('amazonFee', e.target.value)}
+                    className="border p-1 rounded text-sm w-full"
+                  />
+                ) : (
+                  <div className="text-base font-semibold">${product.amazonFee.toFixed(2)}</div>
+                )}
               </div>
               <div className="bg-gray-50 p-2 rounded">
                 <div className="text-xs text-gray-500">Category</div>
-                <div className="text-base font-semibold truncate">{product.category || 'N/A'}</div>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={editedProduct?.category || ''}
+                    onChange={(e) => handleEditChange('category', e.target.value)}
+                    className="border p-1 rounded text-sm w-full"
+                  />
+                ) : (
+                  <div className="text-base font-semibold truncate">{product.category || 'N/A'}</div>
+                )}
               </div>
               <div className="bg-gray-50 p-2 rounded">
                 <div className="text-xs text-gray-500">Rating</div>

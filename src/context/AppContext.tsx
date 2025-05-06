@@ -67,6 +67,7 @@ interface AppContextType {
   error: Error | null;
   totalProductCount: number;
   addProduct: (product: Omit<Product, 'id'>) => Promise<Product>;
+  updateProduct: (product: Product) => Promise<Product>;
   addSupplier: (supplier: Omit<Supplier, 'id'>) => Promise<Supplier>;
   updateSupplier: (id: string, updates: Partial<Supplier>) => Promise<Supplier>;
   deleteSupplier: (id: string) => Promise<void>;
@@ -241,6 +242,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       reviewCount: newProduct.review_count,
       mpn: newProduct.mpn
     };
+  };
+
+  // Update product
+  const updateProduct = async (product: Product) => {
+    try {
+      // Convert from frontend format to database format
+      const dbProduct = {
+        id: product.id,
+        title: product.title,
+        ean: product.ean,
+        brand: product.brand,
+        sale_price: product.salePrice,
+        units_sold: product.unitsSold,
+        amazon_fee: product.amazonFee,
+        buy_box_price: product.buyBoxPrice,
+        category: product.category,
+        rating: product.rating,
+        review_count: product.reviewCount,
+        mpn: product.mpn,
+        updated_at: new Date().toISOString()
+      };
+      
+      // Update the product in the database
+      const { data, error } = await supabase
+        .from('products')
+        .update(dbProduct)
+        .eq('id', product.id)
+        .select()
+        .single();
+      
+      if (error) throw error;
+      
+      if (!data) {
+        throw new Error('Product update failed');
+      }
+      
+      // Convert back to frontend format
+      return {
+        id: data.id,
+        title: data.title,
+        ean: data.ean,
+        brand: data.brand,
+        salePrice: data.sale_price,
+        unitsSold: data.units_sold,
+        amazonFee: data.amazon_fee,
+        buyBoxPrice: data.buy_box_price,
+        category: data.category,
+        rating: data.rating,
+        reviewCount: data.review_count,
+        mpn: data.mpn
+      };
+    } catch (error) {
+      console.error('Error updating product:', error);
+      throw error;
+    }
   };
 
   // Add supplier
@@ -678,6 +734,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         error,
         totalProductCount,
         addProduct,
+        updateProduct,
         addSupplier,
         updateSupplier,
         deleteSupplier,

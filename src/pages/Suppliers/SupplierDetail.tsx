@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, RefreshCcw, Edit } from 'lucide-react';
+import { ArrowLeft, RefreshCcw, Edit, Save, X } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
@@ -8,6 +8,7 @@ import LoadingOverlay from '../../components/UI/LoadingOverlay';
 import EmptyState from '../../components/Dashboard/EmptyState';
 import SupplierModal from './SupplierModal';
 import SupplierProducts from '../../components/Suppliers/SupplierProducts';
+import toast from 'react-hot-toast';
 
 const SupplierDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -19,7 +20,8 @@ const SupplierDetail: React.FC = () => {
     loading, 
     refreshData,
     getEntityAttributes,
-    setAttributeValue
+    setAttributeValue,
+    updateSupplier
   } = useAppContext();
   
   // State for component
@@ -28,6 +30,11 @@ const SupplierDetail: React.FC = () => {
   const [supplierNotFound, setSupplierNotFound] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [dataFetched, setDataFetched] = useState(false);
+  
+  // Edit mode states
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedSupplier, setEditedSupplier] = useState<any>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Ensure ID is properly formatted - remove any UUID format issues
   const normalizedId = useMemo(() => {
@@ -117,6 +124,63 @@ const SupplierDetail: React.FC = () => {
       }).filter(Boolean);
   }, [supplierProductsList, products]);
   
+  // When supplier data is loaded, initialize editedSupplier
+  useEffect(() => {
+    if (supplier && (isEditing || !editedSupplier)) {
+      setEditedSupplier({
+        ...supplier,
+        name: supplier.name
+      });
+    }
+  }, [supplier, isEditing, editedSupplier]);
+
+  const handleEditChange = (field: string, value: any) => {
+    setEditedSupplier((prev: any) => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleSave = async () => {
+    if (!editedSupplier) return;
+    
+    try {
+      setIsSaving(true);
+      
+      // Validate required fields
+      if (!editedSupplier.name) {
+        toast.error('Supplier name is required');
+        return;
+      }
+      
+      // Update the supplier
+      await updateSupplier(normalizedId, {
+        name: editedSupplier.name
+      });
+      
+      // Refresh data to get updated state
+      await refreshData();
+      
+      toast.success('Supplier updated successfully');
+      setIsEditing(false);
+    } catch (error) {
+      console.error('Error updating supplier:', error);
+      toast.error('Failed to update supplier');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    if (supplier) {
+      setEditedSupplier({
+        ...supplier,
+        name: supplier.name
+      });
+    }
+    setIsEditing(false);
+  };
+
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
@@ -160,9 +224,13 @@ const SupplierDetail: React.FC = () => {
     };
   }, [productsWithDetails]);
   
-  if (loading || isRefreshing) {
+  if (loading || isRefreshing || isSaving) {
     return (
-      <LoadingOverlay message={isRefreshing ? "Refreshing supplier data..." : "Loading supplier details..."} />
+      <LoadingOverlay message={
+        isSaving ? "Saving supplier data..." :
+        isRefreshing ? "Refreshing supplier data..." : 
+        "Loading supplier details..."
+      } />
     );
   }
   
@@ -214,19 +282,56 @@ const SupplierDetail: React.FC = () => {
           <h1 className="text-3xl font-bold">Supplier Details</h1>
         </div>
         <div className="flex space-x-2">
-          <Button onClick={handleRefresh} className="flex items-center">
-            <RefreshCcw size={16} className="mr-2" /> Refresh
-          </Button>
-          <Button onClick={openEditModal} className="flex items-center" variant="secondary">
-            <Edit size={16} className="mr-2" /> Edit Supplier
-          </Button>
+          {isEditing ? (
+            <>
+              <Button 
+                variant="secondary" 
+                onClick={handleCancelEdit}
+                className="flex items-center"
+              >
+                <X size={16} className="mr-2" /> Cancel
+              </Button>
+              <Button 
+                onClick={handleSave}
+                className="flex items-center bg-green-600 hover:bg-green-700"
+              >
+                <Save size={16} className="mr-2" /> Save
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button onClick={handleRefresh} className="flex items-center">
+                <RefreshCcw size={16} className="mr-2" /> Refresh
+              </Button>
+              <Button 
+                onClick={() => setIsEditing(true)} 
+                className="flex items-center" 
+                variant="secondary"
+              >
+                <Edit size={16} className="mr-2" /> Edit
+              </Button>
+            </>
+          )}
         </div>
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-6">
         <div className="col-span-2">
           <Card>
-            <h2 className="text-xl font-bold mb-4">{supplier.name}</h2>
+            {isEditing ? (
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1">Supplier Name</label>
+                <input
+                  type="text"
+                  value={editedSupplier?.name || ''}
+                  onChange={(e) => handleEditChange('name', e.target.value)}
+                  className="w-full border p-2 rounded"
+                  placeholder="Enter supplier name"
+                />
+              </div>
+            ) : (
+              <h2 className="text-xl font-bold mb-4">{supplier.name}</h2>
+            )}
             <div className="text-gray-600 mb-2">ID: {supplier.id}</div>
             <div className="text-gray-600">
               Added: {new Date().toLocaleDateString()}
@@ -259,10 +364,25 @@ const SupplierDetail: React.FC = () => {
         <div className="md:col-span-2">
           <Card>
             <div className="flex justify-between items-start mb-4">
-              <h2 className="text-2xl font-bold">{supplier?.name}</h2>
-              <Button variant="secondary" onClick={openEditModal} className="flex items-center">
-                <Edit size={16} className="mr-2" /> Edit
-              </Button>
+              {isEditing ? (
+                <div className="w-full">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Supplier Name</label>
+                  <input
+                    type="text"
+                    value={editedSupplier?.name || ''}
+                    onChange={(e) => handleEditChange('name', e.target.value)}
+                    className="w-full border p-2 rounded"
+                    placeholder="Enter supplier name"
+                  />
+                </div>
+              ) : (
+                <>
+                  <h2 className="text-2xl font-bold">{supplier?.name}</h2>
+                  <Button variant="secondary" onClick={openEditModal} className="flex items-center">
+                    <Edit size={16} className="mr-2" /> Edit
+                  </Button>
+                </>
+              )}
             </div>
             
             <p className="text-gray-600 mb-6">
@@ -396,6 +516,7 @@ const SupplierDetail: React.FC = () => {
           isOpen={isModalOpen}
           onClose={closeModal}
           supplier={supplier}
+          onUpdate={fetchLatestData}
         />
       )}
     </div>

@@ -7,9 +7,10 @@ interface SupplierModalProps {
   isOpen: boolean;
   onClose: () => void;
   supplier: Supplier | null;
+  onUpdate?: () => Promise<void>;
 }
 
-const SupplierModal: React.FC<SupplierModalProps> = ({ isOpen, onClose, supplier }) => {
+const SupplierModal: React.FC<SupplierModalProps> = ({ isOpen, onClose, supplier, onUpdate }) => {
   const { addSupplier, updateSupplier } = useAppContext();
   const [name, setName] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -41,6 +42,11 @@ const SupplierModal: React.FC<SupplierModalProps> = ({ isOpen, onClose, supplier
       if (supplier) {
         // Update existing supplier
         await updateSupplier(supplier.id, { name });
+        
+        // Call onUpdate callback if provided to refresh the parent component
+        if (onUpdate) {
+          await onUpdate();
+        }
       } else {
         // Add new supplier
         await addSupplier({ name });
