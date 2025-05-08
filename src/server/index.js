@@ -196,6 +196,11 @@ app.use((req, res, next) => {
 // CORS middleware
 app.use(cors(corsOptions));
 
+// Health check endpoint for Railway
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', uptime: process.uptime() });
+});
+
 // Setup routes
 const router = express.Router();
 

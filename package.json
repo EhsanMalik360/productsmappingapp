@@ -9,11 +9,13 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "cd src/server && node index.js",
-    "start": "concurrently \"npm run dev\" \"npm run server\""
+    "start": "node --max-old-space-size=4096 src/server/index.js",
+    "postinstall": "npm run build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.7",
     "chart.js": "^4.4.0",
+    "express": "^5.1.0",
     "lucide-react": "^0.344.0",
     "node-fetch": "^2.6.7",
     "papaparse": "^5.4.1",
