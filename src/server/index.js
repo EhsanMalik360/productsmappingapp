@@ -136,7 +136,7 @@ console.log('=== SERVER STARTING ===');
 
 // Create Express app
 const app = express();
-const PORT = config.serverPort;
+const PORT = process.env.PORT || 10000;
 
 // CORS configuration
 const corsOptions = {
@@ -303,7 +303,7 @@ if (process.env.NODE_ENV === 'production') {
 // Start the server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  console.log(`API URL: http://localhost:${PORT}`);
+  console.log(`API URL: ${process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`}`);
   
   // Log available routes
   console.log('\nAvailable routes:');
