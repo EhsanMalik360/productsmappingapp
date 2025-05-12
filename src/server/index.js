@@ -136,7 +136,7 @@ console.log('=== SERVER STARTING ===');
 
 // Create Express app
 const app = express();
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.SERVER_PORT || 10000;
 
 // CORS configuration
 const corsOptions = {

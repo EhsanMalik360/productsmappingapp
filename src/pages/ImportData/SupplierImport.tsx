@@ -120,7 +120,11 @@ const SupplierImport: React.FC = () => {
 
   // Handle success modal close
   const handleSuccessModalClose = () => {
+    // Immediately set showSuccess to false to prevent any race conditions
     setShowSuccess(false);
+    
+    // Clear any jobId to prevent status checks
+    setJobId(null);
     
     // Clear polling interval if it exists
     if (pollInterval) {
@@ -139,7 +143,6 @@ const SupplierImport: React.FC = () => {
     setIsLoading(false);
     setLoadingProgress(0); 
     setLoadingMessage("Processing data...");
-    setJobId(null);
     
     // Reset the form
     resetForm();
@@ -238,8 +241,10 @@ const SupplierImport: React.FC = () => {
             });
           }
           
-          // Show success modal only once
+          // Show success modal only once and prevent showing it again
           if (!showSuccess) {
+            // Set to null first to prevent any possible race conditions
+            setJobId(null);
             setShowSuccess(true);
           }
           
@@ -576,7 +581,10 @@ const SupplierImport: React.FC = () => {
         
         // Add a delay before showing success to ensure user sees 100% state
         setTimeout(() => {
-          setShowSuccess(true);
+          // Only show success if it's not already showing (prevents double triggering)
+          if (!showSuccess) {
+            setShowSuccess(true);
+          }
           
           // Small delay to ensure success modal is visible before hiding loader
           setTimeout(() => {

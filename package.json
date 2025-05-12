@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "server": "cd src/server && node index.js",
     "start": "node --max-old-space-size=4096 src/server/index.js",
-    "postinstall": "npm run build"
+    "postinstall": "npm run build",
+    "dev:all": "concurrently \"npm run server\" \"npm run dev\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.7",

@@ -5,23 +5,111 @@ export interface CSVRow {
   [key: string]: string;
 }
 
-export const parseCSV = (file: File): Promise<CSVRow[]> => {
+export const parseCSV = async (file: File): Promise<any[]> => {
+  console.log('📊 CSV PARSE: Starting CSV parsing for file:', file.name);
+  
   return new Promise((resolve, reject) => {
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: (results) => {
-        resolve(results.data as CSVRow[]);
-      },
-      error: (error) => {
+    const reader = new FileReader();
+    
+    reader.onload = (event) => {
+      try {
+        if (!event.target?.result) {
+          console.error('❌ CSV PARSE: FileReader result is null or undefined');
+          reject(new Error('Failed to read file contents'));
+          return;
+        }
+        
+        const csvString = event.target.result as string;
+        console.log(`📊 CSV PARSE: Loaded file content (${csvString.length} characters)`);
+        
+        // For very large files, log only a preview
+        if (csvString.length > 1000) {
+          console.log('📊 CSV PARSE: First 500 characters preview:', csvString.substring(0, 500));
+        }
+        
+        Papa.parse(csvString, {
+          header: true,
+          skipEmptyLines: true,
+          complete: (results) => {
+            console.log(`✅ CSV PARSE: Parsing complete. Found ${results.data.length} rows and ${results.meta.fields?.length || 0} columns`);
+            console.log('📊 CSV PARSE: Column headers:', results.meta.fields);
+            
+            if (results.errors.length > 0) {
+              console.warn(`⚠️ CSV PARSE: Found ${results.errors.length} parsing errors:`);
+              results.errors.slice(0, 5).forEach(error => {
+                console.warn(`  - Row ${error.row}: ${error.message}`);
+              });
+            }
+            
+            // If we got data despite errors, we'll still return it
+            if (results.data.length > 0) {
+              console.log('📊 CSV PARSE: Sample of first row:', results.data[0]);
+              resolve(results.data);
+            } else {
+              console.error('❌ CSV PARSE: No data rows found in CSV');
+              reject(new Error('No data rows found in CSV file'));
+            }
+          },
+          error: (error) => {
+            console.error('❌ CSV PARSE: Error parsing CSV:', error);
+            reject(error);
+          }
+        });
+      } catch (error) {
+        console.error('❌ CSV PARSE: Exception during CSV parsing:', error);
         reject(error);
       }
-    });
+    };
+    
+    reader.onerror = (error) => {
+      console.error('❌ CSV PARSE: FileReader error:', error);
+      reject(new Error('Failed to read file'));
+    };
+    
+    reader.readAsText(file);
   });
 };
 
-export const validateRequiredFields = (data: CSVRow[]): boolean => {
-  return data.length > 0 && Object.keys(data[0]).length > 0;
+export const validateRequiredFields = (data: any[]): boolean => {
+  if (!data || data.length === 0) {
+    console.error('❌ CSV VALIDATE: No data rows found in CSV');
+    return false;
+  }
+  
+  console.log(`📊 CSV VALIDATE: Validating CSV data with ${data.length} rows`);
+  
+  const firstRow = data[0];
+  if (!firstRow || typeof firstRow !== 'object') {
+    console.error('❌ CSV VALIDATE: First row is not a valid object');
+    return false;
+  }
+  
+  const columns = Object.keys(firstRow);
+  console.log('📊 CSV VALIDATE: Columns found in first row:', columns);
+  
+  if (columns.length === 0) {
+    console.error('❌ CSV VALIDATE: No columns found in CSV data');
+    return false;
+  }
+  
+  // Check for empty values in key columns of first few rows
+  const sampleSize = Math.min(data.length, 5);
+  console.log(`📊 CSV VALIDATE: Checking first ${sampleSize} rows for empty values in key columns`);
+  
+  for (let i = 0; i < sampleSize; i++) {
+    const row = data[i];
+    const emptyColumns = columns.filter(col => {
+      const value = row[col];
+      return value === undefined || value === null || value === '';
+    });
+    
+    if (emptyColumns.length > 0) {
+      console.warn(`⚠️ CSV VALIDATE: Row ${i+1} has empty values in columns:`, emptyColumns);
+    }
+  }
+  
+  console.log('✅ CSV VALIDATE: Basic validation passed');
+  return true;
 };
 
 // Helper function to normalize column names for comparison

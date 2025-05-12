@@ -161,10 +161,37 @@ const createSupabaseClient = () => {
 // Create the Supabase client with custom options
 const supabase = createSupabaseClient();
 
+// Debug function to log import errors to database
+async function logImportError(jobId, errorType, errorMessage, errorDetails = null, rowData = null, rowNumber = null, supplierName = null) {
+  console.error(`🚨 IMPORT ERROR: ${errorType} - ${errorMessage}`);
+  
+  try {
+    // Try to log to supplier_data_errors table
+    const { error: insertError } = await supabase
+      .from('supplier_data_errors')
+      .insert({
+        job_id: jobId,
+        supplier_name: supplierName,
+        error_type: errorType,
+        error_message: errorMessage,
+        error_details: errorDetails,
+        row_data: rowData,
+        row_number: rowNumber
+      });
+      
+    if (insertError) {
+      console.error('Failed to log error to database:', insertError);
+    }
+  } catch (e) {
+    console.error('Exception trying to log error:', e);
+  }
+}
+
 // Test the Supabase connection
 (async () => {
   try {
     console.log('Testing Supabase connection...');
+    // First, test basic connectivity
     const { data, error } = await supabase.from('import_jobs').select('count').limit(1);
     
     if (error) {
@@ -172,6 +199,28 @@ const supabase = createSupabaseClient();
       console.error('Please check your environment variables and network connection.');
     } else {
       console.log('✅ Successfully connected to Supabase!');
+      
+      // Now test the suppliers table
+      const { data: suppliersData, error: suppliersError } = await supabase
+        .from('suppliers')
+        .select('count');
+        
+      if (suppliersError) {
+        console.error('❌ Suppliers table test failed:', suppliersError);
+      } else {
+        console.log('✅ Successfully accessed suppliers table!');
+      }
+      
+      // Test supplier_products table
+      const { data: supplierProductsData, error: supplierProductsError } = await supabase
+        .from('supplier_products')
+        .select('count');
+        
+      if (supplierProductsError) {
+        console.error('❌ supplier_products table test failed:', supplierProductsError);
+      } else {
+        console.log('✅ Successfully accessed supplier_products table!');
+      }
     }
   } catch (err) {
     console.error('❌ Error testing Supabase connection:', err);
@@ -1195,7 +1244,8 @@ async function processChunk(chunk, job, fieldMapping, results) {
       },
       null, // No progress callback needed here
       batchSize,
-      job.match_column_mapping // Pass the custom match column mapping
+      job.match_column_mapping, // Pass the custom match column mapping
+      job.id // Pass the job ID
     );
     
     // Update results
@@ -1647,30 +1697,46 @@ async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 
 }
 
 // Import supplier data function (reference to existing function)
-async function importSupplierData(mappedData, matchOptions, progressCallback, batchSize, matchColumns) {
+async function importSupplierData(mappedData, matchOptions, progressCallback, batchSize, matchColumns, jobId) {
   try {
-    console.log(`Importing ${mappedData.length} supplier records with batch size ${batchSize}`);
-    console.log('Match options:', JSON.stringify(matchOptions));
+    console.log(`🚀 IMPORT: Starting import of ${mappedData.length} supplier records with batch size ${batchSize}`);
+    console.log('🔧 IMPORT: Match options:', JSON.stringify(matchOptions));
     
     // Log custom match columns if provided
     if (matchColumns) {
-      console.log('Custom match columns will be used for matching:', JSON.stringify(matchColumns));
+      console.log('🔧 IMPORT: Custom match columns will be used for matching:', JSON.stringify(matchColumns));
     }
     
     if (!mappedData || mappedData.length === 0) {
-      console.warn('No supplier data to import');
+      console.warn('⚠️ IMPORT: No supplier data to import');
       throw new Error('No supplier data to import');
     }
 
+    // Additional debug logging for diagnosing database issues
+    console.log('🔍 DEBUG: Checking database connection...');
+    try {
+      const { data: dbCheck, error: dbError } = await supabase.from('suppliers').select('count').limit(1);
+      if (dbError) {
+        console.error('❌ DEBUG: Database connection issue:', dbError);
+      } else {
+        console.log('✅ DEBUG: Database connection successful');
+      }
+    } catch (dbCheckError) {
+      console.error('❌ DEBUG: Exception testing database connection:', dbCheckError);
+    }
+
+    // Log sample of the data being imported
+    console.log('📋 IMPORT: Sample of first record to import:', JSON.stringify(mappedData[0]));
+
     // Group data by supplier to reduce the number of upsert operations
-    console.log(`Grouping ${mappedData.length} rows by supplier name`);
+    console.log(`🔄 IMPORT: Grouping ${mappedData.length} rows by supplier name`);
     
     const supplierGroups = mappedData.reduce((acc, row) => {
       const { supplier_name, custom_attributes, ...productData } = row;
       
       // Skip rows with empty supplier name
       if (!supplier_name || supplier_name.trim() === '') {
-        console.warn('Found row with empty supplier_name');
+        console.warn('⚠️ IMPORT: Found row with empty supplier_name, skipping');
         return acc;
       }
       
@@ -1685,26 +1751,33 @@ async function importSupplierData(mappedData, matchOptions, progressCallback, ba
       return acc;
     }, {});
     
-    console.log(`Grouped into ${Object.keys(supplierGroups).length} unique suppliers`);
+    console.log(`🔄 IMPORT: Grouped into ${Object.keys(supplierGroups).length} unique suppliers`);
+    console.log('👥 IMPORT: Supplier names found:', Object.keys(supplierGroups));
 
     const results = [];
     let processedCount = 0;
     const batchErrors = [];
 
     // Get custom attributes
+    console.log('🔄 IMPORT: Fetching supplier custom attributes from database');
     const { data: customAttributes, error: customAttrError } = await supabase
       .from('custom_attributes')
       .select('*')
       .eq('for_type', 'supplier');
       
     if (customAttrError) {
-      console.error('Error fetching supplier custom attributes:', customAttrError);
+      console.error('❌ IMPORT: Error fetching supplier custom attributes:', customAttrError);
       throw customAttrError;
+    }
+
+    console.log(`✅ IMPORT: Found ${customAttributes?.length || 0} custom attributes for suppliers`);
+    if (customAttributes && customAttributes.length > 0) {
+      console.log('📋 IMPORT: Custom attributes:', customAttributes.map(attr => attr.name));
     }
 
     // Prepare supplier records for upsert
     const supplierNames = Object.keys(supplierGroups);
-    console.log(`Found ${supplierNames.length} unique suppliers to upsert`);
+    console.log(`🔄 IMPORT: Found ${supplierNames.length} unique suppliers to upsert`);
     
     const supplierUpsertData = supplierNames.map(name => {
       const supplierData = supplierGroups[name];
@@ -1725,593 +1798,724 @@ async function importSupplierData(mappedData, matchOptions, progressCallback, ba
       return supplierRecord;
     });
     
+    console.log('📋 IMPORT: First supplier record sample:', JSON.stringify(supplierUpsertData[0]));
+    
+    // Detailed logging of supplier upsert attempt
+    console.log('🔍 DEBUG: About to upsert suppliers with the following data:');
+    console.log('🔍 DEBUG: First record (example):', JSON.stringify(supplierUpsertData[0]));
+    console.log('🔍 DEBUG: Total records to upsert:', supplierUpsertData.length);
+    
     // Upsert all suppliers in a single operation
-    const { data: upsertedSuppliers, error: suppliersError } = await supabase
-      .from('suppliers')
-      .upsert(supplierUpsertData, { 
-        onConflict: 'name',
-        ignoreDuplicates: false 
-      })
-      .select('id,name');
-      
-    if (suppliersError) {
-      console.error('Error upserting suppliers:', suppliersError);
-      throw suppliersError;
-    }
+    console.log('🔄 IMPORT: Upserting all suppliers to database');
+    let supplierIdsByName = {};
     
-    if (!upsertedSuppliers) {
-      console.error('Failed to upsert suppliers: no data returned');
-      throw new Error('Failed to upsert suppliers');
-    }
-    
-    console.log(`Successfully upserted ${upsertedSuppliers.length} suppliers`);
-    console.log('First few suppliers:', upsertedSuppliers.slice(0, 3).map(s => ({ id: s.id, name: s.name })));
-
-    // Create lookup for supplier IDs
-    const supplierIdsByName = {};
-    upsertedSuppliers.forEach(s => {
-      supplierIdsByName[s.name] = s.id;
-    });
-    
-    // Collect product identifiers for matching
-    const eans = new Set();
-    const mpns = new Set();
-    const productNames = new Set();
-    
-    console.log('Collecting product identifiers for matching...');
-    
-    for (const supplierData of Object.values(supplierGroups)) {
-      supplierData.products.forEach(p => {
-        // Use custom match columns if provided, otherwise use standard fields
-        const eanValue = matchColumns?.ean ? p[matchColumns.ean] : p.ean;
-        const mpnValue = matchColumns?.mpn ? p[matchColumns.mpn] : p.mpn;
-        const nameValue = matchColumns?.name ? p[matchColumns.name] : p.product_name;
+    try {
+      // First, check if the suppliers table exists and has the expected structure
+      const { data: tableInfo, error: tableError } = await supabase
+        .from('suppliers')
+        .select('id')
+        .limit(1)
+        .maybeSingle();
         
-        if (matchOptions.useEan && eanValue) {
-          eans.add(eanValue);
-          console.log(`Added EAN for matching: ${eanValue}`);
-        }
-        if (matchOptions.useMpn && mpnValue) {
-          mpns.add(mpnValue);
-          console.log(`Added MPN for matching: ${mpnValue}`);
-        }
-        if (matchOptions.useName && nameValue) {
-          productNames.add(nameValue);
-          console.log(`Added product name for matching: ${nameValue}`);
-        }
-      });
-    }
-    
-    console.log(`Collected ${eans.size} unique EANs, ${mpns.size} unique MPNs, and ${productNames.size} unique product names for matching`);
-    
-    // Build filters for product queries
-    let filters = [];
-    
-    if (matchOptions.useEan && eans.size > 0) {
-      const eanChunks = chunkArray(Array.from(eans), 500);
-      for (const chunk of eanChunks) {
-        filters.push(`ean.in.(${chunk.map(ean => `"${ean}"`).join(',')})`);
-      }
-    }
-    
-    if (matchOptions.useMpn && mpns.size > 0) {
-      const mpnChunks = chunkArray(Array.from(mpns), 500);
-      for (const chunk of mpnChunks) {
-        filters.push(`mpn.in.(${chunk.map(mpn => `"${mpn}"`).join(',')})`);
-        filters.push(`custom_mpn.in.(${chunk.map(mpn => `"${mpn}"`).join(',')})`);
-      }
-    }
-    
-    if (matchOptions.useName && productNames.size > 0) {
-      const nameChunks = chunkArray(Array.from(productNames), 500);
-      for (const chunk of nameChunks) {
-        filters.push(`title.ilike.any.(${chunk.map(name => `"%${name}%"`).join(',')})`);
-      }
-    }
-    
-    console.log(`Built ${filters.length} filter chunks for product queries`);
-    
-    // Debug the first filter if available
-    if (filters.length > 0) {
-      console.log('First filter chunk example:', filters[0]);
-    }
-    
-    // Fetch products for matching
-    let allProducts = [];
-    
-    // Check if we have any filters to apply
-    if (filters.length === 0) {
-      console.warn('No filters available for product matching. This will result in no matches.');
-    } else {
-      console.log('Fetching products for matching...');
-      const productQueries = filters.map(f => 
-        supabase
-          .from('products')
-          .select('id, ean, mpn, title, custom_mpn')
-          .or(f)
-      );
-      
-      console.log(`Executing ${productQueries.length} product queries...`);
-      const productResults = await Promise.all(productQueries);
-      
-      for (const result of productResults) {
-        if (result.error) {
-          console.error('Error in product query:', result.error);
-          throw result.error;
-        }
-        if (result.data) {
-          console.log(`Query returned ${result.data.length} products`);
-          const newProducts = result.data.filter(newProduct => 
-            !allProducts.some(existingProduct => existingProduct.id === newProduct.id)
+      if (tableError) {
+        console.error('❌ IMPORT: Error accessing suppliers table:', tableError);
+        
+        if (jobId) {
+          await logImportError(
+            jobId,
+            'DATABASE_ACCESS',
+            `Error accessing suppliers table: ${tableError.message}`,
+            { error: tableError },
+            null,
+            null
           );
-          allProducts = [...allProducts, ...newProducts];
         }
-      }
-    }
-    
-    console.log(`Fetched a total of ${allProducts.length} products for matching`);
-    
-    // Debug: Show sample of products if available
-    if (allProducts.length > 0) {
-      console.log('First few products for matching:', allProducts.slice(0, 3).map(p => ({ 
-        id: p.id, 
-        ean: p.ean, 
-        mpn: p.mpn, 
-        title: p.title 
-      })));
-    }
-    
-    // Create product lookup maps
-    const productsByEan = {};
-    const productsByMpn = {};
-    const productsByName = {};
-    
-    // Helper function to normalize MPNs for consistent matching
-    const normalizeMpn = (mpn) => {
-      if (!mpn) return '';
-      // First convert to string, lowercase, and trim whitespace
-      let normalized = mpn.toString().toLowerCase().trim();
-      // Remove all non-alphanumeric characters
-      normalized = normalized.replace(/[^a-z0-9]/g, '');
-      return normalized;
-    };
-    
-    // Advanced MPN matching - tries multiple normalization techniques
-    const matchMpn = (supplierMpn, productMpns) => {
-      if (!supplierMpn) return null;
-      
-      // Try multiple normalization techniques
-      const supplierNormalized = normalizeMpn(supplierMpn);
-      
-      // 1. Direct lookup with our standard normalization
-      if (productMpns[supplierNormalized]) {
-        return {
-          product: productMpns[supplierNormalized],
-          method: 'exact',
-          normalizedMpn: supplierNormalized
-        };
+          
+        throw new Error(`Database error: ${tableError.message}`);
       }
       
-      // 2. Try removing leading zeros (common variation)
-      const noLeadingZeros = supplierNormalized.replace(/^0+/, '');
-      if (noLeadingZeros !== supplierNormalized && productMpns[noLeadingZeros]) {
-        return {
-          product: productMpns[noLeadingZeros],
-          method: 'no-leading-zeros',
-          normalizedMpn: noLeadingZeros
-        };
-      }
-      
-      // 3. Try partial matching (contained within or contains)
-      for (const [key, product] of Object.entries(productMpns)) {
-        // Skip very short MPNs for partial matching to avoid false positives
-        if (supplierNormalized.length < 4 || key.length < 4) continue;
+      // If no suppliers to upsert, log warning but continue
+      if (!supplierUpsertData.length) {
+        console.warn('⚠️ IMPORT: No suppliers to upsert');
+        if (jobId) {
+          await logImportError(
+            jobId,
+            'NO_SUPPLIERS',
+            'No supplier data to upsert',
+            null,
+            null,
+            null
+          );
+        }
+      } else {
+        // Proceed with upsert
+        console.log(`🔄 IMPORT: Upserting ${supplierUpsertData.length} suppliers`);
         
-        if (key.includes(supplierNormalized) || supplierNormalized.includes(key)) {
-          return {
-            product,
-            method: 'partial',
-            normalizedMpn: key
-          };
-        }
-      }
-      
-      // No match found
-      return null;
-    };
-    
-    console.log(`Building product lookup maps for ${allProducts.length} products...`);
-    allProducts.forEach(product => {
-      if (product.ean) {
-        productsByEan[product.ean] = product;
-      }
-      
-      // Use normalized MPNs for lookup
-      if (product.mpn) {
-        const normalizedMpn = normalizeMpn(product.mpn);
-        if (normalizedMpn) {
-          console.log(`Adding product to MPN lookup: "${product.mpn}" → "${normalizedMpn}"`);
-          productsByMpn[normalizedMpn] = product;
-        }
-      }
-      
-      if (product.custom_mpn) {
-        const normalizedCustomMpn = normalizeMpn(product.custom_mpn);
-        if (normalizedCustomMpn) {
-          console.log(`Adding product to MPN lookup: "${product.custom_mpn}" → "${normalizedCustomMpn}"`);
-          productsByMpn[normalizedCustomMpn] = product;
-        }
-      }
-      
-      if (product.title) {
-        productsByName[product.title.toLowerCase()] = product;
-      }
-    });
-    
-    console.log(`Created lookup maps: ${Object.keys(productsByEan).length} EANs, ${Object.keys(productsByMpn).length} MPNs, ${Object.keys(productsByName).length} titles`);
-    
-    // Debug: Log all the MPNs in our lookup
-    console.log('MPN lookup keys (first 20):', Object.keys(productsByMpn).slice(0, 20));
-    
-    // Call diagnostic function AFTER allProducts is populated
-    debugMpnMatching(supplierGroups, allProducts);
-    
-    // Match supplier products to existing products
-    console.log(`Processing supplier products for ${Object.keys(supplierGroups).length} suppliers`);
-    
-    const allSupplierProducts = [];
-    const unmatchedSupplierData = [];
-    const suppliersWithMatches = new Set();
-    
-    // Generate placeholder EAN helper function
-    const generatePlaceholderEan = (supplierId, productName, mpn) => {
-      const idPart = supplierId.substring(0, 8);
-      const namePart = productName ? productName.substring(0, 5).replace(/\W/g, '') : 'item';
-      const mpnPart = mpn ? mpn.substring(0, 5).replace(/\W/g, '') : 'nompn';
-      const timestamp = Date.now().toString().substring(6);
-      return `SUP${idPart}${namePart}${mpnPart}${timestamp}`.substring(0, 30);
-    };
-    
-    // Statistics for different match methods
-    const matchMethodStats = {
-      ean: 0,
-      mpn: 0,
-      name: 0,
-      none: 0
-    };
-    
-    // Process each supplier and their products
-    for (const [supplierName, supplierData] of Object.entries(supplierGroups)) {
-      const supplierId = supplierIdsByName[supplierName];
-      
-      if (!supplierId) {
-        console.error(`No supplier ID found for supplier name: "${supplierName}"`);
-        continue;
-      }
-      
-      console.log(`Processing supplier: ${supplierName} (ID: ${supplierId}) with ${supplierData.products.length} products`);
-      
-      const matchedProducts = [];
-      const matchedSupplierProductIndices = new Set();
-      
-      // Match by priority
-      for (const method of matchOptions.priority) {
-        // Skip methods that are disabled
-        if (
-          (method === 'ean' && !matchOptions.useEan) ||
-          (method === 'mpn' && !matchOptions.useMpn) ||
-          (method === 'name' && !matchOptions.useName)
-        ) {
-          console.log(`Skipping disabled match method: ${method}`);
-          continue;
-        }
-        
-        console.log(`Trying to match products using method: ${method}`);
-        
-        // Match supplier products to products
-        supplierData.products.forEach((supplierProduct, index) => {
-          if (matchedSupplierProductIndices.has(index)) {
-            return; // Skip already matched products
+        const { data: upsertedSuppliers, error: suppliersError } = await supabase
+          .from('suppliers')
+          .upsert(supplierUpsertData, { 
+            onConflict: 'name',
+            ignoreDuplicates: false 
+          })
+          .select('id,name');
+          
+        if (suppliersError) {
+          console.error('❌ IMPORT: Error upserting suppliers:', suppliersError);
+          console.error('❌ DEBUG: Error details:', suppliersError.message, suppliersError.details, suppliersError.hint);
+          
+          if (jobId) {
+            await logImportError(
+              jobId,
+              'SUPPLIER_UPSERT',
+              `Error upserting suppliers: ${suppliersError.message}`,
+              { 
+                error: suppliersError, 
+                supplierCount: supplierUpsertData.length,
+                firstSupplier: supplierUpsertData[0] 
+              },
+              null,
+              null
+            );
           }
           
-          let match = null;
+          throw suppliersError;
+        }
+        
+        if (!upsertedSuppliers || upsertedSuppliers.length === 0) {
+          console.error('❌ IMPORT: Failed to upsert suppliers: no data returned');
           
-          if (method === 'ean' && matchOptions.useEan) {
-            // Use custom EAN column if provided
-            const eanValue = matchColumns?.ean ? supplierProduct[matchColumns.ean] : supplierProduct.ean;
-            if (eanValue) {
-              match = productsByEan[eanValue];
-              if (match) {
-                console.log(`Matched by EAN: ${eanValue} -> Product ID: ${match.id}`);
-              }
-            }
-          } else if (method === 'mpn' && matchOptions.useMpn) {
-            // Use custom MPN column if provided
-            const mpnValue = matchColumns?.mpn ? supplierProduct[matchColumns.mpn] : supplierProduct.mpn;
-            if (mpnValue) {
-              console.log(`Trying to match MPN: "${mpnValue}"`);
-              
-              // Use our advanced MPN matcher
-              const matchResult = matchMpn(mpnValue, productsByMpn);
-              
-              if (matchResult) {
-                match = matchResult.product;
-                console.log(`✅ MATCHED by MPN: "${mpnValue}" → "${matchResult.normalizedMpn}" (${matchResult.method} match)`);
-                console.log(`  Product ID: ${match.id}, Title: "${match.title}"`);
-                console.log(`  Original product MPNs: mpn="${match.mpn}", custom_mpn="${match.custom_mpn}"`);
-              } else {
-                // No match found with any method
-                console.log(`❌ No match found for MPN: "${mpnValue}"`);
-              }
-            }
-          } else if (method === 'name' && matchOptions.useName) {
-            // Use custom product name column if provided
-            const nameValue = matchColumns?.name ? supplierProduct[matchColumns.name] : supplierProduct.product_name;
-            if (nameValue) {
-              // For name matching, try case-insensitive exact match first
-              match = productsByName[nameValue.toLowerCase()];
-              
-              // If no exact match, try to find a product with a similar name
-              if (!match && allProducts.length > 0) {
-                const productName = nameValue.toLowerCase();
-                const possibleMatches = allProducts.filter(p => 
-                  p.title && p.title.toLowerCase().includes(productName)
-                );
-                
-                if (possibleMatches.length > 0) {
-                  match = possibleMatches[0];
-                  console.log(`Matched by partial name: "${nameValue}" -> Product: "${match.title}" (ID: ${match.id})`);
-                }
-              }
-            }
+          if (jobId) {
+            await logImportError(
+              jobId,
+              'SUPPLIER_EMPTY_RESULT',
+              'No suppliers were created - empty result returned',
+              { supplierCount: supplierUpsertData.length },
+              null,
+              null
+            );
           }
           
-          if (match) {
-            matchedProducts.push({
-              supplierProduct,
-              product: match,
-              matchMethod: method
-            });
-            matchedSupplierProductIndices.add(index);
-            suppliersWithMatches.add(supplierId);
-            matchMethodStats[method]++;
-            
-            // Update product MPN if matched by MPN but custom_mpn is empty
-            if (method === 'mpn' && supplierProduct.mpn && !match.custom_mpn) {
-              void supabase
-                .from('products')
-                .update({ 
-                  custom_mpn: supplierProduct.mpn,
-                  mpn: supplierProduct.mpn,
-                  updated_at: new Date().toISOString() 
-                })
-                .eq('id', match.id);
-            }
+          throw new Error('Failed to upsert suppliers: no data returned');
+        }
+        
+        console.log(`✅ IMPORT: Successfully upserted ${upsertedSuppliers.length} suppliers`);
+        console.log('📋 IMPORT: First few suppliers:', upsertedSuppliers.slice(0, 3).map(s => ({ id: s.id, name: s.name })));
+        
+        // Create lookup for supplier IDs
+        supplierIdsByName = {};
+        upsertedSuppliers.forEach(s => {
+          supplierIdsByName[s.name] = s.id;
+        });
+      }
+      
+      // Collect product identifiers for matching
+      const eans = new Set();
+      const mpns = new Set();
+      const productNames = new Set();
+      
+      console.log('Collecting product identifiers for matching...');
+      
+      for (const supplierData of Object.values(supplierGroups)) {
+        supplierData.products.forEach(p => {
+          // Use custom match columns if provided, otherwise use standard fields
+          const eanValue = matchColumns?.ean ? p[matchColumns.ean] : p.ean;
+          const mpnValue = matchColumns?.mpn ? p[matchColumns.mpn] : p.mpn;
+          const nameValue = matchColumns?.name ? p[matchColumns.name] : p.product_name;
+          
+          if (matchOptions.useEan && eanValue) {
+            eans.add(eanValue);
+            console.log(`Added EAN for matching: ${eanValue}`);
+          }
+          if (matchOptions.useMpn && mpnValue) {
+            mpns.add(mpnValue);
+            console.log(`Added MPN for matching: ${mpnValue}`);
+          }
+          if (matchOptions.useName && nameValue) {
+            productNames.add(nameValue);
+            console.log(`Added product name for matching: ${nameValue}`);
           }
         });
       }
       
-      console.log(`Matched ${matchedProducts.length} out of ${supplierData.products.length} products for supplier ${supplierName}`);
+      console.log(`Collected ${eans.size} unique EANs, ${mpns.size} unique MPNs, and ${productNames.size} unique product names for matching`);
       
-      // Create supplier-product records for matches
-      const supplierProductsForThisSupplier = matchedProducts.map(match => {
-        const ean = match.supplierProduct.ean && match.supplierProduct.ean.trim() !== '' 
-          ? match.supplierProduct.ean 
-          : match.product.ean || generatePlaceholderEan(supplierId, match.supplierProduct.product_name, match.supplierProduct.mpn);
-
-        return {
-          supplier_id: supplierId,
-          product_id: match.product.id,
-          ean: ean,
-          cost: match.supplierProduct.cost,
-          moq: match.supplierProduct.moq || 1,
-          lead_time: match.supplierProduct.lead_time || '3 days',
-          payment_terms: match.supplierProduct.payment_terms || 'Net 30',
-          match_method: match.matchMethod,
-          updated_at: new Date().toISOString()
-        };
-      });
+      // Build filters for product queries
+      let filters = [];
       
-      console.log(`Created ${supplierProductsForThisSupplier.length} supplier-product records for supplier ${supplierName}`);
-      allSupplierProducts.push(...supplierProductsForThisSupplier);
+      if (matchOptions.useEan && eans.size > 0) {
+        const eanChunks = chunkArray(Array.from(eans), 500);
+        for (const chunk of eanChunks) {
+          filters.push(`ean.in.(${chunk.map(ean => `"${ean}"`).join(',')})`);
+        }
+      }
       
-      // Handle unmatched supplier products
-      const unmatchedProducts = [];
-      supplierData.products.forEach((supplierProduct, index) => {
-        if (!matchedSupplierProductIndices.has(index)) {
-          matchMethodStats.none++;
-          const ean = supplierProduct.ean && supplierProduct.ean.trim() !== '' 
-            ? supplierProduct.ean 
-            : generatePlaceholderEan(supplierId, supplierProduct.product_name, supplierProduct.mpn);
-            
-          unmatchedProducts.push({
-            supplier_id: supplierId,
-            product_id: null,
-            ean: ean,
-            cost: supplierProduct.cost,
-            moq: supplierProduct.moq || 1,
-            lead_time: supplierProduct.lead_time || '3 days',
-            payment_terms: supplierProduct.payment_terms || 'Net 30',
-            match_method: 'none',
-            product_name: supplierProduct.product_name || '',
-            mpn: supplierProduct.mpn || '',
-            updated_at: new Date().toISOString()
-          });
+      if (matchOptions.useMpn && mpns.size > 0) {
+        const mpnChunks = chunkArray(Array.from(mpns), 500);
+        for (const chunk of mpnChunks) {
+          filters.push(`mpn.in.(${chunk.map(mpn => `"${mpn}"`).join(',')})`);
+          filters.push(`custom_mpn.in.(${chunk.map(mpn => `"${mpn}"`).join(',')})`);
+        }
+      }
+      
+      if (matchOptions.useName && productNames.size > 0) {
+        const nameChunks = chunkArray(Array.from(productNames), 500);
+        for (const chunk of nameChunks) {
+          filters.push(`title.ilike.any.(${chunk.map(name => `"%${name}%"`).join(',')})`);
+        }
+      }
+      
+      console.log(`Built ${filters.length} filter chunks for product queries`);
+      
+      // Debug the first filter if available
+      if (filters.length > 0) {
+        console.log('First filter chunk example:', filters[0]);
+      }
+      
+      // Fetch products for matching
+      let allProducts = [];
+      
+      // Check if we have any filters to apply
+      if (filters.length === 0) {
+        console.warn('No filters available for product matching. This will result in no matches.');
+      } else {
+        console.log('Fetching products for matching...');
+        const productQueries = filters.map(f => 
+          supabase
+            .from('products')
+            .select('id, ean, mpn, title, custom_mpn')
+            .or(f)
+        );
+        
+        console.log(`Executing ${productQueries.length} product queries...`);
+        const productResults = await Promise.all(productQueries);
+        
+        for (const result of productResults) {
+          if (result.error) {
+            console.error('Error in product query:', result.error);
+            throw result.error;
+          }
+          if (result.data) {
+            console.log(`Query returned ${result.data.length} products`);
+            const newProducts = result.data.filter(newProduct => 
+              !allProducts.some(existingProduct => existingProduct.id === newProduct.id)
+            );
+            allProducts = [...allProducts, ...newProducts];
+          }
+        }
+      }
+      
+      console.log(`Fetched a total of ${allProducts.length} products for matching`);
+      
+      // Debug: Show sample of products if available
+      if (allProducts.length > 0) {
+        console.log('First few products for matching:', allProducts.slice(0, 3).map(p => ({ 
+          id: p.id, 
+          ean: p.ean, 
+          mpn: p.mpn, 
+          title: p.title 
+        })));
+      }
+      
+      // Create product lookup maps
+      const productsByEan = {};
+      const productsByMpn = {};
+      const productsByName = {};
+      
+      // Helper function to normalize MPNs for consistent matching
+      const normalizeMpn = (mpn) => {
+        if (!mpn) return '';
+        // First convert to string, lowercase, and trim whitespace
+        let normalized = mpn.toString().toLowerCase().trim();
+        // Remove all non-alphanumeric characters
+        normalized = normalized.replace(/[^a-z0-9]/g, '');
+        return normalized;
+      };
+      
+      // Advanced MPN matching - tries multiple normalization techniques
+      const matchMpn = (supplierMpn, productMpns) => {
+        if (!supplierMpn) return null;
+        
+        // Try multiple normalization techniques
+        const supplierNormalized = normalizeMpn(supplierMpn);
+        
+        // 1. Direct lookup with our standard normalization
+        if (productMpns[supplierNormalized]) {
+          return {
+            product: productMpns[supplierNormalized],
+            method: 'exact',
+            normalizedMpn: supplierNormalized
+          };
+        }
+        
+        // 2. Try removing leading zeros (common variation)
+        const noLeadingZeros = supplierNormalized.replace(/^0+/, '');
+        if (noLeadingZeros !== supplierNormalized && productMpns[noLeadingZeros]) {
+          return {
+            product: productMpns[noLeadingZeros],
+            method: 'no-leading-zeros',
+            normalizedMpn: noLeadingZeros
+          };
+        }
+        
+        // 3. Try partial matching (contained within or contains)
+        for (const [key, product] of Object.entries(productMpns)) {
+          // Skip very short MPNs for partial matching to avoid false positives
+          if (supplierNormalized.length < 4 || key.length < 4) continue;
+          
+          if (key.includes(supplierNormalized) || supplierNormalized.includes(key)) {
+            return {
+              product,
+              method: 'partial',
+              normalizedMpn: key
+            };
+          }
+        }
+        
+        // No match found
+        return null;
+      };
+      
+      console.log(`Building product lookup maps for ${allProducts.length} products...`);
+      allProducts.forEach(product => {
+        if (product.ean) {
+          productsByEan[product.ean] = product;
+        }
+        
+        // Use normalized MPNs for lookup
+        if (product.mpn) {
+          const normalizedMpn = normalizeMpn(product.mpn);
+          if (normalizedMpn) {
+            console.log(`Adding product to MPN lookup: "${product.mpn}" → "${normalizedMpn}"`);
+            productsByMpn[normalizedMpn] = product;
+          }
+        }
+        
+        if (product.custom_mpn) {
+          const normalizedCustomMpn = normalizeMpn(product.custom_mpn);
+          if (normalizedCustomMpn) {
+            console.log(`Adding product to MPN lookup: "${product.custom_mpn}" → "${normalizedCustomMpn}"`);
+            productsByMpn[normalizedCustomMpn] = product;
+          }
+        }
+        
+        if (product.title) {
+          productsByName[product.title.toLowerCase()] = product;
         }
       });
       
-      console.log(`Found ${unmatchedProducts.length} unmatched products for supplier ${supplierName}`);
-      unmatchedSupplierData.push(...unmatchedProducts);
+      console.log(`Created lookup maps: ${Object.keys(productsByEan).length} EANs, ${Object.keys(productsByMpn).length} MPNs, ${Object.keys(productsByName).length} titles`);
       
-      // Report progress
-      if (progressCallback) {
-        progressCallback(processedCount, mappedData.length);
-      }
-    }
-    
-    // Update is_matched flag for suppliers with matches
-    if (suppliersWithMatches.size > 0) {
-      console.log(`Updating is_matched flag for ${suppliersWithMatches.size} suppliers`);
-      const { error: matchUpdateError } = await supabase
-        .from('suppliers')
-        .update({ is_matched: true })
-        .in('id', Array.from(suppliersWithMatches));
+      // Debug: Log all the MPNs in our lookup
+      console.log('MPN lookup keys (first 20):', Object.keys(productsByMpn).slice(0, 20));
       
-      if (matchUpdateError) {
-        console.error('Error updating supplier match status:', matchUpdateError);
-      }
-    }
-    
-    // Process unmatched products by supplier ID
-    const unmatchedBySupplierId = {};
-    
-    unmatchedSupplierData.forEach(item => {
-      const supplierId = item.supplier_id;
-      if (!unmatchedBySupplierId[supplierId]) {
-        unmatchedBySupplierId[supplierId] = [];
-      }
-      unmatchedBySupplierId[supplierId].push(item);
-    });
-    
-    console.log(`Processing ${unmatchedSupplierData.length} unmatched supplier products for ${Object.keys(unmatchedBySupplierId).length} suppliers`);
-    
-    // Insert unmatched products
-    for (const [supplierId, supplierProducts] of Object.entries(unmatchedBySupplierId)) {
-      for (let i = 0; i < supplierProducts.length; i += batchSize) {
-        const batch = supplierProducts.slice(i, i + batchSize);
+      // Call diagnostic function AFTER allProducts is populated
+      debugMpnMatching(supplierGroups, allProducts);
+      
+      // Match supplier products to existing products
+      console.log(`Processing supplier products for ${Object.keys(supplierGroups).length} suppliers`);
+      
+      const allSupplierProducts = [];
+      const unmatchedSupplierData = [];
+      const suppliersWithMatches = new Set();
+      
+      // Generate placeholder EAN helper function
+      const generatePlaceholderEan = (supplierId, productName, mpn) => {
+        const idPart = supplierId.substring(0, 8);
+        const namePart = productName ? productName.substring(0, 5).replace(/\W/g, '') : 'item';
+        const mpnPart = mpn ? mpn.substring(0, 5).replace(/\W/g, '') : 'nompn';
+        const timestamp = Date.now().toString().substring(6);
+        return `SUP${idPart}${namePart}${mpnPart}${timestamp}`.substring(0, 30);
+      };
+      
+      // Statistics for different match methods
+      const matchMethodStats = {
+        ean: 0,
+        mpn: 0,
+        name: 0,
+        none: 0
+      };
+      
+      // Process each supplier and their products
+      for (const [supplierName, supplierData] of Object.entries(supplierGroups)) {
+        const supplierId = supplierIdsByName[supplierName];
         
-        if (batch.length > 0) {
-          try {
-            const validBatch = batch;
-            
-            if (validBatch.length === 0) {
-              continue;
+        if (!supplierId) {
+          console.error(`No supplier ID found for supplier name: "${supplierName}"`);
+          continue;
+        }
+        
+        console.log(`Processing supplier: ${supplierName} (ID: ${supplierId}) with ${supplierData.products.length} products`);
+        
+        const matchedProducts = [];
+        const matchedSupplierProductIndices = new Set();
+        
+        // Match by priority
+        for (const method of matchOptions.priority) {
+          // Skip methods that are disabled
+          if (
+            (method === 'ean' && !matchOptions.useEan) ||
+            (method === 'mpn' && !matchOptions.useMpn) ||
+            (method === 'name' && !matchOptions.useName)
+          ) {
+            console.log(`Skipping disabled match method: ${method}`);
+            continue;
+          }
+          
+          console.log(`Trying to match products using method: ${method}`);
+          
+          // Match supplier products to products
+          supplierData.products.forEach((supplierProduct, index) => {
+            if (matchedSupplierProductIndices.has(index)) {
+              return; // Skip already matched products
             }
             
-            // Get EANs to check
-            const eansToCheck = validBatch.map(item => item.ean);
+            let match = null;
             
-            // Delete any previous unmatched entries
-            if (eansToCheck.length > 0) {
-              try {
-                await supabase
-                  .from('supplier_products')
-                  .delete()
-                  .eq('supplier_id', supplierId)
-                  .is('product_id', null)
-                  .in('ean', eansToCheck);
-              } catch (deleteError) {
-                console.error('Error deleting existing unmatched supplier products:', deleteError);
+            if (method === 'ean' && matchOptions.useEan) {
+              // Use custom EAN column if provided
+              const eanValue = matchColumns?.ean ? supplierProduct[matchColumns.ean] : supplierProduct.ean;
+              if (eanValue) {
+                match = productsByEan[eanValue];
+                if (match) {
+                  console.log(`Matched by EAN: ${eanValue} -> Product ID: ${match.id}`);
+                }
+              }
+            } else if (method === 'mpn' && matchOptions.useMpn) {
+              // Use custom MPN column if provided
+              const mpnValue = matchColumns?.mpn ? supplierProduct[matchColumns.mpn] : supplierProduct.mpn;
+              if (mpnValue) {
+                console.log(`Trying to match MPN: "${mpnValue}"`);
+                
+                // Use our advanced MPN matcher
+                const matchResult = matchMpn(mpnValue, productsByMpn);
+                
+                if (matchResult) {
+                  match = matchResult.product;
+                  console.log(`✅ MATCHED by MPN: "${mpnValue}" → "${matchResult.normalizedMpn}" (${matchResult.method} match)`);
+                  console.log(`  Product ID: ${match.id}, Title: "${match.title}"`);
+                  console.log(`  Original product MPNs: mpn="${match.mpn}", custom_mpn="${match.custom_mpn}"`);
+                } else {
+                  // No match found with any method
+                  console.log(`❌ No match found for MPN: "${mpnValue}"`);
+                }
+              }
+            } else if (method === 'name' && matchOptions.useName) {
+              // Use custom product name column if provided
+              const nameValue = matchColumns?.name ? supplierProduct[matchColumns.name] : supplierProduct.product_name;
+              if (nameValue) {
+                // For name matching, try case-insensitive exact match first
+                match = productsByName[nameValue.toLowerCase()];
+                
+                // If no exact match, try to find a product with a similar name
+                if (!match && allProducts.length > 0) {
+                  const productName = nameValue.toLowerCase();
+                  const possibleMatches = allProducts.filter(p => 
+                    p.title && p.title.toLowerCase().includes(productName)
+                  );
+                  
+                  if (possibleMatches.length > 0) {
+                    match = possibleMatches[0];
+                    console.log(`Matched by partial name: "${nameValue}" -> Product: "${match.title}" (ID: ${match.id})`);
+                  }
+                }
               }
             }
             
-            // Insert new unmatched records
-            console.log(`Inserting ${validBatch.length} unmatched supplier products for supplier ${supplierId}`);
-            const { data: insertedUnmatched, error: unmatchedError } = await supabase
-              .from('supplier_products')
-              .insert(validBatch)
-              .select();
+            if (match) {
+              matchedProducts.push({
+                supplierProduct,
+                product: match,
+                matchMethod: method
+              });
+              matchedSupplierProductIndices.add(index);
+              suppliersWithMatches.add(supplierId);
+              matchMethodStats[method]++;
               
-            if (unmatchedError) {
-              console.error('Error inserting unmatched supplier products batch:', unmatchedError);
-              batchErrors.push(unmatchedError);
-            } else if (insertedUnmatched) {
-              console.log(`Successfully inserted ${insertedUnmatched.length} unmatched supplier products`);
-              processedCount += insertedUnmatched.length;
+              // Update product MPN if matched by MPN but custom_mpn is empty
+              if (method === 'mpn' && supplierProduct.mpn && !match.custom_mpn) {
+                void supabase
+                  .from('products')
+                  .update({ 
+                    custom_mpn: supplierProduct.mpn,
+                    mpn: supplierProduct.mpn,
+                    updated_at: new Date().toISOString() 
+                  })
+                  .eq('id', match.id);
+              }
+            }
+          });
+        }
+        
+        console.log(`Matched ${matchedProducts.length} out of ${supplierData.products.length} products for supplier ${supplierName}`);
+        
+        // Create supplier-product records for matches
+        const supplierProductsForThisSupplier = matchedProducts.map(match => {
+          const ean = match.supplierProduct.ean && match.supplierProduct.ean.trim() !== '' 
+            ? match.supplierProduct.ean 
+            : match.product.ean || generatePlaceholderEan(supplierId, match.supplierProduct.product_name, match.supplierProduct.mpn);
+
+          return {
+            supplier_id: supplierId,
+            product_id: match.product.id,
+            ean: ean,
+            cost: match.supplierProduct.cost,
+            moq: match.supplierProduct.moq || 1,
+            lead_time: match.supplierProduct.lead_time || '3 days',
+            payment_terms: match.supplierProduct.payment_terms || 'Net 30',
+            match_method: match.matchMethod,
+            updated_at: new Date().toISOString()
+          };
+        });
+        
+        console.log(`Created ${supplierProductsForThisSupplier.length} supplier-product records for supplier ${supplierName}`);
+        allSupplierProducts.push(...supplierProductsForThisSupplier);
+        
+        // Handle unmatched supplier products
+        const unmatchedProducts = [];
+        supplierData.products.forEach((supplierProduct, index) => {
+          if (!matchedSupplierProductIndices.has(index)) {
+            matchMethodStats.none++;
+            const ean = supplierProduct.ean && supplierProduct.ean.trim() !== '' 
+              ? supplierProduct.ean 
+              : generatePlaceholderEan(supplierId, supplierProduct.product_name, supplierProduct.mpn);
+              
+            unmatchedProducts.push({
+              supplier_id: supplierId,
+              product_id: null,
+              ean: ean,
+              cost: supplierProduct.cost,
+              moq: supplierProduct.moq || 1,
+              lead_time: supplierProduct.lead_time || '3 days',
+              payment_terms: supplierProduct.payment_terms || 'Net 30',
+              match_method: 'none',  // Ensure this is set for NOT NULL constraint
+              product_name: supplierProduct.product_name || '',
+              mpn: supplierProduct.mpn || '',
+              updated_at: new Date().toISOString()
+            });
+          }
+        });
+        
+        console.log(`Found ${unmatchedProducts.length} unmatched products for supplier ${supplierName}`);
+        unmatchedSupplierData.push(...unmatchedProducts);
+        
+        // Report progress
+        if (progressCallback) {
+          progressCallback(processedCount, mappedData.length);
+        }
+      }
+      
+      // Update is_matched flag for suppliers with matches
+      if (suppliersWithMatches.size > 0) {
+        console.log(`Updating is_matched flag for ${suppliersWithMatches.size} suppliers`);
+        const { error: matchUpdateError } = await supabase
+          .from('suppliers')
+          .update({ is_matched: true })
+          .in('id', Array.from(suppliersWithMatches));
+        
+        if (matchUpdateError) {
+          console.error('Error updating supplier match status:', matchUpdateError);
+        }
+      }
+      
+      // Process unmatched products by supplier ID
+      const unmatchedBySupplierId = {};
+      
+      unmatchedSupplierData.forEach(item => {
+        const supplierId = item.supplier_id;
+        if (!unmatchedBySupplierId[supplierId]) {
+          unmatchedBySupplierId[supplierId] = [];
+        }
+        unmatchedBySupplierId[supplierId].push(item);
+      });
+      
+      console.log(`Processing ${unmatchedSupplierData.length} unmatched supplier products for ${Object.keys(unmatchedBySupplierId).length} suppliers`);
+      
+      // Insert unmatched products
+      for (const [supplierId, supplierProducts] of Object.entries(unmatchedBySupplierId)) {
+        for (let i = 0; i < supplierProducts.length; i += batchSize) {
+          const batch = supplierProducts.slice(i, i + batchSize);
+          
+          if (batch.length > 0) {
+            try {
+              const validBatch = batch;
+              
+              // Make sure all records have match_method set
+              validBatch.forEach(item => {
+                if (!item.match_method) {
+                  console.log('🔍 DEBUG: Setting missing match_method to "none" for a record');
+                  item.match_method = 'none';
+                }
+              });
+              
+              if (validBatch.length === 0) {
+                continue;
+              }
+              
+              // Get EANs to check
+              const eansToCheck = validBatch.map(item => item.ean);
+              
+              // Delete any previous unmatched entries
+              if (eansToCheck.length > 0) {
+                try {
+                  console.log(`🔍 DEBUG: Attempting to delete existing unmatched supplier products for supplier ${supplierId}`);
+                  const { data: deleteData, error: deleteError } = await supabase
+                    .from('supplier_products')
+                    .delete()
+                    .eq('supplier_id', supplierId)
+                    .is('product_id', null)
+                    .in('ean', eansToCheck);
+                    
+                  if (deleteError) {
+                    console.error('❌ DEBUG: Error deleting existing unmatched supplier products:', deleteError);
+                    console.error('❌ DEBUG: Error details:', deleteError.message, deleteError.details, deleteError.hint);
+                  } else {
+                    console.log('✅ DEBUG: Successfully deleted existing unmatched supplier products');
+                  }
+                } catch (deleteError) {
+                  console.error('❌ DEBUG: Exception deleting existing unmatched supplier products:', deleteError);
+                }
+              }
+              
+              // Insert new unmatched records
+              console.log(`Inserting ${validBatch.length} unmatched supplier products for supplier ${supplierId}`);
+              console.log('🔍 DEBUG: First unmatched record sample:', JSON.stringify(validBatch[0]));
+              
+              try {
+                const { data: insertedUnmatched, error: unmatchedError } = await supabase
+                  .from('supplier_products')
+                  .insert(validBatch)
+                  .select();
+
+                if (unmatchedError) {
+                  console.error('Error inserting unmatched supplier products batch:', unmatchedError);
+                  console.error('❌ DEBUG: Error details:', unmatchedError.message, unmatchedError.details, unmatchedError.hint);
+                  batchErrors.push(unmatchedError);
+                } else if (insertedUnmatched) {
+                  console.log(`Successfully inserted ${insertedUnmatched.length} unmatched supplier products`);
+                  processedCount += insertedUnmatched.length;
+                } else {
+                  console.log('❓ DEBUG: No error but no data returned from insert operation');
+                }
+              } catch (insertError) {
+                console.error('❌ DEBUG: Exception during insert operation:', insertError);
+                batchErrors.push(insertError);
+              }
+            } catch (err) {
+              console.error('Exception processing unmatched supplier products batch:', err);
+              batchErrors.push(err);
+            }
+          }
+        }
+      }
+      
+      // Process matched products in batches
+      console.log(`Processing ${allSupplierProducts.length} matched supplier products in batches`);
+      for (let i = 0; i < allSupplierProducts.length; i += batchSize) {
+        const batch = allSupplierProducts.slice(i, i + batchSize);
+              
+        if (batch.length > 0) {
+          try {
+            const validBatch = batch.filter(item => 
+              item.supplier_id && 
+              item.product_id && // For matched products, we need product_id
+              item.ean && 
+              item.ean.trim() !== ''
+            );
+            
+            // Make sure all records have match_method set
+            validBatch.forEach(item => {
+              if (!item.match_method) {
+                console.log('🔍 DEBUG: Setting missing match_method to "ean" for a matched record');
+                item.match_method = 'ean'; // Default to EAN for matched products
+              }
+            });
+            
+            if (validBatch.length === 0) {
+              console.log('🔍 DEBUG: No valid records in this batch after filtering');
+              continue;
+            }
+            
+            console.log(`Upserting ${validBatch.length} matched supplier products (batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(allSupplierProducts.length/batchSize)})`);
+            console.log('🔍 DEBUG: First valid record sample:', JSON.stringify(validBatch[0]));
+            
+            try {
+              const { data: insertedData, error: relationError } = await supabase
+                .from('supplier_products')
+                .upsert(validBatch, {
+                  onConflict: 'supplier_id,product_id',
+                  ignoreDuplicates: false
+                })
+                .select();
+
+              if (relationError) {
+                console.error('Error upserting supplier products batch:', relationError);
+                console.error('❌ DEBUG: Error details:', relationError.message, relationError.details, relationError.hint);
+                batchErrors.push(relationError);
+              } else if (insertedData) {
+                console.log(`Successfully upserted ${insertedData.length} supplier-product relationships`);
+                results.push(...insertedData);
+                processedCount += insertedData.length;
+              } else {
+                console.log('❓ DEBUG: No error but no data returned from upsert operation');
+              }
+            } catch (upsertError) {
+              console.error('❌ DEBUG: Exception during upsert operation:', upsertError);
+              batchErrors.push(upsertError);
             }
           } catch (err) {
-            console.error('Exception processing unmatched supplier products batch:', err);
+            console.error('Exception processing supplier products batch:', err);
             batchErrors.push(err);
           }
         }
       }
-    }
-    
-    // Process matched products in batches
-    console.log(`Processing ${allSupplierProducts.length} matched supplier products in batches`);
-    for (let i = 0; i < allSupplierProducts.length; i += batchSize) {
-      const batch = allSupplierProducts.slice(i, i + batchSize);
-            
-      if (batch.length > 0) {
-        try {
-          const validBatch = batch.filter(item => 
-            item.supplier_id && 
-            item.product_id && 
-            item.ean && 
-            item.ean.trim() !== ''
-          );
-          
-          if (validBatch.length === 0) {
-            continue;
-          }
-          
-          console.log(`Upserting ${validBatch.length} matched supplier products (batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(allSupplierProducts.length/batchSize)})`);
-          const { data: insertedData, error: relationError } = await supabase
-            .from('supplier_products')
-            .upsert(validBatch, {
-              onConflict: 'supplier_id,product_id',
-              ignoreDuplicates: false
-            })
-            .select();
+      
+      // Handle errors
+      if (batchErrors.length > 0 && processedCount > 0) {
+        console.warn(`Completed import with ${batchErrors.length} batch errors, but processed ${processedCount} records successfully.`);
+      } else if (batchErrors.length > 0) {
+        throw batchErrors[0];
+      }
 
-          if (relationError) {
-            console.error('Error upserting supplier products batch:', relationError);
-            batchErrors.push(relationError);
-          } else if (insertedData) {
-            console.log(`Successfully upserted ${insertedData.length} supplier-product relationships`);
-            results.push(...insertedData);
-            processedCount += insertedData.length;
-          }
-        } catch (err) {
-          console.error('Exception processing supplier products batch:', err);
-          batchErrors.push(err);
+      // Final results and statistics
+      const totalMatched = allSupplierProducts.length;
+      const totalUnmatched = unmatchedSupplierData.length;
+      const totalProcessed = totalMatched + totalUnmatched;
+      
+      console.log('============ IMPORT SUMMARY ============');
+      console.log(`Total processed: ${totalProcessed}`);
+      console.log(`Total matched: ${totalMatched}`);
+      console.log(`Total unmatched: ${totalUnmatched}`);
+      console.log(`Match by EAN: ${matchMethodStats.ean}`);
+      console.log(`Match by MPN: ${matchMethodStats.mpn}`);
+      console.log(`Match by Name: ${matchMethodStats.name}`);
+      console.log(`Unmatched count: ${matchMethodStats.none}`);
+      console.log('=======================================');
+      
+      // Enhance the final results to ensure match statistics are included
+      const finalResults = {
+        processedCount: totalProcessed,
+        supplierCount: Object.keys(supplierGroups).length,
+        totalRecords: totalProcessed,
+        successfulImports: totalProcessed,
+        failedImports: 0,
+        suppliersAdded: Object.keys(supplierGroups).length,
+        matchStats: {
+          totalMatched: totalMatched,
+          byMethod: {
+            ean: matchMethodStats.ean,
+            mpn: matchMethodStats.mpn,
+            name: matchMethodStats.name
+          },
+          unmatchedCount: totalUnmatched
         }
-      }
+      };
+      
+      console.log('Returning final results to client:', finalResults);
+      return finalResults;
+    } catch (error) {
+      console.error('Error importing supplier data:', error);
+      throw error;
     }
-    
-    // Handle errors
-    if (batchErrors.length > 0 && processedCount > 0) {
-      console.warn(`Completed import with ${batchErrors.length} batch errors, but processed ${processedCount} records successfully.`);
-    } else if (batchErrors.length > 0) {
-      throw batchErrors[0];
-    }
-
-    // Final results and statistics
-    const totalMatched = allSupplierProducts.length;
-    const totalUnmatched = unmatchedSupplierData.length;
-    const totalProcessed = totalMatched + totalUnmatched;
-    
-    console.log('============ IMPORT SUMMARY ============');
-    console.log(`Total processed: ${totalProcessed}`);
-    console.log(`Total matched: ${totalMatched}`);
-    console.log(`Total unmatched: ${totalUnmatched}`);
-    console.log(`Match by EAN: ${matchMethodStats.ean}`);
-    console.log(`Match by MPN: ${matchMethodStats.mpn}`);
-    console.log(`Match by Name: ${matchMethodStats.name}`);
-    console.log(`Unmatched count: ${matchMethodStats.none}`);
-    console.log('=======================================');
-    
-    // Enhance the final results to ensure match statistics are included
-    const finalResults = {
-      processedCount: totalProcessed,
-      supplierCount: Object.keys(supplierGroups).length,
-      totalRecords: totalProcessed,
-      successfulImports: totalProcessed,
-      failedImports: 0,
-      suppliersAdded: Object.keys(supplierGroups).length,
-      matchStats: {
-        totalMatched: totalMatched,
-        byMethod: {
-          ean: matchMethodStats.ean,
-          mpn: matchMethodStats.mpn,
-          name: matchMethodStats.name
-        },
-        unmatchedCount: totalUnmatched
-      }
-    };
-    
-    console.log('Returning final results to client:', finalResults);
-    return finalResults;
   } catch (error) {
     console.error('Error importing supplier data:', error);
     throw error;

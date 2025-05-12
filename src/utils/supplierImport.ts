@@ -152,51 +152,78 @@ export const manualMapSupplierColumn = (
 
 export const validateSupplierData = async (data: any): Promise<boolean> => {
   try {
+    console.log('🔍 VALIDATION: Validating supplier data:', JSON.stringify(data));
+    
     // Only validate required fields
     if (!data.supplier_name || typeof data.supplier_name !== 'string') {
+      console.error('❌ VALIDATION FAILED: Supplier name is missing or not a string', data.supplier_name);
       throw new Error('Supplier name is required');
     }
     
     // Ensure supplier_name is not empty after trimming
     if (data.supplier_name.trim() === '') {
+      console.error('❌ VALIDATION FAILED: Supplier name is empty after trimming');
       throw new Error('Supplier name cannot be empty');
     }
     
+    console.log('✅ VALIDATION: Supplier name is valid:', data.supplier_name);
+    
     if (data.ean !== undefined && typeof data.ean !== 'string') {
+      console.error('❌ VALIDATION FAILED: EAN is not a string:', data.ean);
       throw new Error('Product EAN must be a string if provided');
     }
+    
+    console.log('✅ VALIDATION: EAN is valid or not provided');
+    
     if (typeof data.cost !== 'number' || data.cost <= 0) {
+      console.error('❌ VALIDATION FAILED: Cost is not a positive number:', data.cost, 'type:', typeof data.cost);
       throw new Error('Cost must be a positive number');
     }
+    
+    console.log('✅ VALIDATION: Cost is valid:', data.cost);
       
     // Check for required custom attributes if specified
     if (data.custom_attributes) {
       // Fetch required custom attributes from database
+      console.log('🔍 VALIDATION: Checking required custom attributes');
       const { data: requiredAttributes, error } = await supabase
         .from('custom_attributes')
         .select('*')
         .eq('for_type', 'supplier')
         .eq('required', true);
         
-      if (error) throw error;
+      if (error) {
+        console.error('❌ VALIDATION FAILED: Error fetching required custom attributes:', error);
+        throw error;
+      }
+      
+      console.log('🔍 VALIDATION: Required custom attributes:', requiredAttributes);
       
       if (requiredAttributes && requiredAttributes.length > 0) {
         for (const attr of requiredAttributes) {
           const attributeName = attr.name;
+          console.log(`🔍 VALIDATION: Checking for required attribute: ${attributeName}`, 
+            'Value:', data.custom_attributes[attributeName]);
+            
           if (!data.custom_attributes[attributeName] && data.custom_attributes[attributeName] !== false) {
+            console.error(`❌ VALIDATION FAILED: Required custom attribute '${attributeName}' is missing`);
             throw new Error(`Required custom attribute '${attributeName}' is missing`);
           }
         }
       }
+      
+      console.log('✅ VALIDATION: All required custom attributes are present');
     }
     
     // Skip all validation for non-required fields (moq, lead_time, payment_terms, etc.)
-    
+    console.log('✅ VALIDATION: Supplier data validation successful');
     return true;
   } catch (error) {
     if (error instanceof Error) {
+      console.error('❌ VALIDATION FAILED:', error.message);
       throw error;
     }
+    console.error('❌ VALIDATION FAILED: Unknown error');
     throw new Error('Invalid supplier data');
   }
 };
@@ -210,133 +237,109 @@ export const mapSupplierData = async (csvData: any[], fieldMapping: { [key: stri
     message: string; 
   }
 }> => {
-  // Get all custom attributes to map them - only once for all data
-  const { data: customAttributes, error } = await supabase
-    .from('custom_attributes')
-    .select('*')
-    .eq('for_type', 'supplier');
+  console.log('🔄 MAPPING: Starting supplier data mapping');
+  console.log('🔄 MAPPING: Field mapping configuration:', fieldMapping);
+  console.log('🔄 MAPPING: First row of CSV data:', csvData[0]);
+  
+  const mappedData: SupplierData[] = [];
+  let currencyWarning = false;
+  
+  for (let i = 0; i < csvData.length; i++) {
+    const row = csvData[i];
     
-  if (error) {
-    console.error('Error fetching custom attributes:', error);
-    throw error;
-  }
-  
-  let hasCurrencyWarning = false;
-  let missingSupplierNameCount = 0;
-  
-  // Pre-process all data in a single loop to avoid multiple iterations
-  const mappedData = csvData.map(row => {
-    // Process cost value and check for currency warnings
-    const { cost, currencyWarning } = processCostValue(row[fieldMapping['Cost']]?.trim());
-    if (currencyWarning) {
-      hasCurrencyWarning = true;
+    // Skip empty rows
+    if (!row || Object.keys(row).length === 0) {
+      console.log(`🔄 MAPPING: Skipping empty row at index ${i}`);
+      continue;
     }
     
-    // Get MPN value which may need to be used in multiple places
-    const mpnValue = row[fieldMapping['MPN']]?.trim() || '';
-    
-    // Get supplier name and ensure it's valid
-    let supplierName = row[fieldMapping['Supplier Name']]?.trim() || '';
-    
-    // If supplier name is empty, try to use a different field or generate a placeholder
-    if (!supplierName) {
-      // Try to use another field as fallback
-      supplierName = row[fieldMapping['Product Name']]?.trim() || 'Unknown Supplier';
-      missingSupplierNameCount++;
-    }
-    
-    // Normalize supplier name to avoid issues with case or whitespace
-    supplierName = supplierName.replace(/\s+/g, ' ').trim();
-    
-    const supplierData: SupplierData = {
-      supplier_name: supplierName,
-      ean: row[fieldMapping['EAN']]?.trim() || '',
-      mpn: mpnValue,
-      product_name: row[fieldMapping['Product Name']]?.trim() || '',
-      cost: cost,
-      moq: row[fieldMapping['MOQ']] ? parseInt(row[fieldMapping['MOQ']]) : undefined,
-      lead_time: row[fieldMapping['Lead Time']]?.trim(),
-      payment_terms: row[fieldMapping['Payment Terms']]?.trim()
-    };
-    
-    // Map custom attributes in a single pass
-    if (customAttributes && customAttributes.length > 0) {
-      const customAttrs: Record<string, any> = {};
-      let hasCustomAttrs = false;
+    try {
+      const supplierName = row[fieldMapping['Supplier Name']] || '';
+      const ean = row[fieldMapping['EAN']] || '';
+      const mpn = row[fieldMapping['MPN']] || '';
+      const productName = row[fieldMapping['Product Name']] || '';
       
-      for (const attr of customAttributes) {
-        let value = null;
+      console.log(`🔄 MAPPING: Processing row ${i+1}:`, {
+        supplierName,
+        ean,
+        mpn,
+        productName
+      });
+      
+      // Process cost with additional logging
+      const costField = fieldMapping['Cost'];
+      const costValue = row[costField];
+      console.log(`🔄 MAPPING: Cost field "${costField}" has value:`, costValue, 'type:', typeof costValue);
+      
+      const { cost, currencyWarning: hasCurrencyWarning } = processCostValue(costValue);
+      
+      if (hasCurrencyWarning) {
+        console.warn(`⚠️ MAPPING: Currency symbol detected in cost value: ${costValue}, parsed as: ${cost}`);
+        currencyWarning = true;
+      }
+      
+      // Map custom attributes with logging
+      const customAttributes: Record<string, any> = {};
+      for (const [systemField, csvField] of Object.entries(fieldMapping)) {
+        // Skip standard fields
+        if (['Supplier Name', 'EAN', 'MPN', 'Product Name', 'Cost', 'MOQ', 'Lead Time', 'Payment Terms'].includes(systemField)) {
+          continue;
+        }
         
-        if (fieldMapping[attr.name] && row[fieldMapping[attr.name]]) {
-          value = row[fieldMapping[attr.name]];
-          
-          // Convert value based on attribute type
-          switch (attr.type) {
-            case 'Number':
-              value = parseFloat(value) || 0;
-              break;
-            case 'Date':
-              // Attempt to parse as date, keep as string
-              break;
-            case 'Yes/No':
-              value = value.toLowerCase() === 'yes' || 
-                     value.toLowerCase() === 'true' || 
-                     value === '1';
-              break;
-            default:
-              // Keep as string for text and selection
-              value = value.trim();
-          }
-          
-          customAttrs[attr.name] = value;
-          hasCustomAttrs = true;
-          
-          // If this is an MPN attribute, ensure it's also set in the main mpn field
-          if (attr.name === 'MPN' && !supplierData.mpn && value) {
-            supplierData.mpn = value.toString();
-          }
-        } else if (attr.required) {
-          // For required attributes, use default value if available
-          customAttrs[attr.name] = attr.default_value;
-          hasCustomAttrs = true;
+        console.log(`🔄 MAPPING: Mapping custom attribute: ${systemField} from CSV column: ${csvField}`);
+        if (row[csvField] !== undefined && row[csvField] !== null) {
+          customAttributes[systemField] = row[csvField];
         }
       }
       
-      if (hasCustomAttrs) {
-        supplierData.custom_attributes = customAttrs;
+      // Build the supplier data object
+      const supplierData: SupplierData = {
+        supplier_name: supplierName,
+        cost: cost,
+        custom_attributes: customAttributes
+      };
+      
+      if (ean) supplierData.ean = ean;
+      if (mpn) supplierData.mpn = mpn;
+      if (productName) supplierData.product_name = productName;
+      
+      // Optional fields
+      if (fieldMapping['MOQ'] && row[fieldMapping['MOQ']]) {
+        supplierData.moq = parseInt(row[fieldMapping['MOQ']]) || 0;
       }
+      
+      if (fieldMapping['Lead Time'] && row[fieldMapping['Lead Time']]) {
+        supplierData.lead_time = row[fieldMapping['Lead Time']];
+      }
+      
+      if (fieldMapping['Payment Terms'] && row[fieldMapping['Payment Terms']]) {
+        supplierData.payment_terms = row[fieldMapping['Payment Terms']];
+      }
+      
+      console.log(`🔄 MAPPING: Mapped supplier data for row ${i+1}:`, supplierData);
+      
+      // Run validation
+      try {
+        await validateSupplierData(supplierData);
+        mappedData.push(supplierData);
+        console.log(`✅ MAPPING: Row ${i+1} passed validation`);
+      } catch (validationError) {
+        console.error(`❌ MAPPING: Row ${i+1} failed validation:`, validationError);
+        // We continue processing other rows even if some fail validation
+      }
+    } catch (error) {
+      console.error(`❌ MAPPING: Error mapping row ${i+1}:`, error);
+      // We continue processing other rows even if some fail mapping
     }
-    
-    return supplierData;
-  });
-  
-  if (missingSupplierNameCount > 0) {
-    console.warn(`Found ${missingSupplierNameCount} rows with missing supplier names that were replaced with fallbacks.`);
   }
   
-  // Check if all data has valid supplier_name
-  const validSupplierNameCount = mappedData.filter(item => item.supplier_name && item.supplier_name.trim() !== '').length;
-  console.log(`Mapped ${mappedData.length} rows, ${validSupplierNameCount} with valid supplier names.`);
-  
-  // Validate all mapped data items in parallel for better performance
-  const validationPromises = mappedData.map(validateSupplierData);
-  const validationResults = await Promise.allSettled(validationPromises);
-  
-  // Filter out failed validations
-  const validatedData: SupplierData[] = mappedData.filter((_, index) => {
-    const result = validationResults[index];
-    if (result.status === 'rejected') {
-      console.warn(`Skipping invalid supplier data: ${result.reason instanceof Error ? result.reason.message : 'Unknown error'}`);
-      return false;
-    }
-    return true;
-  });
+  console.log(`🔄 MAPPING: Completed mapping ${mappedData.length} out of ${csvData.length} rows`);
   
   return {
-    data: validatedData,
+    data: mappedData,
     warnings: {
-      currencyWarning: hasCurrencyWarning,
-      message: hasCurrencyWarning ? 'Non-USD currency symbols detected. Please convert all prices to USD before uploading.' : ''
+      currencyWarning,
+      message: currencyWarning ? 'Currency symbols detected in cost values' : ''
     }
   };
 };
