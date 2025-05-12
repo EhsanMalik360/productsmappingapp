@@ -107,100 +107,6 @@ const AmazonImport: React.FC = () => {
     resetForm();
   };
 
-  // Setup polling for job status updates
-  useEffect(() => {
-    let intervalId: number | null = null;
-    let isComponentMounted = true;
-    let consecutiveErrorCount = 0;
-    let currentPollInterval = 2000; // Start with 2 seconds
-    let timeoutIds: number[] = []; // Keep track of all timeouts
-    
-    const scheduleNextPoll = (delay: number) => {
-      if (!isComponentMounted || !jobId) return null;
-      
-      const newTimeoutId = window.setTimeout(async () => {
-        if (!isComponentMounted || !jobId) return;
-        
-        console.log(`Polling job status for job: ${jobId} (interval: ${delay}ms)`);
-        try {
-          const status = await checkJobStatus(jobId);
-          
-          if (!isComponentMounted) return;
-          
-          console.log(`Job status poll returned: ${status}`);
-          
-          // If job is completed or failed, stop polling
-          if (status === 'completed' || status === 'failed') {
-            console.log(`Auto-stopping polling due to job completion`);
-            consecutiveErrorCount = 0;
-            return; // Don't schedule next poll
-          }
-          
-          // Successful poll - decrease interval if it was increased due to errors
-          if (consecutiveErrorCount > 0) {
-            consecutiveErrorCount = 0;
-            // Gradually return to normal polling interval
-            currentPollInterval = Math.max(2000, currentPollInterval * 0.7);
-            console.log(`Decreased polling interval to ${currentPollInterval}ms`);
-          }
-          
-          // Schedule next poll
-          const nextTimeoutId = scheduleNextPoll(currentPollInterval);
-          if (nextTimeoutId) intervalId = nextTimeoutId;
-        } catch (error) {
-          if (!isComponentMounted) return;
-          
-          console.error('Error during job status polling:', error);
-          
-          // Increase consecutive error count and back off polling
-          consecutiveErrorCount++;
-          
-          // Exponential backoff with max of 20 seconds
-          const backoffMultiplier = Math.min(5, 1 + (consecutiveErrorCount * 0.5));
-          currentPollInterval = Math.min(20000, currentPollInterval * backoffMultiplier);
-          
-          console.log(`Backing off polling after error - new interval: ${currentPollInterval}ms`);
-          
-          // Schedule next poll with backoff
-          const nextTimeoutId = scheduleNextPoll(currentPollInterval);
-          if (nextTimeoutId) intervalId = nextTimeoutId;
-        }
-      }, delay);
-      
-      // Add this timeout to our array for cleanup
-      timeoutIds.push(newTimeoutId);
-      return newTimeoutId;
-    };
-    
-    if (jobId) {
-      console.log(`Setting up polling for job status updates: JobID ${jobId}`);
-      
-      // Start first poll with initial interval
-      intervalId = scheduleNextPoll(currentPollInterval);
-      setPollInterval(intervalId as unknown as number);
-    }
-    
-    // Clear interval on unmount or when jobId changes
-    return () => {
-      console.log('Cleaning up AmazonImport component polling...');
-      isComponentMounted = false;
-      
-      // Clear all timeouts we've created
-      timeoutIds.forEach(id => {
-        window.clearTimeout(id);
-        console.log(`Cleared timeout ID: ${id}`);
-      });
-      
-      if (intervalId) {
-        console.log(`Cleaning up job status polling timeout: ${intervalId}`);
-        clearTimeout(intervalId);
-        setPollInterval(null);
-      }
-      
-      console.log('All AmazonImport timeouts cleared');
-    };
-  }, [jobId]);
-
   // Check job status from the server
   const checkJobStatus = async (id: string): Promise<string> => {
     try {
@@ -241,7 +147,11 @@ const AmazonImport: React.FC = () => {
             
             if (retries > 0) {
               // Wait before retry with longer backoff
-              await new Promise(resolve => setTimeout(resolve, (4 - retries) * 3000));
+              const backoffDelay = (4 - retries) * 3000;
+              console.log(`Waiting ${backoffDelay}ms before retry...`);
+              // Update loading message to inform user
+              setLoadingMessage(`Server busy, retrying in ${Math.round(backoffDelay/1000)}s... (Import continues in background)`);
+              await new Promise(resolve => setTimeout(resolve, backoffDelay));
             }
           }
         } catch (fetchError) {
@@ -253,17 +163,22 @@ const AmazonImport: React.FC = () => {
             console.log(`Fetch error during status check: ${String(fetchError)}`);
           }
           
-          // Special handling for abort errors (timeouts)
+          // Special handling for abort errors (timeouts) and network errors
           const isAbortError = fetchError instanceof Error && 
                               (fetchError.name === 'AbortError' || 
                                fetchError.message.includes('abort') ||
                                fetchError.message.includes('time'));
           
+          const isNetworkError = fetchError instanceof Error &&
+                               (fetchError.message.includes('network') ||
+                                fetchError.message.includes('connection') ||
+                                fetchError.message.includes('offline'));
+          
           retries--;
           
           if (retries > 0) {
             // Much longer wait for timeout errors
-            const waitTime = isAbortError ? 8000 : (4 - retries) * 3000;
+            const waitTime = isAbortError || isNetworkError ? 8000 : (4 - retries) * 3000;
             console.log(`Waiting ${waitTime}ms before retry ${3-retries}/3`);
             
             // Update loading message to keep user informed
@@ -274,6 +189,8 @@ const AmazonImport: React.FC = () => {
             // On final retry failure, just continue
             console.log('Status check failed but continuing to assume processing is happening');
             setLoadingMessage('Job is processing in the background. Status updates may be delayed...');
+            
+            // Continue assuming processing is happening
             return 'processing';
           }
         }
@@ -282,7 +199,15 @@ const AmazonImport: React.FC = () => {
       // If all retries failed but we didn't throw an error in the catch block
       if (!response || !response.ok) {
         console.log('Status check failed after all retries, but continuing polling');
-        setLoadingMessage('Import is progressing in the background. Updates delayed due to server load...');
+        
+        // For 502 Bad Gateway specifically - common with render.com free tier
+        if (response && response.status === 502) {
+          setLoadingMessage('Import is progressing in the background. Server is busy (502 Bad Gateway). Updates will resume when server responds...');
+        } else {
+          setLoadingMessage('Import is progressing in the background. Updates delayed due to server load...');
+        }
+        
+        // Continue assuming processing is happening
         return 'processing';
       }
       
@@ -299,7 +224,19 @@ const AmazonImport: React.FC = () => {
       // Update UI with job progress - ensure progress never decreases
       const newProgress = data.progress || 0;
       setLoadingProgress(prev => Math.max(prev, newProgress));
-      setLoadingMessage(data.message || 'Processing file...');
+      
+      // For large imports that are slow, provide more detailed messaging
+      if (data.status === 'processing') {
+        if (newProgress < 20) {
+          setLoadingMessage(`Processing files... (${newProgress}%). This may take several minutes for large files.`);
+        } else if (newProgress < 60) {
+          setLoadingMessage(`Processing data... (${newProgress}%). Please wait.`);
+        } else {
+          setLoadingMessage(data.message || `Processing file... (${newProgress}%)`);
+        }
+      } else {
+        setLoadingMessage(data.message || 'Processing file...');
+      }
       
       console.log(`Job status update: ${data.status}, progress: ${newProgress}%, message: ${data.message}`);
       
@@ -387,7 +324,127 @@ const AmazonImport: React.FC = () => {
       return 'processing';
     }
   };
-  
+
+  // Setup polling for job status updates
+  useEffect(() => {
+    let intervalId: number | null = null;
+    let isComponentMounted = true;
+    let consecutiveErrorCount = 0;
+    let currentPollInterval = 2000; // Start with 2 seconds
+    let timeoutIds: number[] = []; // Keep track of all timeouts
+    
+    const clearAllTimeouts = () => {
+      // Clear all pending timeouts to avoid memory leaks
+      timeoutIds.forEach(id => window.clearTimeout(id));
+      timeoutIds = [];
+    };
+    
+    const scheduleNextPoll = (delay: number) => {
+      if (!isComponentMounted || !jobId) return null;
+      
+      const newTimeoutId = window.setTimeout(async () => {
+        if (!isComponentMounted || !jobId) return;
+        
+        console.log(`Polling job status for job: ${jobId} (interval: ${delay}ms)`);
+        try {
+          const status = await checkJobStatus(jobId);
+          
+          if (!isComponentMounted) return;
+          
+          console.log(`Job status poll returned: ${status}`);
+          
+          // If job is completed or failed, stop polling
+          if (status === 'completed' || status === 'failed') {
+            console.log(`Auto-stopping polling due to job completion`);
+            consecutiveErrorCount = 0;
+            return; // Don't schedule next poll
+          }
+          
+          // Successful poll - decrease interval if it was increased due to errors
+          if (consecutiveErrorCount > 0) {
+            consecutiveErrorCount = 0;
+            // Gradually return to normal polling interval
+            currentPollInterval = Math.max(2000, currentPollInterval * 0.7);
+            console.log(`Decreased polling interval to ${currentPollInterval}ms`);
+          }
+          
+          // Schedule next poll
+          const nextTimeoutId = scheduleNextPoll(currentPollInterval);
+          if (nextTimeoutId) {
+            timeoutIds.push(nextTimeoutId);
+            intervalId = nextTimeoutId;
+          }
+        } catch (error) {
+          console.error('Error during job status polling:', error);
+          
+          if (!isComponentMounted) return;
+          
+          // Increment error count and increase polling interval to avoid hammering the server
+          consecutiveErrorCount++;
+          
+          // Exponentially increase polling interval based on consecutive errors
+          // Don't let it grow beyond 30 seconds
+          currentPollInterval = Math.min(30000, currentPollInterval * 1.5);
+          console.log(`Increased polling interval to ${currentPollInterval}ms after error`);
+          
+          // For 502 errors specifically, show a user-friendly message
+          if (error instanceof Error && error.message.includes('502')) {
+            setLoadingMessage(`Server is experiencing high load (502 error). Your import continues in the background.`);
+          } else if (consecutiveErrorCount > 3) {
+            setLoadingMessage(`Network issues detected. Import continues in background. Retrying in ${Math.round(currentPollInterval/1000)}s...`);
+          }
+          
+          // Continue polling despite errors, with increased interval
+          const nextTimeoutId = scheduleNextPoll(currentPollInterval);
+          if (nextTimeoutId) {
+            timeoutIds.push(nextTimeoutId);
+            intervalId = nextTimeoutId;
+          }
+        }
+      }, delay);
+      
+      timeoutIds.push(newTimeoutId);
+      return newTimeoutId;
+    };
+    
+    // Start polling immediately when jobId is set
+    if (jobId) {
+      console.log(`Setting up polling for job status updates: JobID ${jobId}`);
+      
+      // Initial status check with short delay
+      const initialTimeoutId = window.setTimeout(async () => {
+        try {
+          await checkJobStatus(jobId);
+          
+          // Start regular polling after initial check
+          const timeoutId = scheduleNextPoll(currentPollInterval);
+          if (timeoutId) intervalId = timeoutId;
+          
+        } catch (error) {
+          console.error('Error during initial job status check:', error);
+          
+          // Even if initial check fails, start polling
+          const timeoutId = scheduleNextPoll(currentPollInterval);
+          if (timeoutId) intervalId = timeoutId;
+        }
+      }, 1000);
+      
+      timeoutIds.push(initialTimeoutId);
+    }
+    
+    // Cleanup function to run on unmount or when jobId changes
+    return () => {
+      console.log('Cleaning up job status polling');
+      isComponentMounted = false;
+      clearAllTimeouts();
+      
+      if (intervalId) {
+        window.clearTimeout(intervalId);
+        console.log(`Cleared timeout ${intervalId}`);
+      }
+    };
+  }, [jobId, setLoadingMessage, setLoadingProgress, setIsLoading, setShowSuccess, setError, addImportRecord, setImportResults, setJobId, fileName]);
+
   // Server-side file processing
   const handleServerFileUpload = async (file: File) => {
     try {
