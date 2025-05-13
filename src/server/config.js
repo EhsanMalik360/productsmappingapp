@@ -42,7 +42,8 @@ const config = {
   tempFileCleanupInterval: parseInt(process.env.TEMP_FILE_CLEANUP_INTERVAL || '3600000'), // Clean temp files every hour
   
   // Large file processing settings
-  defaultChunkSize: parseInt(process.env.DEFAULT_CHUNK_SIZE || '10000'), // Increased from 5000 to 10000 rows
+  defaultChunkSize: parseInt(process.env.DEFAULT_CHUNK_SIZE || '5000'), // Adjusted default for general purpose
+  productImportChunkSize: parseInt(process.env.PRODUCT_IMPORT_CHUNK_SIZE || '1000'), // Specific for product imports
   defaultBatchSize: parseInt(process.env.DEFAULT_BATCH_SIZE || '500'), // Increased from 250 to 500 rows
   maxRows: parseInt(process.env.MAX_ROWS || '1000000'), // Maximum number of rows to process in a single file
   

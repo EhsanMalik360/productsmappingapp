@@ -871,6 +871,21 @@ async function processProductImportJob(jobId) {
     // Get field mapping from job or auto-map if not provided
     let fieldMapping = job.field_mapping;
     
+    // Fetch custom attributes for products ONCE
+    console.log('Fetching custom attributes for products...');
+    const { data: customAttributes, error: customAttrError } = await supabase
+      .from('custom_attributes')
+      .select('*')
+      .eq('for_type', 'product');
+
+    if (customAttrError) {
+      console.error('Error fetching custom attributes for products:', customAttrError);
+      // Optionally, update job status to failed here or proceed without custom attributes
+      // For now, we'll throw to indicate a critical setup failure
+      throw new Error(`Failed to fetch custom attributes: ${customAttrError.message}`);
+    }
+    console.log(`Fetched ${customAttributes ? customAttributes.length : 0} custom attributes for products.`);
+
     // Prepare for streaming through the CSV file
     const results = {
       totalRecords: 0,
@@ -899,7 +914,8 @@ async function processProductImportJob(jobId) {
         // If no field mapping provided, auto-map based on headers
         if (!fieldMapping) {
           console.log('No field mapping provided, auto-mapping columns...');
-          fieldMapping = await autoMapProductColumns(headers);
+          // Pass customAttributes to autoMapProductColumns if it needs them for mapping decisions
+          fieldMapping = await autoMapProductColumns(headers, customAttributes); 
           console.log('Auto-mapped fields:', fieldMapping);
           
           // Update job with auto-mapped field mapping
@@ -916,7 +932,8 @@ async function processProductImportJob(jobId) {
         
         // Now process the file with streaming in chunks
         console.log('Beginning file processing in chunks...');
-        processProductFileInChunks(job, fieldMapping, results);
+        // Pass customAttributes to processProductFileInChunks
+        processProductFileInChunks(job, fieldMapping, results, customAttributes);
       })
       .on('error', (error) => {
         console.error('Error reading CSV headers:', error);
@@ -1493,31 +1510,44 @@ async function autoMapSupplierColumns(csvHeaders) {
 }
 
 // Auto-map product columns function
-async function autoMapProductColumns(csvHeaders) {
+async function autoMapProductColumns(csvHeaders, preFetchedCustomAttributes = null) {
   const fieldMappings = {
     'Title': ['title', 'product_name', 'name', 'product_title'],
-    'EAN': ['ean', 'barcode', 'upc', 'product_id', 'sku'],
-    'Brand': ['brand', 'manufacturer', 'vendor'],
-    'Sale Price': ['sale_price', 'price', 'selling_price', 'retail_price'],
-    'Units Sold': ['units_sold', 'quantity_sold', 'sales_quantity', 'sold'],
-    'Amazon Fee': ['amazon_fee', 'fee', 'fba_fee', 'marketplace_fee'],
-    'Buy Box Price': ['buy_box_price', 'buybox_price', 'competitive_price', 'market_price'],
-    'Category': ['category', 'product_category', 'department', 'product_type'],
-    'Rating': ['rating', 'product_rating', 'avg_rating', 'average_rating'],
-    'Review Count': ['review_count', 'reviews', 'number_of_reviews', 'total_reviews']
+    'EAN': ['ean', 'barcode', 'upc', 'gtin'],
+    'Brand': ['brand', 'manufacturer', 'make'],
+    'Sale Price': ['sale_price', 'price', 'listing_price', 'amazon_price'],
+    'Amazon Fee': ['amazon_fee', 'fba_fee', 'commission'],
+    'Buy Box Price': ['buy_box_price', 'buybox', 'current_buy_box_price'],
+    'Units Sold': ['units_sold', 'sold_units', 'quantity_sold'],
+    'Category': ['category', 'product_category', 'item_category'],
+    'Rating': ['rating', 'average_rating', 'product_rating'],
+    'Review Count': ['review_count', 'reviews', 'number_of_reviews'],
+    'MPN': ['mpn', 'manufacturer_part_number', 'part_number']
   };
 
-  // Get custom attributes from database
-  const { data: customAttributes, error } = await supabase
-    .from('custom_attributes')
-    .select('*')
-    .eq('for_type', 'product');
+  // Get custom attributes from database if not provided
+  let customAttributesToMap = preFetchedCustomAttributes;
+  if (!customAttributesToMap) {
+    console.log('Fetching custom attributes for product column auto-mapping...');
+    const { data, error } = await supabase
+      .from('custom_attributes')
+      .select('*')
+      .eq('for_type', 'product');
+    
+    if (error) {
+      console.error('Error fetching custom attributes for auto-mapping:', error);
+    } else {
+      customAttributesToMap = data;
+    }
+  }
   
-  if (!error && customAttributes) {
-    // Add custom attributes to field mappings
-    customAttributes.forEach(attr => {
+  if (customAttributesToMap && customAttributesToMap.length > 0) {
+    customAttributesToMap.forEach(attr => {
       const normalizedName = normalizeColumnName(attr.name);
-      fieldMappings[attr.name] = [normalizedName, ...normalizedName.split('_')];
+      // Ensure we don't overwrite system fields, though custom names should be unique
+      if (!fieldMappings[attr.name]) {
+        fieldMappings[attr.name] = [normalizedName, ...normalizedName.split('_')];
+      }
     });
   }
 
@@ -1561,21 +1591,22 @@ async function autoMapProductColumns(csvHeaders) {
 }
 
 // Map product data function
-async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 'Brand', 'Sale Price']) {
+async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 'Brand', 'Sale Price'], customAttributes = []) {
   try {
     console.log(`Mapping ${csvData.length} product rows with field mapping:`, fieldMapping);
     console.log('Using required fields:', requiredFields);
+    console.log(`Using ${customAttributes ? customAttributes.length : 0} pre-fetched custom attributes for mapping.`);
     
-    // Get all custom attributes to map them
-    const { data: customAttributes, error } = await supabase
-      .from('custom_attributes')
-      .select('*')
-      .eq('for_type', 'product');
+    // No longer fetching customAttributes here, they are passed in
+    // const { data: customAttributes, error } = await supabase
+    //   .from('custom_attributes')
+    //   .select('*')
+    //   .eq('for_type', 'product');
       
-    if (error) {
-      console.error('Error fetching custom attributes:', error);
-      throw error;
-    }
+    // if (error) {
+    //   console.error('Error fetching custom attributes:', error);
+    //   throw error;
+    // }
     
     const mappedData = [];
     
@@ -2680,12 +2711,13 @@ async function importProductData(mappedData, progressCallback, batchSize) {
 }
 
 // Process the product file in manageable chunks using streaming with better progress reporting
-async function processProductFileInChunks(job, fieldMapping, results) {
-  const batchSize = job.batch_size || 100;
-  const chunkSize = 5000; // Process 5000 rows at a time in memory
-  const totalRows = job.total_rows || 1000; // Use estimated total rows or default
+async function processProductFileInChunks(job, fieldMapping, results, customAttributes) {
+  const batchSize = job.batch_size || config.defaultBatchSize; // Use config for DB batch size
+  const chunkSize = config.productImportChunkSize || 1000; // Use new config for in-memory chunk size
+  // Estimate total rows for progress calculation. Fallback if not set on job.
+  const totalRows = job.total_rows || (await estimateRowCount(job.file_path)) || 1000;
   
-  console.log(`Processing product file in chunks. Batch size: ${batchSize}, Chunk size: ${chunkSize}, Estimated total rows: ${totalRows}`);
+  console.log(`Processing product file in chunks. DB Batch size: ${batchSize}, In-memory Chunk size: ${chunkSize}, Estimated total rows: ${totalRows}`);
   console.log(`File path: ${job.file_path}`);
   
   let currentChunk = [];
@@ -2710,7 +2742,8 @@ async function processProductFileInChunks(job, fieldMapping, results) {
           console.log(`Processing product chunk of ${currentChunk.length} rows...`);
           
           try {
-            await processProductChunk(currentChunk, job, fieldMapping, results);
+            // Pass customAttributes to processProductChunk
+            await processProductChunk(currentChunk, job, fieldMapping, results, customAttributes);
             totalProcessed += currentChunk.length;
             currentChunk = [];
             
@@ -2738,7 +2771,8 @@ async function processProductFileInChunks(job, fieldMapping, results) {
         // Process any remaining rows
         if (currentChunk.length > 0) {
           console.log(`Processing final product chunk of ${currentChunk.length} rows...`);
-          await processProductChunk(currentChunk, job, fieldMapping, results);
+          // Pass customAttributes to processProductChunk
+          await processProductChunk(currentChunk, job, fieldMapping, results, customAttributes);
           totalProcessed += currentChunk.length;
         }
         
@@ -2779,7 +2813,7 @@ async function processProductFileInChunks(job, fieldMapping, results) {
 }
 
 // Process a chunk of product CSV data
-async function processProductChunk(chunk, job, fieldMapping, results) {
+async function processProductChunk(chunk, job, fieldMapping, results, customAttributes) {
   try {
     console.log(`Processing ${chunk.length} product rows with field mapping:`, fieldMapping);
     
@@ -2788,7 +2822,8 @@ async function processProductChunk(chunk, job, fieldMapping, results) {
     console.log('Required product fields from config:', requiredFields);
     
     // Map the data according to field mapping
-    const mappedData = await mapProductData(chunk, fieldMapping, requiredFields);
+    // Pass customAttributes to mapProductData
+    const mappedData = await mapProductData(chunk, fieldMapping, requiredFields, customAttributes);
     console.log(`Mapped ${mappedData.length} products successfully`);
     
     // Process the mapped data in smaller batches for database operations
@@ -3110,3 +3145,22 @@ router.get('/api/logs/files', (req, res) => {
     return res.status(500).json({ error: 'Failed to list log files' });
   }
 });
+
+// Helper function to estimate row count if not provided in job details
+async function estimateRowCount(filePath) {
+  try {
+    const fileBuffer = await fs.promises.readFile(filePath, 'utf8');
+    // Subtract 1 for the header row if present, otherwise, it's a rough estimate.
+    // This assumes newline characters delimit rows.
+    const lineCount = (fileBuffer.match(/\n/g) || []).length + 1;
+    // A simple heuristic: if it seems to be a headerless single line, count as 1.
+    // If it has a header and no data, it would be 1. If header + 1 data row, 2.
+    // We are interested in data rows, so if lineCount > 0, perhaps subtract 1 for header.
+    // However, job.total_rows should ideally be set by reading headers and then full file line count.
+    // This is a fallback.
+    return lineCount > 0 ? lineCount -1 : 0; // Simple assumption: one line is header.
+  } catch (err) {
+    console.warn(`Could not estimate row count for ${filePath}:`, err.message);
+    return null; // Return null if estimation fails
+  }
+}
