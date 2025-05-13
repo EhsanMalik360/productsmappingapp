@@ -1,3 +1,10 @@
+// Import memory optimization module first
+try {
+  require('./optimize');
+} catch (e) {
+  console.warn('Memory optimization module not loaded:', e.message);
+}
+
 // Main server file for handling large file uploads
 const express = require('express');
 const cors = require('cors');

@@ -32,6 +32,12 @@ console.log('- SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Found' : '❌ Mis
 console.log('- SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Found' : '❌ Missing');
 console.log('- SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? '✅ Found' : '❌ Missing');
 
+// Check if extreme optimization mode is enabled
+const extremeMode = process.env.EXTREME_OPTIMIZATION === 'true';
+if (extremeMode) {
+  console.log('🚨 EXTREME OPTIMIZATION MODE ENABLED 🚨');
+}
+
 // Load environment variables with fallbacks
 const config = {
   // Server settings
@@ -42,31 +48,49 @@ const config = {
   tempFileCleanupInterval: parseInt(process.env.TEMP_FILE_CLEANUP_INTERVAL || '3600000'), // Clean temp files every hour
   
   // Large file processing settings
-  defaultChunkSize: parseInt(process.env.DEFAULT_CHUNK_SIZE || '10000'), // Increased from 5000 to 10000 rows
-  defaultBatchSize: parseInt(process.env.DEFAULT_BATCH_SIZE || '500'), // Increased from 250 to 500 rows
-  maxRows: parseInt(process.env.MAX_ROWS || '1000000'), // Maximum number of rows to process in a single file
+  defaultChunkSize: parseInt(process.env.DEFAULT_CHUNK_SIZE || (extremeMode ? '50' : '100')),
+  defaultBatchSize: parseInt(process.env.DEFAULT_BATCH_SIZE || (extremeMode ? '10' : '20')),
+  maxRows: parseInt(process.env.MAX_ROWS || (extremeMode ? '50000' : '250000')),
   
   // Memory management settings
-  forceGCInterval: parseInt(process.env.FORCE_GC_INTERVAL || '5000'), // Run garbage collection more frequently (5s) during large uploads
-  highMemoryThreshold: parseInt(process.env.HIGH_MEMORY_THRESHOLD || '1536'), // Increased from 1024MB to 1536MB
+  forceGCInterval: parseInt(process.env.FORCE_GC_INTERVAL || (extremeMode ? '1000' : '5000')),
+  highMemoryThreshold: parseInt(process.env.HIGH_MEMORY_THRESHOLD || (extremeMode ? '512' : '1024')),
+  concurrentProcessing: parseInt(process.env.CONCURRENT_PROCESSING || (extremeMode ? '1' : '2')),
+  lowMemoryMode: process.env.LOW_MEMORY_MODE === 'true' || extremeMode,
   
   // Fetch/network settings
-  fetchTimeout: parseInt(process.env.FETCH_TIMEOUT || '120000'), // Increased from 60s to 120s for large operations
-  retryCount: parseInt(process.env.RETRY_COUNT || '5'), // Number of retries for fetch operations
-  retryDelay: parseInt(process.env.RETRY_DELAY || '3000'), // Increased from 2s to 3s
+  fetchTimeout: parseInt(process.env.FETCH_TIMEOUT || '120000'),
+  retryCount: parseInt(process.env.RETRY_COUNT || '3'),
+  retryDelay: parseInt(process.env.RETRY_DELAY || '3000'),
   
   // Database settings
-  supabaseUrl: process.env.SUPABASE_URL || 'https://your_project_url.supabase.co',
-  supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY || 'your_service_key_here',
+  supabaseUrl: process.env.SUPABASE_URL || 'https://wvgiaeuvyfsdhoxrjmib.supabase.co',
+  supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY,
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
   databaseTimeout: parseInt(process.env.DATABASE_TIMEOUT || '60000'), // Increased from 30s to 60s
   databasePoolSize: parseInt(process.env.DATABASE_POOL_SIZE || '30'), // Increased from 20 to 30 connections
   
+  // CSV streaming settings
+  csvHighWaterMark: parseInt(process.env.CSV_HIGH_WATER_MARK || (extremeMode ? '16' : '64')) * 1024, // Buffer size in bytes
+  csvObjectHighWaterMark: parseInt(process.env.CSV_OBJECT_HIGH_WATER_MARK || (extremeMode ? '50' : '100')), // Objects in memory
+  
   // Required fields for various data types - these can be overridden via the API
   requiredFields: {
-    product: ['Title', 'Brand', 'Sale Price'], // EAN is NOT required, will be generated if missing
-    supplier: ['Supplier Name', 'Cost']
+    product: ['Title', 'Brand', 'Sale Price'],
+    supplier: ['Supplier Name', 'EAN', 'Cost']
   }
 };
+
+console.log('Config loaded:', {
+  supabaseUrl: config.supabaseUrl,
+  defaultChunkSize: config.defaultChunkSize,
+  defaultBatchSize: config.defaultBatchSize,
+  forceGCInterval: config.forceGCInterval,
+  highMemoryThreshold: config.highMemoryThreshold,
+  maxRows: config.maxRows,
+  lowMemoryMode: config.lowMemoryMode,
+  csvHighWaterMark: config.csvHighWaterMark,
+  csvObjectHighWaterMark: config.csvObjectHighWaterMark
+});
 
 module.exports = config; 

@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "cd src/server && node index.js",
+    "server:optimized": "cd src/server && node --expose-gc --optimize-for-size --max-old-space-size=2048 --gc-interval=100 index.js",
     "start": "node --max-old-space-size=4096 src/server/index.js",
     "postinstall": "npm run build",
     "dev:all": "concurrently \"npm run server\" \"npm run dev\""
