@@ -255,7 +255,7 @@ try {
   console.error('❌ Network connectivity test error:', error);
 }
 
-// Setup multer for file uploads
+// Set up multer for file uploads with optimized settings
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const uploadDir = path.join(__dirname, '../uploads');
@@ -274,37 +274,14 @@ const storage = multer.diskStorage({
   }
 });
 
-// Add a pre-handler to log ALL incoming requests
-const logAllRequests = (req, res, next) => {
-  console.log(`📥 [${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-  console.log(`Headers: ${JSON.stringify(req.headers['content-type'])}`);
-  console.log(`Query params: ${JSON.stringify(req.query)}`);
-  
-  // Save original send method to intercept responses
-  const originalSend = res.send;
-  res.send = function(body) {
-    console.log(`📤 Response status: ${res.statusCode}`);
-    try {
-      if (typeof body === 'string' && body.length < 1000) {
-        console.log(`Response body: ${body}`);
-      } else {
-        console.log(`Response body: [${typeof body}] (too large to log)`);
-      }
-    } catch (e) {
-      console.error('Could not log response body', e);
-    }
-    
-    // Call original send method
-    return originalSend.apply(this, arguments);
-  };
-  
-  next();
-};
-
+// Configure upload middleware with optimized settings
 const upload = multer({ 
   storage,
   limits: {
     fileSize: 2 * 1024 * 1024 * 1024, // 2GB max file size
+    files: 1, // Only allow one file to be uploaded at a time
+    // Optimized multipart form-data parsing
+    fieldSize: 2 * 1024 * 1024 // 2MB field size limit
   },
   fileFilter: (req, file, cb) => {
     console.log('FILE UPLOAD REQUEST RECEIVED:', {
@@ -391,54 +368,32 @@ router.post('/api/upload/supplier', upload.single('file'), async (req, res) => {
   }
 });
 
-// Submit product import job endpoint
+// Submit product import job endpoint with optimized file handling
 router.post('/api/upload/product', upload.single('file'), async (req, res) => {
   console.log('\n⭐⭐⭐ PRODUCT UPLOAD ENDPOINT CALLED ⭐⭐⭐');
   console.log('Request received at:', new Date().toISOString());
   
   try {
-    console.log('=== PRODUCT UPLOAD RECEIVED ===');
-    console.log('Request headers:', req.headers);
-    console.log('Content-Type:', req.headers['content-type']);
-    console.log('Content-Length:', req.headers['content-length']);
-    console.log('Request body keys:', Object.keys(req.body));
-    
-    // Check if this is a multipart request
-    if (!req.headers['content-type'] || !req.headers['content-type'].includes('multipart/form-data')) {
-      console.error('ERROR: Request is not multipart/form-data - detected:', req.headers['content-type']);
-      return res.status(400).json({ error: 'Request must be multipart/form-data' });
-    }
+    // Log minimal request info to reduce console output
+    console.log('Request headers content-type:', req.headers['content-type']);
+    console.log('Request content length:', req.headers['content-length']);
     
     if (!req.file) {
-      console.error('ERROR: No file in request. req.file is undefined or null');
-      console.log('Request body:', req.body);
-      console.log('Files in request:', req.files);
+      console.error('ERROR: No file in request');
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
+    // Log minimal file details to reduce memory overhead
     console.log('File details:', {
-      filename: req.file.originalname,
+      name: req.file.originalname,
       size: req.file.size,
-      path: req.file.path,
-      mimetype: req.file.mimetype
-    });
-    console.log('Form data:', {
-      batchSize: req.body.batchSize,
-      hasFieldMapping: !!req.body.fieldMapping,
-      useBulkImport: req.body.useBulkImport === 'true'
+      path: req.file.path
     });
     
-    // Create import job in database
-    console.log('Creating import job in database...');
+    // Create import job in database with streaming import flag always set
+    console.log('Creating import job...');
+    
     try {
-      // Test Supabase connection before insert
-      const connectionTest = await supabase.from('import_jobs').select('count').limit(1);
-      if (connectionTest.error) {
-        console.error('Supabase connection error during insert:', connectionTest.error);
-        throw new Error(`Supabase connection failed: ${connectionTest.error.message}`);
-      }
-      
-      // Proceed with insert if connection is good
       const { data: job, error: jobError } = await supabase
         .from('import_jobs')
         .insert({
@@ -449,10 +404,10 @@ router.post('/api/upload/product', upload.single('file'), async (req, res) => {
           type: 'product',
           user_id: req.user?.id || null,
           field_mapping: req.body.fieldMapping ? JSON.parse(req.body.fieldMapping) : null,
-          batch_size: req.body.batchSize ? parseInt(req.body.batchSize) : 100,
-          fast_import: req.body.useBulkImport === 'true' // Add fast_import flag
+          batch_size: req.body.batchSize ? parseInt(req.body.batchSize) : 500, // Higher default batch size
+          fast_import: true // Always use optimized import
         })
-        .select()
+        .select('id')
         .single();
 
       if (jobError) {
@@ -461,35 +416,25 @@ router.post('/api/upload/product', upload.single('file'), async (req, res) => {
       }
 
       console.log('Job created successfully:', {
-        jobId: job.id,
-        status: job.status,
-        useBulkImport: job.fast_import
+        jobId: job.id
       });
 
-      // Start processing in background
-      console.log('Starting background processing...');
+      // Start processing in background immediately
       processProductImportJob(job.id);
       console.log('Background processing initiated');
 
       // Return job ID to client for tracking
-      console.log('Sending success response to client');
       return res.status(200).json({ 
         success: true, 
-        message: 'File uploaded and processing started',
+        message: 'File uploaded and processing started with optimized streaming',
         jobId: job.id
       });
     } catch (dbError) {
       console.error('Database operation error:', dbError);
-      
-      // Save the file path so we can still process it
-      const tempFilePath = req.file.path;
-      
-      // Return more detailed error response
       return res.status(500).json({ 
         error: 'Failed to create import job in database', 
         details: {
-          message: dbError.message,
-          suggestion: 'Check your Supabase connection and credentials'
+          message: dbError.message
         } 
       });
     }
@@ -921,7 +866,8 @@ async function processProductImportJob(jobId) {
     console.log('Job details retrieved:', {
       fileSize: job.file_size,
       batchSize: job.batch_size,
-      hasFieldMapping: !!job.field_mapping
+      hasFieldMapping: !!job.field_mapping,
+      useBulkImport: job.fast_import
     });
 
     // Get field mapping from job or auto-map if not provided
@@ -956,24 +902,16 @@ async function processProductImportJob(jobId) {
             .from('import_jobs')
             .update({
               field_mapping: fieldMapping,
-              status_message: 'Auto-mapped product columns, starting bulk import'
+              status_message: 'Auto-mapped product columns, starting import'
             })
             .eq('id', jobId);
         } else {
           console.log('Using provided field mapping:', fieldMapping);
         }
 
-        // Check if the fast_import flag is set in the job
-        if (job.fast_import === true) {
-          console.log('🚀 Using optimized bulk import method for faster processing');
-          // Use the new bulk import method
-          await processProductBulkImport(job, fieldMapping);
-        } else {
-          console.log('Using standard chunk-based import method');
-          // Use the existing chunk-based approach
-          const results = { totalRecords: 0, successfulImports: 0, failedImports: 0 };
-          processProductFileInChunks(job, fieldMapping, results);
-        }
+        // Always use the high-performance streaming import for best results
+        console.log('🚀 Using optimized streaming import method');
+        await processProductStreamingImport(job, fieldMapping);
       })
       .on('error', (error) => {
         console.error('Error reading CSV headers:', error);
@@ -1259,7 +1197,7 @@ async function processFileInChunks(job, fieldMapping, results) {
     });
   } catch (error) {
     console.error('Error in processFileInChunks:', error);
-    await updateJobStatus(job.id, 'failed', `Error processing file: ${error.message}`);
+    await updateJobStatus(job.id, 'failed', `Error: ${error.message}`);
     
     // Clear the garbage collection interval if set
     if (gcInterval) {
@@ -3365,5 +3303,293 @@ async function processProductBulkImport(job, fieldMapping) {
   } catch (error) {
     console.error('Error in processProductBulkImport:', error);
     await updateJobStatus(job.id, 'failed', `Error: ${error.message}`);
+  }
+}
+
+/**
+ * Highly optimized streaming product import function with minimal memory usage
+ * Uses true streaming with batching for maximum performance
+ */
+async function processProductStreamingImport(job, fieldMapping) {
+  console.log(`Starting high-performance streaming import for job: ${job.id}`);
+  
+  try {
+    // Update job status to processing
+    await updateJobProgress(job.id, 5, 'Starting optimized streaming import');
+    
+    // Set up memory tracking
+    const memoryLimit = Math.min(process.env.MEMORY_LIMIT_MB || 2500, 2500); // 2.5GB max
+    console.log(`Memory limit set to ${memoryLimit}MB`);
+    
+    // Create stats counter
+    let totalRows = 0;
+    let totalProcessed = 0;
+    let lastProgressUpdate = Date.now();
+    
+    // Set up custom attributes once (avoid duplicate DB calls)
+    console.log('Fetching product custom attributes (one-time)');
+    const { data: customAttributes, error: customAttrError } = await supabase
+      .from('custom_attributes')
+      .select('*')
+      .eq('for_type', 'product');
+    
+    if (customAttrError) {
+      console.error('Error fetching custom attributes:', customAttrError);
+      throw new Error(`Failed to fetch custom attributes: ${customAttrError.message}`);
+    }
+    
+    console.log(`Found ${customAttributes?.length || 0} custom attributes`);
+    
+    // Get required fields
+    const requiredFields = config.requiredFields?.product || ['Title', 'Brand', 'Sale Price'];
+    
+    // Setting up optimal batch parameters
+    const batchSize = 500; // Larger batches for fewer DB operations
+    const batchTimeout = 2000; // Maximum time to accumulate a batch (ms)
+    
+    // Use promise for completion tracking
+    const processingComplete = new Promise((resolve, reject) => {
+      // Create a buffer for batching rows
+      let currentBatch = [];
+      let batchTimer = null;
+      let rowsProcessed = 0;
+      
+      // Function to flush the current batch to the database
+      const flushBatch = async (final = false) => {
+        if (currentBatch.length === 0) return;
+        
+        // Clear any pending timer
+        if (batchTimer) {
+          clearTimeout(batchTimer);
+          batchTimer = null;
+        }
+        
+        const batchToProcess = [...currentBatch];
+        currentBatch = [];
+        
+        console.log(`Processing batch of ${batchToProcess.length} rows (${final ? 'final batch' : ''})`);
+        
+        try {
+          // Directly map and upsert in one operation to avoid creating intermediate arrays
+          const productsToUpsert = batchToProcess.map(row => {
+            try {
+              // Create the basic product record
+              const productRecord = {
+                title: row[fieldMapping['Title']]?.trim() || '',
+                ean: row[fieldMapping['EAN']]?.trim() || '',
+                brand: row[fieldMapping['Brand']]?.trim() || '',
+                sale_price: parseFloat(row[fieldMapping['Sale Price']]) || 0,
+                units_sold: parseInt(row[fieldMapping['Units Sold']]) || 0,
+                amazon_fee: parseFloat(row[fieldMapping['Amazon Fee']]) || 0,
+                buy_box_price: parseFloat(row[fieldMapping['Buy Box Price']]) || 0,
+                category: row[fieldMapping['Category']]?.trim() || null,
+                rating: parseFloat(row[fieldMapping['Rating']]) || null,
+                review_count: parseInt(row[fieldMapping['Review Count']]) || null,
+                updated_at: new Date().toISOString()
+              };
+              
+              // Quick validation of required fields
+              for (const field of requiredFields) {
+                const propName = field === 'Title' ? 'title' :
+                               field === 'Brand' ? 'brand' : 
+                               field === 'Sale Price' ? 'sale_price' : 
+                               field === 'EAN' ? 'ean' : 
+                               field.toLowerCase().replace(/\s+/g, '_');
+                               
+                if (!productRecord[propName] && productRecord[propName] !== 0) {
+                  return null; // Skip invalid records
+                }
+              }
+              
+              // Add custom attributes if present in fieldMapping
+              if (customAttributes && customAttributes.length > 0) {
+                for (const attr of customAttributes) {
+                  if (fieldMapping[attr.name] && row[fieldMapping[attr.name]]) {
+                    let value = row[fieldMapping[attr.name]];
+                    
+                    // Minimal conversion for known types
+                    if (attr.type === 'Number') {
+                      value = parseFloat(value) || 0;
+                    }
+                    
+                    // Add directly to product record with standard naming convention
+                    productRecord[`custom_${attr.name.toLowerCase().replace(/\s+/g, '_')}`] = value;
+                  }
+                }
+              }
+              
+              return productRecord;
+            } catch (e) {
+              console.error('Error mapping row:', e);
+              return null;
+            }
+          }).filter(Boolean); // Remove nulls (skipped records)
+          
+          // Only proceed if we have valid products to insert
+          if (productsToUpsert.length > 0) {
+            // Single database call with all products 
+            const { count, error: upsertError } = await supabase
+              .from('products')
+              .upsert(productsToUpsert, {
+                onConflict: 'ean',
+                ignoreDuplicates: false,
+                count: 'exact' // Just get count for efficiency
+              });
+            
+            if (upsertError) {
+              console.error('Error upserting products batch:', upsertError);
+              
+              // For individual row errors, we'll still count them as processed but failed
+              totalProcessed += batchToProcess.length;
+            } else {
+              // Count successful inserts
+              const successCount = count || productsToUpsert.length;
+              rowsProcessed += successCount;
+              totalProcessed += batchToProcess.length;
+              
+              console.log(`Successfully upserted ${successCount} products`);
+            }
+          } else {
+            console.log('No valid products in this batch, skipping DB operation');
+            totalProcessed += batchToProcess.length; // Still count as processed
+          }
+          
+          // Update progress (max every 2 seconds to reduce DB load)
+          const now = Date.now();
+          if (now - lastProgressUpdate > 2000 || final) {
+            // Calculate progress as percentage of total (estimate if totalRows is unknown)
+            const progress = Math.min(95, Math.ceil(5 + (90 * (totalProcessed / Math.max(totalRows, 1000)))));
+            
+            await updateJobProgress(job.id, progress, 
+              `Processing data: ${totalProcessed} rows (${rowsProcessed} products imported)`);
+            
+            lastProgressUpdate = now;
+          }
+          
+          // Force garbage collection if available
+          if (global.gc) {
+            global.gc();
+          }
+        } catch (error) {
+          console.error('Error processing batch:', error);
+          // Still count these as processed so we continue
+          totalProcessed += batchToProcess.length;
+        }
+      };
+      
+      // Create CSV parser with minimal memory footprint
+      const parser = csv({
+        skipLines: 0,
+        maxRows: 0, // No limit
+        strict: false,
+        objectMode: true,
+        highWaterMark: 10 // Very low object buffer
+      });
+      
+      // Process rows as they come in
+      parser.on('data', (row) => {
+        totalRows++;
+        
+        // Add to current batch
+        currentBatch.push(row);
+        
+        // Flush if we hit batch size
+        if (currentBatch.length >= batchSize) {
+          flushBatch();
+        }
+        // Start timer to flush batch after timeout (ensures small files process quickly)
+        else if (!batchTimer) {
+          batchTimer = setTimeout(() => flushBatch(), batchTimeout);
+        }
+        
+        // Check memory pressure - stop parsing temporarily if too high
+        const memUsage = process.memoryUsage().heapUsed / 1024 / 1024;
+        if (memUsage > memoryLimit * 0.8) {
+          // Pause the parser
+          parser.pause();
+          console.log(`Memory pressure detected (${Math.round(memUsage)}MB), pausing parser`);
+          
+          // Force GC
+          if (global.gc) global.gc();
+          
+          // Resume after a short delay and second GC
+          setTimeout(() => {
+            if (global.gc) global.gc();
+            console.log('Resuming parser after memory pressure relief');
+            parser.resume();
+          }, 1000);
+        }
+      });
+      
+      // Handle end of file
+      parser.on('end', async () => {
+        console.log(`CSV parsing complete, processed ${totalRows} rows`);
+        
+        // Process any remaining rows in the final batch
+        await flushBatch(true);
+        
+        // Update job as completed
+        await supabase
+          .from('import_jobs')
+          .update({
+            status: 'completed',
+            status_message: 'Import completed successfully',
+            progress: 100,
+            results: {
+              totalRecords: totalRows,
+              successfulImports: rowsProcessed,
+              failedImports: totalRows - rowsProcessed,
+              importMethod: 'streaming'
+            },
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', job.id);
+        
+        console.log('Job marked as completed');
+        
+        // Clean up temporary file
+        try {
+          fs.unlinkSync(job.file_path);
+          console.log('Temporary file deleted');
+        } catch (err) {
+          console.error('Error deleting file:', err);
+        }
+        
+        resolve();
+      });
+      
+      // Handle parsing errors
+      parser.on('error', async (error) => {
+        console.error('Error parsing CSV:', error);
+        await updateJobStatus(job.id, 'failed', `Error parsing CSV: ${error.message}`);
+        reject(error);
+      });
+      
+      // Create the file read stream with optimal settings
+      const fileStream = fs.createReadStream(job.file_path, {
+        encoding: 'utf8',
+        highWaterMark: 64 * 1024, // 64KB chunks
+        autoClose: true
+      });
+      
+      // Handle stream errors
+      fileStream.on('error', async (error) => {
+        console.error('Error reading file:', error);
+        await updateJobStatus(job.id, 'failed', `Error reading file: ${error.message}`);
+        reject(error);
+      });
+      
+      // Start processing
+      fileStream.pipe(parser);
+    });
+    
+    // Wait for processing to complete
+    await processingComplete;
+    console.log('Streaming import completed successfully');
+    
+  } catch (error) {
+    console.error('Error in processProductStreamingImport:', error);
+    await updateJobStatus(job.id, 'failed', `Processing error: ${error.message}`);
+    throw error;
   }
 }
