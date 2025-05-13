@@ -41,27 +41,26 @@ const config = {
   maxFileSize: process.env.MAX_FILE_SIZE || 2147483648, // 2GB max file size by default
   tempFileCleanupInterval: parseInt(process.env.TEMP_FILE_CLEANUP_INTERVAL || '3600000'), // Clean temp files every hour
   
-  // Large file processing settings
-  defaultChunkSize: parseInt(process.env.DEFAULT_CHUNK_SIZE || '5000'), // Adjusted default for general purpose
-  productImportChunkSize: parseInt(process.env.PRODUCT_IMPORT_CHUNK_SIZE || '1000'), // Specific for product imports
-  defaultBatchSize: parseInt(process.env.DEFAULT_BATCH_SIZE || '500'), // Increased from 250 to 500 rows
+  // Large file processing settings - OPTIMIZED for memory efficiency
+  defaultChunkSize: parseInt(process.env.DEFAULT_CHUNK_SIZE || '2000'), // REDUCED from 10000 to 2000 rows for less memory usage
+  defaultBatchSize: parseInt(process.env.DEFAULT_BATCH_SIZE || '200'), // REDUCED from 500 to 200 for database operations
   maxRows: parseInt(process.env.MAX_ROWS || '1000000'), // Maximum number of rows to process in a single file
   
-  // Memory management settings
-  forceGCInterval: parseInt(process.env.FORCE_GC_INTERVAL || '5000'), // Run garbage collection more frequently (5s) during large uploads
-  highMemoryThreshold: parseInt(process.env.HIGH_MEMORY_THRESHOLD || '1536'), // Increased from 1024MB to 1536MB
+  // Memory management settings - OPTIMIZED
+  forceGCInterval: parseInt(process.env.FORCE_GC_INTERVAL || '2000'), // REDUCED from 5000ms to 2000ms for more frequent GC
+  highMemoryThreshold: parseInt(process.env.HIGH_MEMORY_THRESHOLD || '1024'), // REDUCED from 1536MB to 1024MB to be more conservative
   
-  // Fetch/network settings
-  fetchTimeout: parseInt(process.env.FETCH_TIMEOUT || '120000'), // Increased from 60s to 120s for large operations
-  retryCount: parseInt(process.env.RETRY_COUNT || '5'), // Number of retries for fetch operations
-  retryDelay: parseInt(process.env.RETRY_DELAY || '3000'), // Increased from 2s to 3s
+  // Fetch/network settings - OPTIMIZED for reliability
+  fetchTimeout: parseInt(process.env.FETCH_TIMEOUT || '30000'), // REDUCED from 120s to 30s to prevent hanging connections
+  retryCount: parseInt(process.env.RETRY_COUNT || '3'), // REDUCED from 5 to 3 for faster failure recovery
+  retryDelay: parseInt(process.env.RETRY_DELAY || '1000'), // REDUCED from 3000ms to 1000ms
   
-  // Database settings
+  // Database settings - OPTIMIZED
   supabaseUrl: process.env.SUPABASE_URL || 'https://your_project_url.supabase.co',
   supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY || 'your_service_key_here',
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
-  databaseTimeout: parseInt(process.env.DATABASE_TIMEOUT || '60000'), // Increased from 30s to 60s
-  databasePoolSize: parseInt(process.env.DATABASE_POOL_SIZE || '30'), // Increased from 20 to 30 connections
+  databaseTimeout: parseInt(process.env.DATABASE_TIMEOUT || '30000'), // REDUCED from 60s to 30s
+  databasePoolSize: parseInt(process.env.DATABASE_POOL_SIZE || '20'), // REDUCED from 30 to 20 connections
   
   // Required fields for various data types - these can be overridden via the API
   requiredFields: {
