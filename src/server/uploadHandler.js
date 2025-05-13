@@ -2568,31 +2568,35 @@ async function importProductData(mappedData, progressCallback, batchSize) {
     console.log(`Importing ${mappedData.length} products with batch size ${batchSize}`);
     
     if (!mappedData || mappedData.length === 0) {
-      throw new Error('No product data to import');
+      // It's better to return an empty result than throw an error for no data
+      console.warn('No product data provided to importProductData.');
+      return {
+        results: [],
+        processedCount: 0
+      };
     }
 
-    const results = [];
+    const results = []; // This will store all successfully processed product records
+    let overallProcessedCount = 0; // For more accurate counting across batches
     
     // Process products in batches
     for (let i = 0; i < mappedData.length; i += batchSize) {
-      console.log(`Processing batch ${Math.floor(i/batchSize) + 1} of ${Math.ceil(mappedData.length/batchSize)}`);
-      const batch = mappedData.slice(i, i + batchSize).map(product => {
+      console.log(`Processing product import batch ${Math.floor(i/batchSize) + 1} of ${Math.ceil(mappedData.length/batchSize)}`);
+      const currentOverallBatch = mappedData.slice(i, i + batchSize);
+      
+      // Map the current overall batch to product records with updated_at
+      const batchToProcess = currentOverallBatch.map(product => {
         const { custom_attributes, ...productData } = product;
-        
-        // Build the product record with both standard fields and custom fields
         const productRecord = {
           ...productData,
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString() // Ensure updated_at is fresh for this batch
         };
         
-        // If we have custom attributes, add them directly to the product record
         if (custom_attributes) {
-          // Map known custom attributes to their respective columns
           if (custom_attributes['Title'] !== undefined) productRecord.custom_title = custom_attributes['Title'];
           if (custom_attributes['EAN'] !== undefined) productRecord.custom_ean = custom_attributes['EAN'];
           if (custom_attributes['MPN'] !== undefined) {
             productRecord.custom_mpn = custom_attributes['MPN'];
-            // Also store in the regular mpn column
             productRecord.mpn = custom_attributes['MPN'];
           }
           if (custom_attributes['Units Sold in 30 days'] !== undefined) 
@@ -2600,113 +2604,155 @@ async function importProductData(mappedData, progressCallback, batchSize) {
           if (custom_attributes['FBA Fee'] !== undefined) 
             productRecord.custom_fba_fee = parseFloat(custom_attributes['FBA Fee']) || 0;
         }
-        
         return productRecord;
       });
       
-      console.log(`Sending batch of ${batch.length} products to database`);
+      console.log(`Prepared batch of ${batchToProcess.length} products for database operations.`);
       
-      // Determine which products have real EANs vs generated ones
-      const productsWithRealEans = batch.filter(p => !p.ean.startsWith('GEN'));
-      const productsWithGeneratedEans = batch.filter(p => p.ean.startsWith('GEN'));
+      const productsWithRealEans = batchToProcess.filter(p => p.ean && !p.ean.startsWith('GEN'));
+      const productsWithGeneratedEans = batchToProcess.filter(p => !p.ean || p.ean.startsWith('GEN'));
       
-      let successfulInserts = [];
+      // Accumulator for successfully processed products in this currentOverallBatch
+      let batchSuccessfulInserts = [];
       
-      // First, upsert products with real EANs
+      // 1. Upsert products with real EANs
       if (productsWithRealEans.length > 0) {
         console.log(`Upserting ${productsWithRealEans.length} products with real EANs`);
-        const { data: insertedWithEan, error: eanError } = await supabase
+        const { data: upsertedWithEan, error: eanError } = await supabase
           .from('products')
           .upsert(productsWithRealEans, {
-            onConflict: 'ean',
-            ignoreDuplicates: false
+            onConflict: 'ean', // Assumes EAN is a unique constraint
+            ignoreDuplicates: false 
           })
           .select();
           
         if (eanError) {
           console.error('Database error upserting products with real EANs:', eanError);
-        } else if (insertedWithEan) {
-          console.log(`Successfully upserted ${insertedWithEan.length} products with real EANs`);
-          successfulInserts.push(...insertedWithEan);
+          // Decide if we should continue or throw. For now, log and continue.
+        } else if (upsertedWithEan) {
+          console.log(`Successfully upserted/updated ${upsertedWithEan.length} products with real EANs.`);
+          batchSuccessfulInserts.push(...upsertedWithEan);
         }
       }
       
-      // Then, handle products with generated EANs - try to match by title and brand
+      // 2. Handle products with generated EANs (match by title/brand, then batch update/insert)
       if (productsWithGeneratedEans.length > 0) {
-        console.log(`Processing ${productsWithGeneratedEans.length} products with generated EANs`);
-        
+        console.log(`Processing ${productsWithGeneratedEans.length} products with generated/missing EANs by finding matches...`);
+        const updatesToPerform = []; // Stores { id: existingId, dataToUpdate: {} }
+        const insertsToPerform = []; // Stores product objects to insert
+
         for (const product of productsWithGeneratedEans) {
           try {
-            // First check if a similar product already exists by title and brand
+            // Ensure title and brand are valid for searching
+            if (!product.title || !product.brand) {
+                console.warn(\`Skipping product due to missing title or brand (for matching generated EAN): ${JSON.stringify(product)}\`);
+                insertsToPerform.push(product); // Add to insert if critical info missing for match
+                continue;
+            }
+
+            // Search for existing product by a significant part of title and brand
+            const titleSearchTerm = product.title.substring(0, Math.min(product.title.length, 30)).replace(/'/g, "''"); // Escape apostrophes
+
             const { data: existingProducts, error: searchError } = await supabase
               .from('products')
-              .select('*')
-              .ilike('title', `%${product.title.substring(0, Math.min(product.title.length, 20))}%`)
+              .select('id, ean') // Only select id and ean, no need for full record yet
+              .ilike('title', `%${titleSearchTerm}%`)
               .eq('brand', product.brand)
               .limit(1);
               
             if (searchError) {
-              console.error('Error searching for existing product:', searchError);
+              console.error(\`Error searching for existing product ("${product.title}"):\`, searchError);
+              insertsToPerform.push(product); // Fallback: attempt to insert if search fails
               continue;
             }
             
             if (existingProducts && existingProducts.length > 0) {
-              // Found an existing product, update it
-              console.log(`Found existing product match for "${product.title}" - updating`);
-              const existingId = existingProducts[0].id;
-              
-              const { data: updated, error: updateError } = await supabase
-                .from('products')
-                .update({
-                  ...product,
-                  ean: existingProducts[0].ean // Keep the original EAN
-                })
-                .eq('id', existingId)
-                .select();
-                
-              if (updateError) {
-                console.error('Error updating existing product:', updateError);
-              } else if (updated) {
-                console.log(`Updated existing product with ID ${existingId}`);
-                successfulInserts.push(...updated);
-              }
+              const existingProduct = existingProducts[0];
+              console.log(`Found existing product (ID: ${existingProduct.id}) for "${product.title}". Preparing for update.`);
+              updatesToPerform.push({
+                id: existingProduct.id,
+                // Ensure we use the existing EAN and update other fields
+                dataToUpdate: { ...product, ean: existingProduct.ean, updated_at: new Date().toISOString() }
+              });
             } else {
-              // No match found, insert as new
-              console.log(`No existing product found for "${product.title}" - inserting as new`);
-              const { data: inserted, error: insertError } = await supabase
-                .from('products')
-                .insert(product)
-                .select();
-                
-              if (insertError) {
-                console.error('Error inserting new product:', insertError);
-              } else if (inserted) {
-                console.log(`Inserted new product with generated EAN: ${product.ean}`);
-                successfulInserts.push(...inserted);
-              }
+              // No match found, prepare to insert as new
+              console.log(`No existing product found for "${product.title}". Preparing for insert.`);
+              // The 'product' object already has its generated EAN and fresh updated_at
+              insertsToPerform.push(product);
             }
-          } catch (productError) {
-            console.error(`Error processing product with generated EAN: ${product.title}`, productError);
+          } catch (productMatchError) {
+            console.error(`Error during matching product "${product.title}":`, productMatchError);
+            insertsToPerform.push(product); // Fallback: attempt to insert on error
+          }
+        }
+
+        // Perform batch updates for matched products
+        if (updatesToPerform.length > 0) {
+          console.log(`Attempting to update ${updatesToPerform.length} existing products (matched for generated EANs)`);
+          const updatePromises = updatesToPerform.map(op =>
+            supabase.from('products').update(op.dataToUpdate).eq('id', op.id).select()
+          );
+          // Process promises, handling individual errors
+          const updateResultsSettled = await Promise.allSettled(updatePromises);
+          updateResultsSettled.forEach((result, index) => {
+            if (result.status === 'fulfilled' && result.value.data) {
+              if(result.value.error){
+                console.error(`Error updating product ID ${updatesToPerform[index].id} (fulfilled but error in response):`, result.value.error);
+              } else {
+                console.log(`Successfully updated product ID ${updatesToPerform[index].id}`);
+                batchSuccessfulInserts.push(...result.value.data);
+              }
+            } else if (result.status === 'rejected') {
+              console.error(`Failed to update product ID ${updatesToPerform[index].id}:`, result.reason);
+            } else if (result.value.error) { // Fulfilled but Supabase returned an error
+                 console.error(`Error updating product ID ${updatesToPerform[index].id} (Supabase error):`, result.value.error);
+            }
+          });
+        }
+
+        // Perform batch inserts for new products (those not matched)
+        if (insertsToPerform.length > 0) {
+          console.log(`Attempting to insert ${insertsToPerform.length} new products (no match found for generated EANs or fallback)`);
+          const { data: insertedNew, error: insertNewError } = await supabase
+            .from('products')
+            .insert(insertsToPerform)
+            .select();
+          if (insertNewError) {
+            console.error('Error inserting new products (generated EANs/fallback):', insertNewError);
+          } else if (insertedNew) {
+            console.log(`Successfully inserted ${insertedNew.length} new products.`);
+            batchSuccessfulInserts.push(...insertedNew);
           }
         }
       }
       
-      results.push(...successfulInserts);
+      results.push(...batchSuccessfulInserts); // Add successfully processed from this batch to overall results
+      overallProcessedCount += batchToProcess.length; // Increment by number of items in this batch from mappedData
+
+      if (progressCallback) {
+        progressCallback(overallProcessedCount, mappedData.length);
+      }
       
-      // Add a small delay between batches
+      // Add a small delay between batches to reduce load, if not the last batch
       if (i + batchSize < mappedData.length) {
-        await new Promise(resolve => setTimeout(resolve, 200));
+        console.log('Delaying before next product import batch...');
+        await new Promise(resolve => setTimeout(resolve, 250)); // 250ms delay
       }
     }
     
-    console.log(`Import complete. Processed ${results.length} products successfully`);
+    console.log(`Product import complete. Total products processed from input: ${mappedData.length}. Successful DB operations: ${results.length}.`);
     return {
-      results,
-      processedCount: results.length
+      results, // Contains records returned by DB operations
+      processedCount: results.length // Count of successful DB operations
     };
   } catch (error) {
-    console.error('Error importing product data:', error);
-    throw error;
+    console.error('Critical error in importProductData function:', error);
+    // Ensure a consistent return type in case of top-level error
+    return {
+      results: [],
+      processedCount: 0,
+      error: error.message
+    };
   }
 }
 
@@ -2715,7 +2761,7 @@ async function processProductFileInChunks(job, fieldMapping, results, customAttr
   const batchSize = job.batch_size || config.defaultBatchSize; // Use config for DB batch size
   const chunkSize = config.productImportChunkSize || 1000; // Use new config for in-memory chunk size
   // Estimate total rows for progress calculation. Fallback if not set on job.
-  const totalRows = job.total_rows || (await estimateRowCount(job.file_path)) || 1000;
+  const totalRows = job.total_rows || (await estimateRowCount(job.file_path)) || 10000; // Increased default assumption
   
   console.log(`Processing product file in chunks. DB Batch size: ${batchSize}, In-memory Chunk size: ${chunkSize}, Estimated total rows: ${totalRows}`);
   console.log(`File path: ${job.file_path}`);
@@ -2723,91 +2769,187 @@ async function processProductFileInChunks(job, fieldMapping, results, customAttr
   let currentChunk = [];
   let totalProcessed = 0;
   let lastUpdateTime = Date.now();
+  let lastProgressUpdate = 0;
+  let lastMemoryCheck = Date.now();
+  let gcInterval = null;
+  let throttleDelay = 0; // Dynamic throttling delay
+  let consecutiveErrors = 0; // Track consecutive chunk processing errors
+
+  // Set up garbage collection interval for large files, if gc is available
+  if (global.gc && totalRows > (config.productImportChunkSize || 1000) * 5) { // Activate if more than ~5 chunks
+    console.log('Setting up forced garbage collection interval for large product file processing');
+    gcInterval = setInterval(() => {
+      try {
+        const memUsage = process.memoryUsage();
+        const memUsageMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+        console.log(`Product Import Memory: ${memUsageMB}MB / ${Math.round(memUsage.heapTotal / 1024 / 1024)}MB (${Math.round(memUsage.heapUsed / memUsage.heapTotal * 100)}%)`);
+        
+        if (memUsageMB > (config.highMemoryThreshold || 1024)) {
+          throttleDelay = Math.min(3000, throttleDelay + 750); // Increase throttling, max 3s
+          console.log(`High memory for products (${memUsageMB}MB), throttle: ${throttleDelay}ms`);
+        } else if (throttleDelay > 0 && memUsageMB < ((config.highMemoryThreshold || 1024) * 0.7)) {
+          throttleDelay = Math.max(0, throttleDelay - 500); // Decrease throttling
+          console.log(`Memory for products acceptable (${memUsageMB}MB), throttle: ${throttleDelay}ms`);
+        }
+        
+        global.gc();
+        console.log('Product Import: Forced garbage collection complete');
+      } catch (err) {
+        console.error('Product Import: Error during garbage collection:', err);
+      }
+    }, config.forceGCInterval || 7000); // Slightly longer interval than suppliers
+  }
   
   try {
     console.log('Creating read stream for product file...');
-    const fileStream = fs.createReadStream(job.file_path, { encoding: 'utf8' });
+    const fileStream = fs.createReadStream(job.file_path, { 
+      encoding: 'utf8',
+      highWaterMark: 64 * 1024 // 64KB buffer, helps with memory
+    });
     
-    // Initial progress update to show process has started
-    await updateJobProgress(job.id, 32, `Started processing data`);
+    // Initial progress update
+    await updateJobProgress(job.id, 32, `Processing product data`);
     
-    fileStream
-      .pipe(csv())
-      .on('data', async (row) => {
-        currentChunk.push(row);
+    const csvStream = fileStream.pipe(csv({
+      skipLines: 0, // Assuming header is handled by auto-mapping or provided mapping
+      maxRows: config.maxRows || (totalRows + 1),
+      strict: false
+    }));
+
+    const failedChunks = []; // To store info about chunks that failed processing
+
+    csvStream.on('data', async (row) => {
+      currentChunk.push(row);
+      
+      if (currentChunk.length >= chunkSize) {
+        csvStream.pause();
+        fileStream.pause();
         
-        // When chunk reaches size, pause stream and process
-        if (currentChunk.length >= chunkSize) {
-          fileStream.pause();
-          console.log(`Processing product chunk of ${currentChunk.length} rows...`);
-          
-          try {
-            // Pass customAttributes to processProductChunk
-            await processProductChunk(currentChunk, job, fieldMapping, results, customAttributes);
-            totalProcessed += currentChunk.length;
-            currentChunk = [];
-            
-            // Calculate progress as a percentage between 35% (start) and 90% (end of data processing)
-            // This leaves room for remaining 10% for finalizing
-            const dataProcessingRange = 55; // From 35% to 90%
-            const completionPercentage = Math.min(totalProcessed / totalRows, 1);
-            const progress = Math.min(90, Math.floor(35 + (dataProcessingRange * completionPercentage)));
-            
-            // Update progress every 2 seconds or after processing large chunks
-            const now = Date.now();
-            if (now - lastUpdateTime > 2000) {
-              console.log(`Progress update: ${progress}% - Processed ${totalProcessed}/${totalRows} rows`);
-              await updateJobProgress(job.id, progress, `Processing data... ${progress}%`);
-              lastUpdateTime = now;
-            }
-          } catch (error) {
-            console.error('Error processing product chunk:', error);
-          }
-          
-          fileStream.resume();
+        console.log(`Product Import: Processing chunk of ${currentChunk.length} rows...`);
+        
+        if (throttleDelay > 0) {
+          console.log(`Product Import: Throttling for ${throttleDelay}ms due to memory.`);
+          await new Promise(resolve => setTimeout(resolve, throttleDelay));
         }
-      })
-      .on('end', async () => {
-        // Process any remaining rows
-        if (currentChunk.length > 0) {
-          console.log(`Processing final product chunk of ${currentChunk.length} rows...`);
+
+        const memoryUsage = process.memoryUsage();
+        const memoryUsageMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
+        console.log(`Product Import: Memory before processing chunk: ${memoryUsageMB}MB`);
+
+        try {
           // Pass customAttributes to processProductChunk
           await processProductChunk(currentChunk, job, fieldMapping, results, customAttributes);
           totalProcessed += currentChunk.length;
+          consecutiveErrors = 0; // Reset on success
+          currentChunk.length = 0; // Clear chunk memory
+          
+          const dataProcessingRange = 55; // 35% to 90%
+          const completionPercentage = Math.min(totalProcessed / totalRows, 1);
+          const progress = Math.min(90, Math.floor(35 + (dataProcessingRange * completionPercentage)));
+          
+          const now = Date.now();
+          if (progress - lastProgressUpdate >= 2 || now - lastUpdateTime > 2000) {
+            console.log(`Product Import Progress: ${progress}% - Processed ${totalProcessed}/${totalRows} rows`);
+            await updateJobProgress(job.id, progress, `Processing data... ${progress}%`);
+            lastUpdateTime = now;
+            lastProgressUpdate = progress;
+          }
+        } catch (error) {
+          console.error('Product Import: Error processing product chunk:', error);
+          consecutiveErrors++;
+          failedChunks.push({
+            startRow: totalProcessed + 1,
+            endRow: totalProcessed + currentChunk.length,
+            error: error.message
+          });
+          totalProcessed += currentChunk.length; // Count as processed to advance
+          currentChunk.length = 0; // Clear chunk memory
+
+          if (consecutiveErrors > 2) {
+            throttleDelay = Math.min(5000, throttleDelay + 1000); // Increase throttle on multiple errors
+            console.warn(`Product Import: Multiple consecutive chunk errors, increased throttle to ${throttleDelay}ms`);
+          }
+          await updateJobStatus(job.id, 'processing', `Error processing rows (approx ${failedChunks.at(-1).startRow}-${failedChunks.at(-1).endRow}): ${error.message.substring(0,100)}`);
         }
         
-        console.log(`Product file processing complete. Total rows processed: ${totalProcessed}`);
-        console.log('Results:', results);
+        if (global.gc && (Date.now() - lastMemoryCheck > (config.forceGCInterval * 2 || 15000))) {
+          console.log('Product Import: Forcing GC after chunk processing.');
+          global.gc();
+          lastMemoryCheck = Date.now();
+        }
         
-        // Update progress to 95% - finalizing import
-        await updateJobProgress(job.id, 95, 'Finalizing import');
-        
-        // Update job as completed
-        await supabase
-          .from('import_jobs')
-          .update({
-            status: 'completed',
-            status_message: 'Import completed successfully',
-            progress: 100,
-            results: results,
-            completed_at: new Date().toISOString()
-          })
-          .eq('id', job.id);
-        
-        console.log('Product import job marked as completed');
+        csvStream.resume();
+        fileStream.resume();
+      }
+    });
+    
+    csvStream.on('end', async () => {
+      if (currentChunk.length > 0) {
+        console.log(`Product Import: Processing final chunk of ${currentChunk.length} rows...`);
+        try {
+            // Pass customAttributes to processProductChunk
+            await processProductChunk(currentChunk, job, fieldMapping, results, customAttributes);
+            totalProcessed += currentChunk.length;
+        } catch (error) {
+            console.error('Product Import: Error processing final product chunk:', error);
+            failedChunks.push({
+              startRow: totalProcessed + 1,
+              endRow: totalProcessed + currentChunk.length,
+              error: error.message
+            });
+            totalProcessed += currentChunk.length;
+        }
+        currentChunk.length = 0;
+      }
+      
+      console.log(`Product file processing complete. Total rows processed: ${totalProcessed}`);
+      console.log('Product Import Results:', results);
+      if(failedChunks.length > 0) {
+        console.warn(`Product Import: ${failedChunks.length} chunks encountered errors.`, failedChunks.slice(0,5)); // Log first 5 errors
+        results.failedChunkDetails = failedChunks;
+      }
+      
+      if (gcInterval) {
+        clearInterval(gcInterval);
+        console.log('Product Import: Cleared garbage collection interval.');
+      }
+      
+      await updateJobProgress(job.id, 95, 'Finalizing product import');
+      
+      await supabase
+        .from('import_jobs')
+        .update({
+          status: failedChunks.length > 0 ? 'completed_with_errors' : 'completed',
+          status_message: failedChunks.length > 0 ? `Import completed with ${failedChunks.length} chunk errors. Check server logs.` : 'Product import completed successfully',
+          progress: 100,
+          results: results, // Ensure results are saved
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', job.id);
+      
+      console.log('Product import job marked as completed (or completed_with_errors)');
           
-        // Clean up temporary file
-        fs.unlink(job.file_path, (err) => {
-          if (err) console.error('Error deleting temporary file:', err);
-          else console.log('Temporary file deleted');
-        });
-      })
-      .on('error', async (error) => {
-        console.error('Error reading product CSV file:', error);
-        await updateJobStatus(job.id, 'failed', `Error reading CSV file: ${error.message}`);
+      fs.unlink(job.file_path, (err) => {
+        if (err) console.error('Product Import: Error deleting temporary file:', err);
+        else console.log('Product Import: Temporary file deleted');
       });
+    });
+    
+    csvStream.on('error', async (error) => {
+      console.error('Product Import: Error reading product CSV file:', error);
+      if (gcInterval) clearInterval(gcInterval);
+      await updateJobStatus(job.id, 'failed', `Error reading CSV file: ${error.message}`);
+    });
+
+    fileStream.on('error', async (error) => {
+      console.error('Product Import: Error with file stream:', error);
+      if (gcInterval) clearInterval(gcInterval);
+      await updateJobStatus(job.id, 'failed', `File stream error: ${error.message}`);
+    });
+
   } catch (error) {
     console.error('Error in processProductFileInChunks:', error);
+    if (gcInterval) clearInterval(gcInterval);
     await updateJobStatus(job.id, 'failed', `Error processing product file: ${error.message}`);
   }
 }
