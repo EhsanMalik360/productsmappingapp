@@ -1567,12 +1567,6 @@ async function autoMapProductColumns(csvHeaders) {
 }
 
 // Map product data function
-// Fixed mapProductData function for use in uploadHandler.js
-
-/**
- * Maps CSV data to product objects, with proper batching and memory management.
- * This is a fixed version to replace the broken function in uploadHandler.js.
- */
 async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 'Brand', 'Sale Price']) {
   try {
     console.log(`Mapping ${csvData.length} product rows with field mapping:`, fieldMapping);
@@ -1738,8 +1732,6 @@ async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 
     throw error;
   }
 }
-
- 
 
 // Import supplier data function (reference to existing function)
 async function importSupplierData(mappedData, matchOptions, progressCallback, batchSize, matchColumns, jobId) {
