@@ -1716,14 +1716,9 @@ async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 
             continue;
           }
           
-          // If EAN is not provided, generate a placeholder
+          // If EAN is not provided, set it to an empty string
           if (!productData.ean || productData.ean.trim() === '') {
-            // Generate a placeholder EAN based on brand and title
-            const brandPart = productData.brand ? productData.brand.substring(0, 5).replace(/\W/g, '') : 'brand';
-            const titlePart = productData.title ? productData.title.substring(0, 10).replace(/\W/g, '') : 'title';
-            const timestamp = Date.now().toString().substring(6);
-            productData.ean = `GEN${brandPart}${titlePart}${timestamp}`.substring(0, 30);
-            console.log(`Generated placeholder EAN for product: ${productData.title} -> ${productData.ean}`);
+            productData.ean = '';
           }
           
           mappedData.push(productData);
@@ -2308,7 +2303,7 @@ async function importSupplierData(mappedData, matchOptions, progressCallback, ba
         const supplierProductsForThisSupplier = matchedProducts.map(match => {
           const ean = match.supplierProduct.ean && match.supplierProduct.ean.trim() !== '' 
             ? match.supplierProduct.ean 
-            : match.product.ean || generatePlaceholderEan(supplierId, match.supplierProduct.product_name, match.supplierProduct.mpn);
+            : match.product.ean || '';  // Use empty string instead of generating EAN
 
           return {
             supplier_id: supplierId,
@@ -2333,7 +2328,7 @@ async function importSupplierData(mappedData, matchOptions, progressCallback, ba
             matchMethodStats.none++;
             const ean = supplierProduct.ean && supplierProduct.ean.trim() !== '' 
               ? supplierProduct.ean 
-              : generatePlaceholderEan(supplierId, supplierProduct.product_name, supplierProduct.mpn);
+              : '';  // Use empty string instead of generating EAN
               
             unmatchedProducts.push({
               supplier_id: supplierId,
@@ -2631,89 +2626,27 @@ async function importProductData(mappedData, progressCallback, batchSize) {
       
       console.log(`Sending batch of ${batch.length} products to database`);
       
-      // Determine which products have real EANs vs generated ones
-      const productsWithRealEans = batch.filter(p => !p.ean.startsWith('GEN'));
-      const productsWithGeneratedEans = batch.filter(p => p.ean.startsWith('GEN'));
-      
+      // Process all products with the same approach (no longer separating by generated EANs)
       let successfulInserts = [];
       
-      // First, upsert products with real EANs
-      if (productsWithRealEans.length > 0) {
-        console.log(`Upserting ${productsWithRealEans.length} products with real EANs`);
-        const { data: insertedWithEan, error: eanError } = await supabase
+      // Upsert all products
+      try {
+        const { data: upserted, error } = await supabase
           .from('products')
-          .upsert(productsWithRealEans, {
+          .upsert(batch, { 
             onConflict: 'ean',
-            ignoreDuplicates: false
-          })
-          .select();
+            ignoreDuplicates: false,
+            returning: 'representation'
+          });
           
-        if (eanError) {
-          console.error('Database error upserting products with real EANs:', eanError);
-        } else if (insertedWithEan) {
-          console.log(`Successfully upserted ${insertedWithEan.length} products with real EANs`);
-          successfulInserts.push(...insertedWithEan);
+        if (error) {
+          console.error('Error upserting products:', error);
+        } else if (upserted) {
+          console.log(`Successfully upserted ${upserted.length} products`);
+          successfulInserts = upserted;
         }
-      }
-      
-      // Then, handle products with generated EANs - try to match by title and brand
-      if (productsWithGeneratedEans.length > 0) {
-        console.log(`Processing ${productsWithGeneratedEans.length} products with generated EANs`);
-        
-        for (const product of productsWithGeneratedEans) {
-          try {
-            // First check if a similar product already exists by title and brand
-            const { data: existingProducts, error: searchError } = await supabase
-              .from('products')
-              .select('*')
-              .ilike('title', `%${product.title.substring(0, Math.min(product.title.length, 20))}%`)
-              .eq('brand', product.brand)
-              .limit(1);
-              
-            if (searchError) {
-              console.error('Error searching for existing product:', searchError);
-              continue;
-            }
-            
-            if (existingProducts && existingProducts.length > 0) {
-              // Found an existing product, update it
-              console.log(`Found existing product match for "${product.title}" - updating`);
-              const existingId = existingProducts[0].id;
-              
-              const { data: updated, error: updateError } = await supabase
-                .from('products')
-                .update({
-                  ...product,
-                  ean: existingProducts[0].ean // Keep the original EAN
-                })
-                .eq('id', existingId)
-                .select();
-                
-              if (updateError) {
-                console.error('Error updating existing product:', updateError);
-              } else if (updated) {
-                console.log(`Updated existing product with ID ${existingId}`);
-                successfulInserts.push(...updated);
-              }
-            } else {
-              // No match found, insert as new
-              console.log(`No existing product found for "${product.title}" - inserting as new`);
-              const { data: inserted, error: insertError } = await supabase
-                .from('products')
-                .insert(product)
-                .select();
-                
-              if (insertError) {
-                console.error('Error inserting new product:', insertError);
-              } else if (inserted) {
-                console.log(`Inserted new product with generated EAN: ${product.ean}`);
-                successfulInserts.push(...inserted);
-              }
-            }
-          } catch (productError) {
-            console.error(`Error processing product with generated EAN: ${product.title}`, productError);
-          }
-        }
+      } catch (error) {
+        console.error('Exception during product upsert:', error);
       }
       
       results.push(...successfulInserts);
