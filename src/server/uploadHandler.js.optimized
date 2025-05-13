@@ -1124,6 +1124,12 @@ async function processFileInChunks(job, fieldMapping, results) {
         console.log('Cleared garbage collection interval');
       }
       
+      // Clear the garbage collection interval if set
+      if (gcInterval) {
+        clearInterval(gcInterval);
+        console.log('Cleared garbage collection interval');
+      }
+      
       // Add failed rows information to results
       results.failedGroups = failedRows;
       results.totalFailedGroups = failedRows.length;
@@ -1220,7 +1226,7 @@ async function processChunk(chunk, job, fieldMapping, results) {
     }
     
     // Process the mapped data in smaller batches for database operations
-    const batchSize = job.batch_size || 100;
+    const batchSize = job.batch_size || config.defaultBatchSize || 50; // Use smaller batches for memory optimization
     
     // Process the supplier data with the chosen match options
     console.log('Starting supplier data import with options:', job.match_options || {
@@ -2682,7 +2688,7 @@ async function importProductData(mappedData, progressCallback, batchSize) {
 // Process the product file in manageable chunks using streaming with better progress reporting
 async function processProductFileInChunks(job, fieldMapping, results) {
   const batchSize = job.batch_size || config.defaultBatchSize || 50; // Use smaller batches for memory optimization
-  const chunkSize = job.chunk_size || config.defaultChunkSize || 250; // Use smaller chunks for memory optimization
+  const chunkSize = job.chunk_size || config.defaultChunkSize || 250; // Use smaller chunks for memory optimization // Process 5000 rows at a time in memory
   const totalRows = job.total_rows || 1000; // Use estimated total rows or default
   
   console.log(`Processing product file in chunks. Batch size: ${batchSize}, Chunk size: ${chunkSize}, Estimated total rows: ${totalRows}`);
@@ -2785,13 +2791,6 @@ async function processProductFileInChunks(job, fieldMapping, results) {
         }
         
         console.log(`Product file processing complete. Total rows processed: ${totalProcessed}`);
-        
-        // Clear the garbage collection interval if set
-        if (gcInterval) {
-          clearInterval(gcInterval);
-          console.log('Cleared garbage collection interval');
-        }
-        
         console.log('Results:', results);
         
         // Update progress to 95% - finalizing import

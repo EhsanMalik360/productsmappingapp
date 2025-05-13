@@ -49,6 +49,12 @@ const AmazonImport: React.FC = () => {
   const [batchSize, setBatchSize] = useState<number>(500); // Increased default batch size
   const [pollInterval, setPollInterval] = useState<number | null>(null);
   
+  // Add state to track long-running imports
+  const [isLongRunningImport, setIsLongRunningImport] = useState<boolean>(false);
+  const [timeoutModalVisible, setTimeoutModalVisible] = useState<boolean>(false);
+  const [executionTime, setExecutionTime] = useState<number>(0);
+  const [importStartTime, setImportStartTime] = useState<number | null>(null);
+  
   // Get required product custom attributes
   const requiredCustomAttributes = customAttributes
     .filter(attr => attr.forType === 'product' && attr.required)
@@ -332,11 +338,59 @@ const AmazonImport: React.FC = () => {
     let consecutiveErrorCount = 0;
     let currentPollInterval = 2000; // Start with 2 seconds
     let timeoutIds: number[] = []; // Keep track of all timeouts
+    let timeoutCounter = 0; // Count seconds for timeout detection
+    let timeoutCheckInterval: number | null = null;
+    
+    // Start timer for timeout detection
+    if (jobId && importStartTime === null) {
+      setImportStartTime(Date.now());
+      
+      // Set timeout check to notify user if import is taking too long
+      timeoutCheckInterval = window.setInterval(() => {
+        if (!isComponentMounted || !jobId) return;
+        
+        timeoutCounter += 1;
+        const elapsedTime = Math.floor((Date.now() - (importStartTime || Date.now())) / 1000);
+        setExecutionTime(elapsedTime);
+        
+        // After 3 minutes with no progress update, show timeout warning
+        if (timeoutCounter >= 180 && !isLongRunningImport && !timeoutModalVisible) {
+          console.log("Import taking longer than expected, showing timeout warning");
+          setIsLongRunningImport(true);
+          setTimeoutModalVisible(true);
+          
+          // Update message to inform user
+          setLoadingMessage(`Import has been running for ${Math.floor(elapsedTime / 60)} minutes. You can wait or cancel.`);
+        }
+        
+        // Fail after 15 minutes if no update (configurable)
+        if (timeoutCounter >= 900 && !timeoutModalVisible) { // 15 minutes
+          console.error("Import timed out after 15 minutes");
+          setLoadingMessage("Import operation timed out after 15 minutes.");
+          
+          // Cancel the operation
+          setIsLoading(false);
+          setJobId(null);
+          setError("Import operation timed out after 15 minutes. Please try again with a smaller file or contact support.");
+          
+          // Clear all intervals
+          if (timeoutCheckInterval) window.clearInterval(timeoutCheckInterval);
+          if (pollInterval) window.clearInterval(pollInterval);
+        }
+      }, 1000); // Check every second
+      
+      timeoutIds.push(timeoutCheckInterval as unknown as number);
+    }
     
     const clearAllTimeouts = () => {
       // Clear all pending timeouts to avoid memory leaks
       timeoutIds.forEach(id => window.clearTimeout(id));
       timeoutIds = [];
+      
+      // Clear timeout check interval
+      if (timeoutCheckInterval) {
+        window.clearInterval(timeoutCheckInterval);
+      }
     };
     
     const scheduleNextPoll = (delay: number) => {
@@ -442,8 +496,12 @@ const AmazonImport: React.FC = () => {
         window.clearTimeout(intervalId);
         console.log(`Cleared timeout ${intervalId}`);
       }
+      
+      // Reset timeout state
+      setImportStartTime(null);
+      setExecutionTime(0);
     };
-  }, [jobId, setLoadingMessage, setLoadingProgress, setIsLoading, setShowSuccess, setError, addImportRecord, setImportResults, setJobId, fileName]);
+  }, [jobId, setLoadingMessage, setLoadingProgress, setIsLoading, setShowSuccess, setError, addImportRecord, setImportResults, setJobId, fileName, importStartTime, isLongRunningImport, timeoutModalVisible]);
 
   // Server-side file processing
   const handleServerFileUpload = async (file: File) => {
@@ -453,6 +511,18 @@ const AmazonImport: React.FC = () => {
       // Start with 0% - the server will update to 5% immediately
       setLoadingProgress(0);
       setLoadingMessage("Preparing file upload...");
+      
+      // Reset timeout tracking
+      setImportStartTime(Date.now());
+      setExecutionTime(0);
+      setIsLongRunningImport(false);
+      
+      // Check file size and warn user if it's very large
+      const fileSizeMB = file.size / (1024 * 1024);
+      if (fileSizeMB > 50) {
+        console.warn(`Very large file detected: ${fileSizeMB.toFixed(2)}MB. This may take longer to process.`);
+        setLoadingMessage(`Large file detected (${fileSizeMB.toFixed(2)}MB). Upload may take several minutes...`);
+      }
       
       // Create form data for file upload
       const formData = new FormData();
@@ -475,8 +545,15 @@ const AmazonImport: React.FC = () => {
       // Upload to server API - use product endpoint since there's no specific amazon endpoint
       try {
         // Add timeout to fetch to detect connection issues
+        // Increase timeout for larger files
+        const timeoutMs = Math.max(60000, Math.min(300000, file.size / 10000)); // Between 1-5 minutes based on file size
+        console.log(`Setting upload timeout to ${(timeoutMs/1000).toFixed(0)} seconds based on file size`);
+        
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout for large files
+        const timeoutId = setTimeout(() => {
+          console.log('Upload timeout reached, aborting fetch');
+          controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
+        }, timeoutMs);
         
         console.log('Starting fetch request to server...');
         const response = await fetch(`${API_URL}/api/upload/product`, {
@@ -504,14 +581,28 @@ const AmazonImport: React.FC = () => {
         
         if (!response.ok) {
           console.error('Server returned error:', result);
-          throw new Error(result.error || `Upload failed with status ${response.status}: ${result.details || ''}`);
+          
+          // Handle specific error cases with user-friendly messages
+          if (response.status === 413) {
+            throw new Error("File is too large. Please reduce the file size and try again.");
+          } else if (response.status === 504 || response.status === 502) {
+            throw new Error("Server timeout. The file is likely too large for the server to process. Try with a smaller file.");
+          } else {
+            throw new Error(result.error || `Upload failed with status ${response.status}: ${result.details || ''}`);
+          }
         }
         
         // Set job ID for status polling
         if (result.jobId) {
           console.log('Job ID received from server:', result.jobId);
           setJobId(result.jobId);
-          setLoadingMessage('Processing file on server...');
+          
+          // For large files, provide more informative message
+          if (fileSizeMB > 10) {
+            setLoadingMessage(`Processing large file (${fileSizeMB.toFixed(2)}MB) on server. This may take several minutes...`);
+          } else {
+            setLoadingMessage('Processing file on server...');
+          }
           
           // Initial status check after a short delay
           setTimeout(() => {
@@ -525,8 +616,13 @@ const AmazonImport: React.FC = () => {
       } catch (fetchError: unknown) {
         // Handle AbortError (timeout) specifically
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-          console.error('Network request timed out after 60 seconds - server might be busy with large file');
-          throw new Error('Server connection timed out. Your file might be very large. The import may still be processing in the background.');
+          console.error('Network request timed out - server might be busy with large file');
+          throw new Error('Upload timed out. Your file might be too large for the server to handle. Try reducing the file size or try again later.');
+        }
+        
+        // Handle 502 Bad Gateway specifically
+        if (fetchError instanceof Error && fetchError.message.includes('502')) {
+          throw new Error('Server Gateway Error (502). The server might be overloaded. Please try again with a smaller file or try later.');
         }
         
         // Handle other fetch errors
@@ -541,11 +637,21 @@ const AmazonImport: React.FC = () => {
       console.error('Error in handleServerFileUpload:', err);
       // Keep the loading state visible with error for a moment
       setLoadingProgress(100);
-      setLoadingMessage(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
       
+      // Provide a clear error message
+      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      setLoadingMessage(`Error: ${errorMessage}`);
+      
+      // Show error message after a delay
       setTimeout(() => {
         setIsLoading(false);
-        setError(err instanceof Error ? err.message : 'Error uploading file');
+        setError(errorMessage);
+        
+        // Clear job tracking data
+        setJobId(null);
+        setImportStartTime(null);
+        setExecutionTime(0);
+        setIsLongRunningImport(false);
       }, 2000);
     }
   };
@@ -733,6 +839,56 @@ const AmazonImport: React.FC = () => {
     }
   };
 
+  // Add a function to handle import cancellation
+  const handleCancelImport = async () => {
+    // Close timeout modal
+    setTimeoutModalVisible(false);
+    
+    // Try to notify server about cancellation so it can abort the job
+    if (jobId) {
+      try {
+        console.log(`Sending cancel request to server for job ${jobId}`);
+        setLoadingMessage("Cancelling import operation...");
+        
+        const response = await fetch(`${API_URL}/api/upload/cancel/${jobId}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          // Short timeout for cancel request
+          signal: AbortSignal.timeout(5000)
+        });
+        
+        if (response.ok) {
+          console.log('Server acknowledged cancellation request');
+        } else {
+          console.warn('Server returned error on cancellation request:', response.status);
+        }
+      } catch (err) {
+        console.error('Error sending cancellation request to server:', err);
+        // Continue with client-side cancellation even if server request fails
+      }
+    }
+    
+    // Clear all states
+    setIsLoading(false);
+    setJobId(null);
+    setLoadingProgress(0);
+    setLoadingMessage("Processing data...");
+    setImportStartTime(null);
+    setExecutionTime(0);
+    setIsLongRunningImport(false);
+    
+    // Show error message
+    setError("Import cancelled by user. The file might be too large or the server might be busy.");
+  };
+
+  // Add a function to continue waiting
+  const handleContinueWaiting = () => {
+    setTimeoutModalVisible(false);
+    setLoadingMessage(`Import is continuing to process in the background (${Math.floor(executionTime / 60)}:${executionTime % 60} elapsed)...`);
+  };
+
   return (
     <div>
       {isLoading && <LoadingOverlay message={loadingMessage} progress={loadingProgress} />}
@@ -748,6 +904,44 @@ const AmazonImport: React.FC = () => {
           { label: 'Failed', value: importResults.failedImports }
         ]}
       />
+      
+      {/* Timeout warning modal */}
+      {timeoutModalVisible && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-96 max-w-lg">
+            <div className="p-6">
+              <div className="flex items-center mb-4">
+                <svg className="w-8 h-8 text-yellow-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                </svg>
+                <h3 className="text-xl font-semibold">Import Taking Longer Than Expected</h3>
+              </div>
+              
+              <p className="text-gray-600 mb-4">
+                Your import has been running for {Math.floor(executionTime / 60)} minutes and {executionTime % 60} seconds. 
+                This could be due to a large file size or high server load.
+              </p>
+              
+              <div className="bg-yellow-50 p-3 rounded-md mb-4 text-sm text-yellow-800">
+                <p className="font-medium">Options:</p>
+                <ul className="list-disc pl-5 mt-1">
+                  <li>Continue waiting - The import will keep processing</li>
+                  <li>Cancel - Stop the import and try again later</li>
+                </ul>
+              </div>
+              
+              <div className="flex justify-end space-x-3">
+                <Button variant="secondary" onClick={handleCancelImport}>
+                  Cancel Import
+                </Button>
+                <Button onClick={handleContinueWaiting}>
+                  Continue Waiting
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
       
       <div className="steps flex mb-6">
         <div className={`step flex-1 p-3 text-center mr-1 rounded ${currentStep === 1 ? 'step-active bg-blue-500 text-white' : 'bg-gray-200'}`}>
