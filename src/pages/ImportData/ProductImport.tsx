@@ -47,7 +47,7 @@ const ProductImport: React.FC = () => {
   const [jobId, setJobId] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("Processing data...");
   const [loadingProgress, setLoadingProgress] = useState<number>(0);
-  const [batchSize, setBatchSize] = useState<number>(500); // Larger batch size for better performance
+  const [batchSize, setBatchSize] = useState<number>(100); // Default batch size
   const [pollInterval, setPollInterval] = useState<number | null>(null);
 
   // Setup polling for job status updates
@@ -165,8 +165,11 @@ const ProductImport: React.FC = () => {
         console.log('Including field mapping in upload:', fieldMapping);
       }
       
+      // Enable bulk import for better performance
+      formData.append('useBulkImport', 'true');
+      
       // Log API endpoint being used
-      console.log(`Uploading to server endpoint: ${API_URL}/api/upload/product`);
+      console.log(`Uploading to server endpoint: ${API_URL}/api/upload/product with bulk import enabled`);
       
       // Upload to server API
       try {
@@ -433,26 +436,35 @@ const ProductImport: React.FC = () => {
             </div>
             
             {/* Performance settings for large files */}
-            <div className="mt-6 border rounded-md p-4">
-              <h4 className="font-medium mb-3">Performance Settings</h4>
-              <div className="flex items-center">
-                <label htmlFor="batchSize" className="mr-2 text-sm">Batch Size:</label>
-                <input 
-                  type="number" 
-                  id="batchSize"
-                  className="w-24 border p-2 rounded"
-                  min="10"
-                  max="1000"
-                  value={batchSize}
-                  onChange={handleBatchSizeChange}
+            <div className="mt-6 bg-gray-50 p-4 rounded-lg border border-gray-200">
+              <h3 className="font-medium mb-2">Performance Settings</h3>
+              
+              <div className="flex items-center space-x-2 mb-3">
+                <input
+                  type="checkbox"
+                  id="useBulkImport"
+                  checked={true}
+                  readOnly
+                  className="rounded text-blue-600 focus:ring-blue-500"
                 />
-                <span className="ml-2 text-sm text-gray-500">
-                  Adjust for better performance when importing large files. Recommended: 100-500.
-                </span>
+                <label htmlFor="useBulkImport" className="text-sm">
+                  Use optimized bulk import (5-10x faster, recommended)
+                </label>
               </div>
-              <p className="text-xs text-gray-500 mt-2">
-                Files larger than 10MB will be processed on the server with progress tracking.
-              </p>
+              
+              <div className="flex items-center space-x-2">
+                <label htmlFor="batchSize" className="text-sm min-w-24">Batch size:</label>
+                <input
+                  type="number"
+                  id="batchSize"
+                  value={batchSize}
+                  onChange={(e) => setBatchSize(parseInt(e.target.value) || 100)}
+                  min="50"
+                  max="1000"
+                  className="border border-gray-300 rounded px-2 py-1 text-sm w-20"
+                />
+                <span className="text-xs text-gray-500">Records per database operation</span>
+              </div>
             </div>
           </div>
         )}

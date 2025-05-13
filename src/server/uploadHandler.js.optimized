@@ -424,7 +424,8 @@ router.post('/api/upload/product', upload.single('file'), async (req, res) => {
     });
     console.log('Form data:', {
       batchSize: req.body.batchSize,
-      hasFieldMapping: !!req.body.fieldMapping
+      hasFieldMapping: !!req.body.fieldMapping,
+      useBulkImport: req.body.useBulkImport === 'true'
     });
     
     // Create import job in database
@@ -448,7 +449,8 @@ router.post('/api/upload/product', upload.single('file'), async (req, res) => {
           type: 'product',
           user_id: req.user?.id || null,
           field_mapping: req.body.fieldMapping ? JSON.parse(req.body.fieldMapping) : null,
-          batch_size: req.body.batchSize ? parseInt(req.body.batchSize) : 100
+          batch_size: req.body.batchSize ? parseInt(req.body.batchSize) : 100,
+          fast_import: req.body.useBulkImport === 'true' // Add fast_import flag
         })
         .select()
         .single();
@@ -460,7 +462,8 @@ router.post('/api/upload/product', upload.single('file'), async (req, res) => {
 
       console.log('Job created successfully:', {
         jobId: job.id,
-        status: job.status
+        status: job.status,
+        useBulkImport: job.fast_import
       });
 
       // Start processing in background
@@ -493,6 +496,59 @@ router.post('/api/upload/product', upload.single('file'), async (req, res) => {
   } catch (error) {
     console.error('Product upload error:', error);
     return res.status(500).json({ error: 'File upload failed', details: error.message });
+  }
+});
+
+// New endpoint specifically for bulk product import
+router.post('/api/upload/product/bulk', upload.single('file'), async (req, res) => {
+  console.log('\n🚀🚀🚀 BULK PRODUCT UPLOAD ENDPOINT CALLED 🚀🚀🚀');
+  console.log('Request received at:', new Date().toISOString());
+  
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    console.log('File details:', {
+      filename: req.file.originalname,
+      size: req.file.size,
+      path: req.file.path
+    });
+    
+    // Create import job in database with fast_import flag set to true
+    const { data: job, error: jobError } = await supabase
+      .from('import_jobs')
+      .insert({
+        file_name: req.file.originalname,
+        file_size: req.file.size,
+        file_path: req.file.path,
+        status: 'pending',
+        type: 'product',
+        user_id: req.user?.id || null,
+        field_mapping: req.body.fieldMapping ? JSON.parse(req.body.fieldMapping) : null,
+        fast_import: true // Always use fast import for this endpoint
+      })
+      .select()
+      .single();
+
+    if (jobError) {
+      return res.status(500).json({ error: 'Failed to create import job', details: jobError });
+    }
+
+    // Start processing in background
+    console.log('Starting optimized bulk import processing...');
+    processProductImportJob(job.id);
+
+    // Return job ID to client for tracking
+    return res.status(200).json({ 
+      success: true, 
+      message: 'File uploaded and bulk processing started',
+      jobId: job.id,
+      bulkImport: true
+    });
+  } catch (error) {
+    console.error('Bulk upload error:', error);
+    return res.status(500).json({ error: 'Bulk file upload failed', details: error.message });
   }
 });
 
@@ -871,13 +927,6 @@ async function processProductImportJob(jobId) {
     // Get field mapping from job or auto-map if not provided
     let fieldMapping = job.field_mapping;
     
-    // Prepare for streaming through the CSV file
-    const results = {
-      totalRecords: 0,
-      successfulImports: 0,
-      failedImports: 0
-    };
-    
     // Verify file exists
     if (!fs.existsSync(job.file_path)) {
       throw new Error(`File not found at path: ${job.file_path}`);
@@ -907,16 +956,24 @@ async function processProductImportJob(jobId) {
             .from('import_jobs')
             .update({
               field_mapping: fieldMapping,
-              status_message: 'Auto-mapped product columns, starting data processing'
+              status_message: 'Auto-mapped product columns, starting bulk import'
             })
             .eq('id', jobId);
         } else {
           console.log('Using provided field mapping:', fieldMapping);
         }
-        
-        // Now process the file with streaming in chunks
-        console.log('Beginning file processing in chunks...');
-        processProductFileInChunks(job, fieldMapping, results);
+
+        // Check if the fast_import flag is set in the job
+        if (job.fast_import === true) {
+          console.log('🚀 Using optimized bulk import method for faster processing');
+          // Use the new bulk import method
+          await processProductBulkImport(job, fieldMapping);
+        } else {
+          console.log('Using standard chunk-based import method');
+          // Use the existing chunk-based approach
+          const results = { totalRecords: 0, successfulImports: 0, failedImports: 0 };
+          processProductFileInChunks(job, fieldMapping, results);
+        }
       })
       .on('error', (error) => {
         console.error('Error reading CSV headers:', error);
@@ -3185,3 +3242,128 @@ router.get('/api/logs/files', (req, res) => {
     return res.status(500).json({ error: 'Failed to list log files' });
   }
 });
+
+// Add this new function after processProductFileInChunks
+
+/**
+ * Optimized product import using PostgreSQL COPY for superior performance
+ * This approach dramatically reduces memory and CPU usage by leveraging PostgreSQL's bulk import capabilities
+ */
+async function processProductBulkImport(job, fieldMapping) {
+  console.log(`Starting optimized bulk import for job: ${job.id}`);
+  
+  try {
+    // Update job status to processing
+    await updateJobProgress(job.id, 10, 'Starting optimized bulk import');
+    
+    // 1. Create a unique temp table name to avoid conflicts with concurrent imports
+    const tempTableName = `temp_products_${Date.now()}`;
+    console.log(`Creating temporary table: ${tempTableName}`);
+    
+    const { error: createTableError } = await supabase.rpc('create_temp_import_table', { 
+      temp_table_name: tempTableName
+    });
+    
+    if (createTableError) {
+      console.error('Error creating temporary table:', createTableError);
+      await updateJobStatus(job.id, 'failed', `Failed to create temporary table: ${createTableError.message}`);
+      return;
+    }
+    
+    // 2. Load CSV data directly into the database
+    console.log(`Copying CSV data from: ${job.file_path}`);
+    await updateJobProgress(job.id, 20, 'Copying CSV data into database');
+    
+    // For server-side file access, we need to pass the file path
+    // Note: This requires the proper file permissions for PostgreSQL
+    const { error: copyError } = await supabase.rpc('copy_csv_to_table', {
+      table_name: tempTableName,
+      file_path: job.file_path,
+      has_header: true
+    });
+    
+    if (copyError) {
+      console.error('Error copying CSV data:', copyError);
+      await updateJobStatus(job.id, 'failed', `Failed to copy CSV data: ${copyError.message}`);
+      // Clean up temporary table
+      await supabase.rpc('drop_temp_table', { temp_table: tempTableName });
+      return;
+    }
+    
+    // 3. Clean and normalize the data
+    console.log('Cleaning and normalizing imported data');
+    await updateJobProgress(job.id, 50, 'Cleaning and normalizing data');
+    
+    const { error: cleanError } = await supabase.rpc('clean_import_data', {
+      temp_table: tempTableName
+    });
+    
+    if (cleanError) {
+      console.error('Error cleaning imported data:', cleanError);
+      await updateJobStatus(job.id, 'failed', `Failed to clean data: ${cleanError.message}`);
+      // Clean up temporary table
+      await supabase.rpc('drop_temp_table', { temp_table: tempTableName });
+      return;
+    }
+    
+    // 4. Merge data into products table with single operation
+    console.log('Merging data into products table');
+    await updateJobProgress(job.id, 75, 'Merging data into products table');
+    
+    const { data: mergeResults, error: mergeError } = await supabase.rpc('merge_products_data', {
+      source_table: tempTableName,
+      target_table: 'products'
+    });
+    
+    if (mergeError) {
+      console.error('Error merging data into products table:', mergeError);
+      await updateJobStatus(job.id, 'failed', `Failed to merge data: ${mergeError.message}`);
+      // Clean up temporary table
+      await supabase.rpc('drop_temp_table', { temp_table: tempTableName });
+      return;
+    }
+    
+    // 5. Get import statistics
+    console.log('Import completed, collecting statistics');
+    const totalCount = mergeResults?.[0]?.total_count || 0;
+    const insertedCount = mergeResults?.[0]?.inserted_count || 0;
+    const updatedCount = mergeResults?.[0]?.updated_count || 0;
+    
+    console.log(`Import statistics: Total=${totalCount}, Inserted=${insertedCount}, Updated=${updatedCount}`);
+    
+    // 6. Clean up temporary table
+    console.log('Cleaning up temporary resources');
+    await updateJobProgress(job.id, 90, 'Cleaning up temporary resources');
+    
+    await supabase.rpc('drop_temp_table', { temp_table: tempTableName });
+    
+    // 7. Update job as completed
+    console.log('Finalizing import job');
+    await supabase
+      .from('import_jobs')
+      .update({
+        status: 'completed',
+        status_message: 'Import completed successfully',
+        progress: 100,
+        results: {
+          totalRecords: totalCount,
+          newRecords: insertedCount,
+          updatedRecords: updatedCount,
+          importMethod: 'bulk'
+        },
+        completed_at: new Date().toISOString()
+      })
+      .eq('id', job.id);
+    
+    console.log('Bulk import completed successfully');
+    
+    // 8. Delete temporary file
+    fs.unlink(job.file_path, (err) => {
+      if (err) console.error('Error deleting temporary file:', err);
+      else console.log('Temporary file deleted');
+    });
+  } catch (error) {
+    console.error('Error in processProductBulkImport:', error);
+    await updateJobStatus(job.id, 'failed', `Error: ${error.message}`);
+  }
+}
