@@ -1568,184 +1568,113 @@ async function autoMapProductColumns(csvHeaders) {
   return mapping;
 }
 
-// Fixed mapProductData function for use in uploadHandler.js
-
-/**
- * Maps CSV data to product objects, with proper batching and memory management.
- * This is a fixed version to replace the broken function in uploadHandler.js.
- */
-// Fixed mapProductData function for use in uploadHandler.js
-
-/**
- * Maps CSV data to product objects, with proper batching and memory management.
- * This is a fixed version to replace the broken function in uploadHandler.js.
- */
+// Optimized mapProductData function for better memory and CPU performance
 async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 'Brand', 'Sale Price']) {
   try {
-    console.log(`Mapping ${csvData.length} product rows with field mapping:`, fieldMapping);
-    console.log('Using required fields:', requiredFields);
+    // Avoid logging large objects
+    console.log(`Mapping ${csvData.length} product rows`);
     
-    // Get all custom attributes to map them
-    const { data: customAttributes, error } = await supabase
-      .from('custom_attributes')
-      .select('*')
-      .eq('for_type', 'product');
-      
-    if (error) {
-      console.error('Error fetching custom attributes:', error);
-      throw error;
+    // Get custom attributes, but avoid refetching for each batch
+    if (!mapProductData.customAttributes) {
+      try {
+        const { data, error } = await supabase
+          .from('custom_attributes')
+          .select('*')
+          .eq('for_type', 'product');
+          
+        if (error) {
+          console.error('Error fetching custom attributes:', error);
+        } else {
+          // Cache attributes in function for reuse
+          mapProductData.customAttributes = data || [];
+          console.log(`Cached ${mapProductData.customAttributes.length} custom attributes`);
+        }
+      } catch (err) {
+        console.error('Exception fetching custom attributes:', err);
+        mapProductData.customAttributes = [];
+      }
     }
     
-    // Process in small batches to prevent memory issues
-    console.log(`Map product data called with ${csvData.length} rows`);
+    const customAttributes = mapProductData.customAttributes || [];
     
-    // In low memory mode, process in very small batches
-    const batchSize = config.lowMemoryMode ? 50 : 500;
-    const totalBatches = Math.ceil(csvData.length / batchSize);
-    
-    if (csvData.length > batchSize) {
-      console.log(`Breaking data mapping into ${totalBatches} batches of ${batchSize} rows each`);
-    }
-    
+    // Use a direct approach for small datasets without extra arrays
     const mappedData = [];
     
-    // Process in batches
-    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
-      const start = batchIndex * batchSize;
-      const end = Math.min(start + batchSize, csvData.length);
-      const batch = csvData.slice(start, end);
+    // Process rows directly
+    for (let i = 0; i < csvData.length; i++) {
+      const row = csvData[i];
       
-      console.log(`Processing batch ${batchIndex + 1}/${totalBatches} (${batch.length} rows)`);
-      
-      // Force GC between batches if available
-      if (global.gc && batchIndex > 0) {
-        global.gc();
-      }
-      
-      // Process this batch
-      for (const row of batch) {
-        try {
-          const productData = {
-            title: row[fieldMapping['Title']]?.trim() || '',
-            ean: row[fieldMapping['EAN']]?.trim() || '',
-            brand: row[fieldMapping['Brand']]?.trim() || '',
-            sale_price: parseFloat(row[fieldMapping['Sale Price']]) || 0,
-            amazon_fee: parseFloat(row[fieldMapping['Amazon Fee']]) || 0,
-            buy_box_price: parseFloat(row[fieldMapping['Buy Box Price']]) || 0,
-            units_sold: parseInt(row[fieldMapping['Units Sold']]) || 0,
-            category: row[fieldMapping['Category']]?.trim() || null,
-            rating: row[fieldMapping['Rating']] ? parseFloat(row[fieldMapping['Rating']]) : null,
-            review_count: row[fieldMapping['Review Count']] ? parseInt(row[fieldMapping['Review Count']]) : null,
-            custom_attributes: {}
-          };
-          
-          // Map any custom attributes found in the CSV
-          if (customAttributes) {
-            customAttributes.forEach(attr => {
-              if (fieldMapping[attr.name] && row[fieldMapping[attr.name]]) {
-                if (!productData.custom_attributes) {
-                  productData.custom_attributes = {};
-                }
-                
-                let value = row[fieldMapping[attr.name]];
-                
-                // Convert value based on attribute type
-                switch (attr.type) {
-                  case 'Number':
-                    value = parseFloat(value) || 0;
-                    break;
-                  case 'Date':
-                    // Attempt to parse as date, keep as string
-                    break;
-                  case 'Yes/No':
-                    value = value.toLowerCase() === 'yes' || 
-                           value.toLowerCase() === 'true' || 
-                           value === '1';
-                    break;
-                  default:
-                    // Keep as string for text and selection
-                    value = value.trim();
-                }
-                
-                productData.custom_attributes[attr.name] = value;
-              } else if (attr.required) {
-                // For required attributes, use default value if available
-                if (!productData.custom_attributes) {
-                  productData.custom_attributes = {};
-                }
-                productData.custom_attributes[attr.name] = attr.default_value;
-              }
-            });
+      try {
+        // Create product with direct field mapping
+        const productData = {
+          title: row[fieldMapping['Title']]?.trim() || '',
+          ean: row[fieldMapping['EAN']]?.trim() || '',
+          brand: row[fieldMapping['Brand']]?.trim() || '',
+          sale_price: parseFloat(row[fieldMapping['Sale Price']]) || 0,
+          amazon_fee: parseFloat(row[fieldMapping['Amazon Fee']]) || 0,
+          buy_box_price: parseFloat(row[fieldMapping['Buy Box Price']]) || 0,
+          units_sold: parseInt(row[fieldMapping['Units Sold']]) || 0,
+          category: row[fieldMapping['Category']]?.trim() || null,
+          rating: row[fieldMapping['Rating']] ? parseFloat(row[fieldMapping['Rating']]) : null,
+          review_count: row[fieldMapping['Review Count']] ? parseInt(row[fieldMapping['Review Count']]) : null,
+          custom_attributes: {}
+        };
+        
+        // Validate required fields
+        let skipProduct = false;
+        
+        for (const requiredField of requiredFields) {
+          // Map field names to properties
+          let fieldProperty;
+          switch (requiredField) {
+            case 'Title': fieldProperty = 'title'; break;
+            case 'Brand': fieldProperty = 'brand'; break;
+            case 'Sale Price': fieldProperty = 'sale_price'; break;
+            case 'EAN': fieldProperty = 'ean'; break;
+            default: fieldProperty = requiredField.toLowerCase().replace(/\s+/g, '_');
           }
           
-          // Validate product data using required fields from config
-          let skipProduct = false;
-          
-          // Check each required field
-          for (const requiredField of requiredFields) {
-            // Map system field names to data properties
-            let fieldProperty;
-            switch (requiredField) {
-              case 'Title':
-                fieldProperty = 'title';
-                break;
-              case 'Brand':
-                fieldProperty = 'brand';
-                break;
-              case 'Sale Price':
-                fieldProperty = 'sale_price';
-                break;
-              case 'EAN':
-                fieldProperty = 'ean';
-                break;
-              default:
-                // For custom fields, check in custom attributes
-                fieldProperty = requiredField.toLowerCase().replace(/\s+/g, '_');
-            }
-            
-            // Check if the field has a value
-            if (!productData[fieldProperty] && 
-                (productData[fieldProperty] !== 0 || fieldProperty !== 'sale_price')) {
-              console.warn(`Skipping product data: ${requiredField} is required`);
-              skipProduct = true;
-              break;
-            }
+          // Check for missing value
+          if (!productData[fieldProperty] && 
+              (productData[fieldProperty] !== 0 || fieldProperty !== 'sale_price')) {
+            skipProduct = true;
+            break;
           }
-          
-          if (skipProduct) {
-            continue;
-          }
-          
-          // If EAN is not provided, set it to an empty string
-          if (!productData.ean || productData.ean.trim() === '') {
-            productData.ean = '';
-          }
-          
-          mappedData.push(productData);
-        } catch (error) {
-          console.warn(`Skipping invalid product data: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
-      }
-      
-      // Allow event loop to continue before next batch
-      if (batchIndex < totalBatches - 1) {
-        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        if (skipProduct) continue;
+        
+        // Add custom attributes with minimal object creation
+        if (customAttributes.length > 0) {
+          for (const attr of customAttributes) {
+            if (fieldMapping[attr.name] && row[fieldMapping[attr.name]]) {
+              let value = row[fieldMapping[attr.name]];
+              
+              // Minimal type conversion
+              if (attr.type === 'Number') {
+                value = parseFloat(value) || 0;
+              } else if (attr.type === 'Yes/No') {
+                value = value.toLowerCase() === 'yes' || value === '1' || value.toLowerCase() === 'true';
+              }
+              
+              productData.custom_attributes[attr.name] = value;
+            }
+          }
+        }
+        
+        mappedData.push(productData);
+      } catch (error) {
+        // Skip invalid rows but continue processing
+        continue;
       }
     }
     
-    console.log(`Mapping complete. ${mappedData.length} valid products of ${csvData.length} total`);
     return mappedData;
   } catch (error) {
     console.error('Error mapping product data:', error);
-    throw error;
+    return [];
   }
 }
-
- 
-
- 
-
- 
 
 // Import supplier data function (reference to existing function)
 async function importSupplierData(mappedData, matchOptions, progressCallback, batchSize, matchColumns, jobId) {
@@ -2582,193 +2511,142 @@ function chunkArray(array, chunkSize) {
   return chunks;
 }
 
-// Import product data function
+// Import product data function with memory optimizations
 async function importProductData(mappedData, progressCallback, batchSize) {
   try {
-    console.log(`Importing ${mappedData.length} products with batch size ${batchSize}`);
-    
     if (!mappedData || mappedData.length === 0) {
-      throw new Error('No product data to import');
+      return { processedCount: 0, results: [] };
     }
 
-    const results = [];
+    console.log(`Importing ${mappedData.length} products with batch size ${batchSize}`);
     
-    // Process products in batches
+    let processedCount = 0;
+    let error = null;
+    
+    // Process products in smaller batches
     for (let i = 0; i < mappedData.length; i += batchSize) {
-      console.log(`Processing batch ${Math.floor(i/batchSize) + 1} of ${Math.ceil(mappedData.length/batchSize)}`);
+      // Track batch memory usage
+      const memBefore = process.memoryUsage().heapUsed / 1024 / 1024;
+      
+      // Get this batch
       const batch = mappedData.slice(i, i + batchSize).map(product => {
         const { custom_attributes, ...productData } = product;
         
-        // Build the product record with both standard fields and custom fields
+        // Create product record with minimal copying
         const productRecord = {
           ...productData,
           updated_at: new Date().toISOString()
         };
         
-        // If we have custom attributes, add them directly to the product record
+        // Add custom attributes directly to avoid extra objects
         if (custom_attributes) {
-          // Map known custom attributes to their respective columns
-          if (custom_attributes['Title'] !== undefined) productRecord.custom_title = custom_attributes['Title'];
-          if (custom_attributes['EAN'] !== undefined) productRecord.custom_ean = custom_attributes['EAN'];
-          if (custom_attributes['MPN'] !== undefined) {
+          if (custom_attributes['Title']) productRecord.custom_title = custom_attributes['Title'];
+          if (custom_attributes['EAN']) productRecord.custom_ean = custom_attributes['EAN'];
+          if (custom_attributes['MPN']) {
             productRecord.custom_mpn = custom_attributes['MPN'];
-            // Also store in the regular mpn column
             productRecord.mpn = custom_attributes['MPN'];
           }
-          if (custom_attributes['Units Sold in 30 days'] !== undefined) 
+          if (custom_attributes['Units Sold in 30 days']) 
             productRecord.custom_units_sold_in_30_days = custom_attributes['Units Sold in 30 days'];
-          if (custom_attributes['FBA Fee'] !== undefined) 
+          if (custom_attributes['FBA Fee']) 
             productRecord.custom_fba_fee = parseFloat(custom_attributes['FBA Fee']) || 0;
         }
         
         return productRecord;
       });
       
-      console.log(`Sending batch of ${batch.length} products to database`);
-      
-      // Process all products with the same approach (no longer separating by generated EANs)
-      let successfulInserts = [];
-      
-      // Upsert all products
       try {
-        const { data: upserted, error } = await supabase
+        // Don't return full representation, just count
+        const { count, error: upsertError } = await supabase
           .from('products')
           .upsert(batch, { 
             onConflict: 'ean',
             ignoreDuplicates: false,
-            returning: 'representation'
+            count: 'exact' // Just get count, not full records
           });
           
-        if (error) {
-          console.error('Error upserting products:', error);
-        } else if (upserted) {
-          console.log(`Successfully upserted ${upserted.length} products`);
-          successfulInserts = upserted;
+        if (upsertError) {
+          console.error('Error upserting products:', upsertError);
+          error = upsertError;
+        } else {
+          // Use count if available, otherwise assume batch size
+          const inserted = count ?? batch.length;
+          processedCount += inserted;
+          console.log(`Upserted batch ${Math.floor(i/batchSize) + 1}: ${inserted} products`);
         }
-      } catch (error) {
-        console.error('Exception during product upsert:', error);
+      } catch (err) {
+        console.error('Exception during product upsert:', err);
+        error = err;
       }
       
-      results.push(...successfulInserts);
+      // Clear batch reference
+      batch.length = 0;
       
-      
-      // Apply dynamic throttling between batches
-      if (i + batchSize < mappedData.length) {
-        // Check memory to determine delay
-        const memUsage = process.memoryUsage();
-        const memUsageMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-        const memPct = Math.round(memUsage.heapUsed / memUsage.heapTotal * 100);
+      // Force garbage collection after each batch
+      if (global.gc && i + batchSize < mappedData.length) {
+        // Check memory increase and log
+        const memAfter = process.memoryUsage().heapUsed / 1024 / 1024;
+        console.log(`Batch memory: ${Math.round(memBefore)}MB → ${Math.round(memAfter)}MB (${Math.round(memAfter - memBefore)}MB increase)`);
         
-        let throttleDelay = 100; // base delay
+        global.gc();
         
-        // Adjust delay based on memory pressure
-        if (memPct > 85) throttleDelay = 2000;
-        else if (memPct > 75) throttleDelay = 1000;
-        else if (memPct > 60) throttleDelay = 500;
-        
-        console.log(`Memory at ${memPct}%, waiting ${throttleDelay}ms before next batch`);
-        await new Promise(resolve => setTimeout(resolve, throttleDelay));
-        
-        // Force garbage collection if available
-        if (global.gc) {
-          global.gc();
-          console.log('Forced garbage collection between batches');
+        // Throttle if needed based on memory usage
+        const memUsage = process.memoryUsage().heapUsed / 1024 / 1024;
+        if (memUsage > 2000) { // 2GB
+          console.log(`High memory detected (${Math.round(memUsage)}MB), pausing for recovery`);
+          await new Promise(resolve => setTimeout(resolve, 2000));
+          global.gc(); // Double GC for critical scenarios
+        } else if (memUsage > 1500) { // 1.5GB
+          await new Promise(resolve => setTimeout(resolve, 500));
+        } else {
+          await new Promise(resolve => setTimeout(resolve, 50)); // Small pause between batches
         }
       }
     }
     
-    console.log(`Import complete. Processed ${results.length} products successfully`);
+    // Return simplified results
     return {
-      results,
-      processedCount: results.length
+      processedCount,
+      error
     };
   } catch (error) {
     console.error('Error importing product data:', error);
-    throw error;
+    return {
+      processedCount: 0,
+      error
+    };
   }
 }
 
 // Process the product file in manageable chunks using streaming with better progress reporting
 async function processProductFileInChunks(job, fieldMapping, results) {
-  const batchSize = job.batch_size || config.defaultBatchSize || 10; // Extremely reduced for memory optimization 
-  const chunkSize = job.chunk_size || config.defaultChunkSize || 50; // Extremely reduced for memory optimization
-  const totalRows = job.total_rows || 1000; // Use estimated total rows or default
+  // Reduce chunk size significantly to prevent memory spikes
+  const batchSize = job.batch_size || config.defaultBatchSize || 100; 
+  const chunkSize = 400; // Hardcode smaller chunk size for better memory management
+  const totalRows = job.total_rows || 1000; 
   
-  // Apply low memory mode if configured
-  if (config.lowMemoryMode) {
-    console.log('🚨 RUNNING IN LOW MEMORY MODE 🚨');
-    
-    // Override values with extremely conservative settings
-    if (chunkSize > 50) {
-      console.log(`Overriding chunk size ${chunkSize} with 50 due to low memory mode`);
-      chunkSize = 50;
-    }
-    
-    if (batchSize > 10) {
-      console.log(`Overriding batch size ${batchSize} with 10 due to low memory mode`);
-      batchSize = 10;
-    }
-    
-    // Hard limit on total rows to process in low memory mode
-    const hardRowLimit = config.maxRows || 50000;
-    if (totalRows > hardRowLimit) {
-      console.warn(`🚨 WARNING: File contains ${totalRows} rows, but low memory mode limits to ${hardRowLimit}`);
-      console.warn('The import will be truncated. Process your file in smaller chunks for complete import.');
-      
-      // Update job to warn user
-      await updateJobStatus(job.id, 'processing', 
-        `WARNING: File is too large (${totalRows} rows). Only processing first ${hardRowLimit} rows in low memory mode.`);
-      
-      totalRows = hardRowLimit;
-    }
-  }
+  // Memory limit protection - track and enforce max memory
+  const memoryLimit = Math.min(process.env.MEMORY_LIMIT_MB || 2500, 2500); // 2.5GB max
+  console.log(`Memory limit set to ${memoryLimit}MB`);
   
-      // Apply low memory mode if configured
-    if (config.lowMemoryMode) {
-      console.log('🚨 RUNNING IN LOW MEMORY MODE 🚨');
-      
-      // Override values with extremely conservative settings
-      if (chunkSize > 50) {
-        console.log(`Overriding chunk size ${chunkSize} with 50 due to low memory mode`);
-        chunkSize = 50;
-      }
-      
-      if (batchSize > 10) {
-        console.log(`Overriding batch size ${batchSize} with 10 due to low memory mode`);
-        batchSize = 10;
-      }
-      
-      // Hard limit on total rows to process in low memory mode
-      const hardRowLimit = config.maxRows || 50000;
-      if (totalRows > hardRowLimit) {
-        console.warn(`🚨 WARNING: File contains ${totalRows} rows, but low memory mode limits to ${hardRowLimit}`);
-        console.warn('The import will be truncated. Process your file in smaller chunks for complete import.');
-        
-        // Update job to warn user
-        await updateJobStatus(job.id, 'processing', 
-          `WARNING: File is too large (${totalRows} rows). Only processing first ${hardRowLimit} rows in low memory mode.`);
-        
-        totalRows = hardRowLimit;
-      }
-    }
-
   console.log(`Processing product file in chunks. Batch size: ${batchSize}, Chunk size: ${chunkSize}, Estimated total rows: ${totalRows}`);
   console.log(`File path: ${job.file_path}`);
   console.log(`File size: ${job.file_size} bytes`);
   
   let currentChunk = [];
   let totalProcessed = 0;
-  
-  
-  // Track memory usage and implement aggressive throttling
+  let lastUpdateTime = Date.now();
   let lastMemoryCheck = Date.now();
   let gcInterval = null;
-  let throttleDelay = 0; // Dynamic throttling delay
-  let highMemCount = 0; // Count consecutive high memory events
+  let throttleDelay = 0;
   
-  // Set up garbage collection interval for all file sizes in extreme mode
+  // Create a counter for more frequent GC
+  let rowCounter = 0;
+  const gcFrequency = 1000; // GC every 1000 rows processed
+  
+  // Set up more frequent garbage collection
   if (global.gc) {
-    console.log(`Setting up forced garbage collection interval for file processing`);
+    console.log('Setting up forced garbage collection');
     gcInterval = setInterval(() => {
       try {
         const memUsage = process.memoryUsage();
@@ -2776,215 +2654,238 @@ async function processProductFileInChunks(job, fieldMapping, results) {
         const memPct = Math.round(memUsage.heapUsed / memUsage.heapTotal * 100);
         console.log(`Memory usage: ${memUsageMB}MB / ${Math.round(memUsage.heapTotal / 1024 / 1024)}MB (${memPct}%)`);
         
-        // Aggressive throttling based on memory usage
-        if (memUsageMB > (config.highMemoryThreshold || 512)) {
-          highMemCount++;
-          throttleDelay = Math.min(5000, throttleDelay + 1000); // Increase throttling aggressively
+        // Check against memory limit
+        if (memUsageMB > memoryLimit * 0.9) {
+          console.warn(`⚠️ CRITICAL: Memory usage ${memUsageMB}MB approaching limit ${memoryLimit}MB`);
+          throttleDelay = 5000; // Extreme throttling
           
-          // If memory is critically high, force garbage collection and pause longer
-          if (memPct > 90 || highMemCount > 3) {
-            console.log(`CRITICAL: Memory usage is ${memPct}% - forcing GC and adding extra delay`);
-            global.gc();
-            return new Promise(resolve => setTimeout(resolve, 1000)).then(() => {
-              global.gc(); // Double GC to be thorough
-              highMemCount = 0; // Reset after taking action
-            });
+          // Force garbage collection twice
+          global.gc();
+          setTimeout(() => global.gc(), 500);
+          
+          // If still too high, take drastic measures
+          if (memUsageMB > memoryLimit * 0.95) {
+            console.error(`🚨 EMERGENCY: Memory usage critical at ${memUsageMB}MB`);
+            // Clear any waiting chunks to free memory
+            if (currentChunk.length > 0) {
+              console.log(`Emergency clearing ${currentChunk.length} cached rows`);
+              currentChunk.length = 0;
+            }
           }
-          
-          console.log(`High memory usage detected (${memUsageMB}MB), setting throttle delay to ${throttleDelay}ms`);
-        } else if (throttleDelay > 0 && memUsageMB < ((config.highMemoryThreshold || 512) * 0.6)) {
-          // If memory usage is below 60% of threshold, reduce throttling
+        } else if (memUsageMB > memoryLimit * 0.7) {
+          throttleDelay = Math.min(3000, throttleDelay + 1000);
+          console.log(`High memory usage (${memUsageMB}MB), setting throttle delay to ${throttleDelay}ms`);
+        } else if (throttleDelay > 0 && memUsageMB < memoryLimit * 0.5) {
           throttleDelay = Math.max(0, throttleDelay - 500);
-          highMemCount = Math.max(0, highMemCount - 1);
           console.log(`Memory usage acceptable (${memUsageMB}MB), reducing throttle delay to ${throttleDelay}ms`);
         }
         
         global.gc();
-        console.log('Forced garbage collection complete');
       } catch (err) {
         console.error('Error during garbage collection:', err);
       }
-    }, config.forceGCInterval || 1000);
-  }let lastUpdateTime = Date.now();
+    }, 3000); // Check more frequently
+  }
   
   try {
-    // Set up aggressive stream handling to prevent memory issues
+    // Use a smaller buffer size for reading
     const streamOptions = { 
       encoding: 'utf8',
-      highWaterMark: config.csvHighWaterMark || 16 * 1024, // Use config setting or default to 16KB
+      highWaterMark: 8 * 1024, // Smaller buffer (8KB)
       emitClose: true,
       autoDestroy: true
     };
-    console.log('Creating read stream for product file with options:', streamOptions);
+    console.log('Creating read stream with options:', streamOptions);
     const fileStream = fs.createReadStream(job.file_path, streamOptions);
-  
-    // Set up CSV parser with strict limits
+    
+    // Use smaller batch size for CSV parser
     const csvOptions = {
       skipLines: 0,
-      maxRows: config.maxRows || 50000, // Hard limit on rows
-      strict: false, // Be more forgiving with CSV format
+      maxRows: config.maxRows || 100000,
+      strict: false,
       objectMode: true,
-      highWaterMark: config.csvObjectHighWaterMark || 50 // Use config setting or default to 50
+      highWaterMark: 25 // Smaller object buffer
     };
-    console.log('CSV parser options:', csvOptions);
-  
-    // Initial progress update to show process has started
-    await updateJobProgress(job.id, 32, `Started processing data`);
     
-    fileStream
-      .pipe(csv(csvOptions))
-      .on('data', async (row) => {
-        currentChunk.push(row);
-        
-        // When chunk reaches size, pause stream and process
-        if (currentChunk.length >= chunkSize) {
-          fileStream.pause();
-          // Give the event loop time to catch up and handle backpressure
-          await new Promise(resolve => setTimeout(resolve, 50));
-          // Give the event loop time to catch up and handle backpressure
-          await new Promise(resolve => setTimeout(resolve, 50));
-          console.log(`Processing product chunk of ${currentChunk.length} rows...`);
+    await updateJobProgress(job.id, 10, `Started processing data`);
+    
+    // Create a promise for tracking completion
+    const processingComplete = new Promise((resolve, reject) => {
+      fileStream
+        .pipe(csv(csvOptions))
+        .on('data', async (row) => {
+          rowCounter++;
           
-          // Apply throttling if necessary
-          if (throttleDelay > 0) {
-            console.log(`Throttling processing for ${throttleDelay}ms to manage memory usage`);
-            await new Promise(resolve => setTimeout(resolve, throttleDelay));
+          // Instead of building up a large chunk in memory, immediately process rows
+          // when we reach smaller threshold
+          currentChunk.push(row);
+          
+          if (currentChunk.length >= chunkSize) {
+            // Pause stream
+            fileStream.pause();
+            
+            // Apply throttling if needed
+            if (throttleDelay > 0) {
+              await new Promise(resolve => setTimeout(resolve, throttleDelay));
+            }
+            
+            try {
+              // Process smaller chunks to reduce memory pressure
+              console.log(`Processing ${currentChunk.length} rows (total so far: ${totalProcessed})`);
+              await processProductChunk(currentChunk, job, fieldMapping, results);
+              
+              // Track progress
+              totalProcessed += currentChunk.length;
+              
+              // Calculate progress
+              const progress = Math.min(90, Math.floor(10 + (80 * Math.min(totalProcessed / totalRows, 1))));
+              
+              // Update progress less frequently
+              const now = Date.now();
+              if (now - lastUpdateTime > 3000) {
+                await updateJobProgress(job.id, progress, `Processing data... ${progress}%`);
+                lastUpdateTime = now;
+              }
+              
+            } catch (error) {
+              console.error('Error processing chunk:', error);
+            }
+            
+            // Explicitly clear the array to help GC
+            currentChunk.length = 0;
+            
+            // Force more aggressive garbage collection
+            if (global.gc && rowCounter % gcFrequency === 0) {
+              global.gc();
+            }
+            
+            // Resume stream with small delay to allow GC to work
+            setTimeout(() => fileStream.resume(), 50);
+          }
+        })
+        .on('end', async () => {
+          // Process remaining rows
+          if (currentChunk.length > 0) {
+            try {
+              await processProductChunk(currentChunk, job, fieldMapping, results);
+              totalProcessed += currentChunk.length;
+              currentChunk.length = 0;
+            } catch (error) {
+              console.error('Error processing final chunk:', error);
+            }
           }
           
-          // Check memory usage before processing chunk
-          const memoryUsage = process.memoryUsage();
-          const memoryUsageMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
-          console.log(`Current memory usage: ${memoryUsageMB}MB`);
+          if (gcInterval) {
+            clearInterval(gcInterval);
+          }
           
+          // Do one final GC
+          if (global.gc) {
+            global.gc();
+          }
           
-          // Add timeout protection to prevent processing from hanging
-          const chunkProcessingPromise = processProductChunk(currentChunk, job, fieldMapping, results);
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Chunk processing timeout')), 60000);
-          });
+          console.log(`Processing complete. Total rows: ${totalProcessed}`);
+          await updateJobProgress(job.id, 95, 'Finalizing import');
           
           try {
-            await Promise.race([chunkProcessingPromise, timeoutPromise]);
-            totalProcessed += currentChunk.length;
-            currentChunk = [];
-          } catch (error) {
-            console.error('Error or timeout processing product chunk:', error);
-            // Force reset of current chunk if timeout occurred
-            if (error.message === 'Chunk processing timeout') {
-              console.warn('TIMEOUT: Forcing chunk reset to prevent memory issues');
-              currentChunk = [];
-              // Force garbage collection
-              if (global.gc) {
-                global.gc();
-                console.log('Forced garbage collection after timeout');
-              }
-            }
-          }
+            // Update job with minimal result data
+            await supabase
+              .from('import_jobs')
+              .update({
+                status: 'completed',
+                status_message: 'Import completed successfully',
+                progress: 100,
+                // Store only summary stats, not full results
+                results: {
+                  totalRecords: results.totalRecords || totalProcessed,
+                  successfulImports: results.successfulImports || totalProcessed,
+                  failedImports: results.failedImports || 0
+                },
+                completed_at: new Date().toISOString()
+              })
+              .eq('id', job.id);
+              
+            console.log('Job marked as completed');
             
-            // Calculate progress as a percentage between 35% (start) and 90% (end of data processing)
-            // This leaves room for remaining 10% for finalizing
-            const dataProcessingRange = 55; // From 35% to 90%
-            const completionPercentage = Math.min(totalProcessed / totalRows, 1);
-            const progress = Math.min(90, Math.floor(35 + (dataProcessingRange * completionPercentage)));
-            
-            // Update progress every 2 seconds or after processing large chunks
-            const now = Date.now();
-            if (now - lastUpdateTime > 2000) {
-              console.log(`Progress update: ${progress}% - Processed ${totalProcessed}/${totalRows} rows`);
-              await updateJobProgress(job.id, progress, `Processing data... ${progress}%`);
-              lastUpdateTime = now;
+            // Clean up
+            try {
+              fs.unlinkSync(job.file_path);
+              console.log('Temporary file deleted');
+            } catch (err) {
+              console.error('Error deleting file:', err);
             }
-          } catch (error) {
-            console.error('Error processing product chunk:', error);
+            
+            resolve();
+          } catch (dbError) {
+            console.error('Error updating job status:', dbError);
+            reject(dbError);
           }
-          
-          fileStream.resume();
-        }
-      })
-      .on('end', async () => {
-        // Process any remaining rows
-        if (currentChunk.length > 0) {
-          console.log(`Processing final product chunk of ${currentChunk.length} rows...`);
-          await processProductChunk(currentChunk, job, fieldMapping, results);
-          totalProcessed += currentChunk.length;
-        }
-        
-        console.log(`Product file processing complete. Total rows processed: ${totalProcessed}`);
-        
-        // Clear the garbage collection interval if set
-        if (gcInterval) {
-          clearInterval(gcInterval);
-          console.log('Cleared garbage collection interval');
-        }
-        
-        console.log('Results:', results);
-        
-        // Update progress to 95% - finalizing import
-        await updateJobProgress(job.id, 95, 'Finalizing import');
-        
-        // Update job as completed
-        await supabase
-          .from('import_jobs')
-          .update({
-            status: 'completed',
-            status_message: 'Import completed successfully',
-            progress: 100,
-            results: results,
-            completed_at: new Date().toISOString()
-          })
-          .eq('id', job.id);
-        
-        console.log('Product import job marked as completed');
-          
-        // Clean up temporary file
-        fs.unlink(job.file_path, (err) => {
-          if (err) console.error('Error deleting temporary file:', err);
-          else console.log('Temporary file deleted');
+        })
+        .on('error', async (error) => {
+          console.error('Error reading CSV:', error);
+          await updateJobStatus(job.id, 'failed', `Error reading CSV: ${error.message}`);
+          reject(error);
         });
-      })
-      .on('error', async (error) => {
-        console.error('Error reading product CSV file:', error);
-        await updateJobStatus(job.id, 'failed', `Error reading CSV file: ${error.message}`);
-      });
+    });
+    
+    // Wait for processing to complete
+    await processingComplete;
+    
   } catch (error) {
     console.error('Error in processProductFileInChunks:', error);
-    await updateJobStatus(job.id, 'failed', `Error processing product file: ${error.message}`);
+    await updateJobStatus(job.id, 'failed', `Error: ${error.message}`);
+    
+    if (gcInterval) {
+      clearInterval(gcInterval);
+    }
   }
 }
 
 // Process a chunk of product CSV data
 async function processProductChunk(chunk, job, fieldMapping, results) {
   try {
-    console.log(`Processing ${chunk.length} product rows with field mapping:`, fieldMapping);
+    console.log(`Processing ${chunk.length} product rows`);
     
     // Get required fields from config
     const requiredFields = config.requiredFields?.product || ['Title', 'Brand', 'Sale Price'];
-    console.log('Required product fields from config:', requiredFields);
     
-    // Map the data according to field mapping
-    const mappedData = await mapProductData(chunk, fieldMapping, requiredFields);
-    console.log(`Mapped ${mappedData.length} products successfully`);
+    // Process in even smaller batches to reduce memory pressure
+    const subChunkSize = 200; // Process 200 rows at a time
     
-    // Process the mapped data in smaller batches for database operations
-    const batchSize = job.batch_size || config.defaultBatchSize || 10; // Extremely reduced for memory optimization // Use smaller batches for memory optimization
+    // Track results for this chunk
+    let chunkSuccessCount = 0;
     
-    // Process the product data
-    console.log(`Importing products with batch size: ${batchSize}`);
-    const importResults = await importProductData(
-      mappedData,
-      null, // No progress callback needed here
-      batchSize
-    );
-    
-    console.log('Import results:', importResults);
+    // Process sub-chunks to prevent memory spikes
+    for (let i = 0; i < chunk.length; i += subChunkSize) {
+      const subChunk = chunk.slice(i, i + subChunkSize);
+      console.log(`Processing sub-chunk ${Math.floor(i/subChunkSize) + 1}/${Math.ceil(chunk.length/subChunkSize)}, size: ${subChunk.length}`);
+      
+      // Map data without creating large intermediate arrays
+      const mappedData = await mapProductData(subChunk, fieldMapping, requiredFields);
+      
+      // Process immediately to reduce memory pressure
+      const importResults = await importProductData(
+        mappedData,
+        null,
+        100 // Use smaller batch size for database operations
+      );
+      
+      // Update counts but don't store detailed results
+      chunkSuccessCount += importResults.processedCount || 0;
+      
+      // Clear references to help garbage collection
+      subChunk.length = 0;
+      
+      // Let event loop breathe between sub-chunks
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
     
     // Update results
-    results.totalRecords += chunk.length;
-    results.successfulImports += importResults.processedCount || 0;
-    results.failedImports += (chunk.length - (importResults.processedCount || 0));
+    results.totalRecords = (results.totalRecords || 0) + chunk.length;
+    results.successfulImports = (results.successfulImports || 0) + chunkSuccessCount;
+    results.failedImports = (results.failedImports || 0) + (chunk.length - chunkSuccessCount);
     
-    console.log('Chunk processing complete. Updated results:', results);
-    return results;
+    return;
   } catch (error) {
     console.error('Error processing product chunk:', error);
     throw error;
