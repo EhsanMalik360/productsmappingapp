@@ -987,7 +987,9 @@ async function processFileInChunks(job, fieldMapping, results) {
     console.log('Creating read stream for file...');
     const fileStream = fs.createReadStream(job.file_path, { 
       encoding: 'utf8',
-      highWaterMark: 64 * 1024 // 64KB buffer size to reduce memory usage
+      highWaterMark: config.csvHighWaterMark || 64 * 1024, // Use config setting or default to 64KB buffer
+      emitClose: true,
+      autoDestroy: true
     });
     
     // Initial progress update to show process has started
@@ -997,7 +999,9 @@ async function processFileInChunks(job, fieldMapping, results) {
     const csvStream = fileStream.pipe(csv({
       skipLines: 0,
       maxRows: config.maxRows || (totalRows + 1), // Limit to prevent memory issues
-      strict: false // Be more forgiving with CSV format
+      strict: false, // Be more forgiving with CSV format
+      objectMode: true,
+      highWaterMark: config.csvObjectHighWaterMark || 100 // Control objects in memory
     }));
     
     // Track failed rows for reporting
@@ -1011,6 +1015,8 @@ async function processFileInChunks(job, fieldMapping, results) {
         // Pause both streams to prevent buffer overflow
         csvStream.pause();
         fileStream.pause();
+          // Give the event loop time to catch up and handle backpressure
+          await new Promise(resolve => setTimeout(resolve, 50));
           // Give the event loop time to catch up and handle backpressure
           await new Promise(resolve => setTimeout(resolve, 50));
         
@@ -1562,7 +1568,18 @@ async function autoMapProductColumns(csvHeaders) {
   return mapping;
 }
 
-// Map product data function
+// Fixed mapProductData function for use in uploadHandler.js
+
+/**
+ * Maps CSV data to product objects, with proper batching and memory management.
+ * This is a fixed version to replace the broken function in uploadHandler.js.
+ */
+// Fixed mapProductData function for use in uploadHandler.js
+
+/**
+ * Maps CSV data to product objects, with proper batching and memory management.
+ * This is a fixed version to replace the broken function in uploadHandler.js.
+ */
 async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 'Brand', 'Sale Price']) {
   try {
     console.log(`Mapping ${csvData.length} product rows with field mapping:`, fieldMapping);
@@ -1578,9 +1595,6 @@ async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 
       console.error('Error fetching custom attributes:', error);
       throw error;
     }
-    
-    const mappedData = [];
-    
     
     // Process in small batches to prevent memory issues
     console.log(`Map product data called with ${csvData.length} rows`);
@@ -1609,127 +1623,134 @@ async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 
       }
       
       // Process this batch
-for (const row of batch) {
-      try {
-        const productData = {
-          title: row[fieldMapping['Title']]?.trim() || '',
-          ean: row[fieldMapping['EAN']]?.trim() || '',
-          brand: row[fieldMapping['Brand']]?.trim() || '',
-          sale_price: parseFloat(row[fieldMapping['Sale Price']]) || 0,
-          amazon_fee: parseFloat(row[fieldMapping['Amazon Fee']]) || 0,
-          buy_box_price: parseFloat(row[fieldMapping['Buy Box Price']]) || 0,
-          units_sold: parseInt(row[fieldMapping['Units Sold']]) || 0,
-          category: row[fieldMapping['Category']]?.trim() || null,
-          rating: row[fieldMapping['Rating']] ? parseFloat(row[fieldMapping['Rating']]) : null,
-          review_count: row[fieldMapping['Review Count']] ? parseInt(row[fieldMapping['Review Count']]) : null,
-          custom_attributes: {}
-        };
-        
-        // Map any custom attributes found in the CSV
-        if (customAttributes) {
-          customAttributes.forEach(attr => {
-            if (fieldMapping[attr.name] && row[fieldMapping[attr.name]]) {
-              if (!productData.custom_attributes) {
-                productData.custom_attributes = {};
+      for (const row of batch) {
+        try {
+          const productData = {
+            title: row[fieldMapping['Title']]?.trim() || '',
+            ean: row[fieldMapping['EAN']]?.trim() || '',
+            brand: row[fieldMapping['Brand']]?.trim() || '',
+            sale_price: parseFloat(row[fieldMapping['Sale Price']]) || 0,
+            amazon_fee: parseFloat(row[fieldMapping['Amazon Fee']]) || 0,
+            buy_box_price: parseFloat(row[fieldMapping['Buy Box Price']]) || 0,
+            units_sold: parseInt(row[fieldMapping['Units Sold']]) || 0,
+            category: row[fieldMapping['Category']]?.trim() || null,
+            rating: row[fieldMapping['Rating']] ? parseFloat(row[fieldMapping['Rating']]) : null,
+            review_count: row[fieldMapping['Review Count']] ? parseInt(row[fieldMapping['Review Count']]) : null,
+            custom_attributes: {}
+          };
+          
+          // Map any custom attributes found in the CSV
+          if (customAttributes) {
+            customAttributes.forEach(attr => {
+              if (fieldMapping[attr.name] && row[fieldMapping[attr.name]]) {
+                if (!productData.custom_attributes) {
+                  productData.custom_attributes = {};
+                }
+                
+                let value = row[fieldMapping[attr.name]];
+                
+                // Convert value based on attribute type
+                switch (attr.type) {
+                  case 'Number':
+                    value = parseFloat(value) || 0;
+                    break;
+                  case 'Date':
+                    // Attempt to parse as date, keep as string
+                    break;
+                  case 'Yes/No':
+                    value = value.toLowerCase() === 'yes' || 
+                           value.toLowerCase() === 'true' || 
+                           value === '1';
+                    break;
+                  default:
+                    // Keep as string for text and selection
+                    value = value.trim();
+                }
+                
+                productData.custom_attributes[attr.name] = value;
+              } else if (attr.required) {
+                // For required attributes, use default value if available
+                if (!productData.custom_attributes) {
+                  productData.custom_attributes = {};
+                }
+                productData.custom_attributes[attr.name] = attr.default_value;
               }
-              
-              let value = row[fieldMapping[attr.name]];
-              
-              // Convert value based on attribute type
-              switch (attr.type) {
-                case 'Number':
-                  value = parseFloat(value) || 0;
-                  break;
-                case 'Date':
-                  // Attempt to parse as date, keep as string
-                  break;
-                case 'Yes/No':
-                  value = value.toLowerCase() === 'yes' || 
-                         value.toLowerCase() === 'true' || 
-                         value === '1';
-                  break;
-                default:
-                  // Keep as string for text and selection
-                  value = value.trim();
-              }
-              
-              productData.custom_attributes[attr.name] = value;
-            } else if (attr.required) {
-              // For required attributes, use default value if available
-              if (!productData.custom_attributes) {
-                productData.custom_attributes = {};
-              }
-              productData.custom_attributes[attr.name] = attr.default_value;
-            }
-          });
-        }
-        
-        // Validate product data using required fields from config
-        let skipProduct = false;
-        
-        // Check each required field
-        for (const requiredField of requiredFields) {
-          // Map system field names to data properties
-          let fieldProperty;
-          switch (requiredField) {
-            case 'Title':
-              fieldProperty = 'title';
-              break;
-            case 'Brand':
-              fieldProperty = 'brand';
-              break;
-            case 'Sale Price':
-              fieldProperty = 'sale_price';
-              break;
-            case 'EAN':
-              fieldProperty = 'ean';
-              break;
-            default:
-              // For custom fields, check in custom attributes
-              fieldProperty = requiredField.toLowerCase().replace(/\s+/g, '_');
+            });
           }
           
-          // Check if the field has a value
-          if (!productData[fieldProperty] && 
-              (productData[fieldProperty] !== 0 || fieldProperty !== 'sale_price')) {
-            console.warn(`Skipping product data: ${requiredField} is required`);
-            skipProduct = true;
-            break;
+          // Validate product data using required fields from config
+          let skipProduct = false;
+          
+          // Check each required field
+          for (const requiredField of requiredFields) {
+            // Map system field names to data properties
+            let fieldProperty;
+            switch (requiredField) {
+              case 'Title':
+                fieldProperty = 'title';
+                break;
+              case 'Brand':
+                fieldProperty = 'brand';
+                break;
+              case 'Sale Price':
+                fieldProperty = 'sale_price';
+                break;
+              case 'EAN':
+                fieldProperty = 'ean';
+                break;
+              default:
+                // For custom fields, check in custom attributes
+                fieldProperty = requiredField.toLowerCase().replace(/\s+/g, '_');
+            }
+            
+            // Check if the field has a value
+            if (!productData[fieldProperty] && 
+                (productData[fieldProperty] !== 0 || fieldProperty !== 'sale_price')) {
+              console.warn(`Skipping product data: ${requiredField} is required`);
+              skipProduct = true;
+              break;
+            }
           }
+          
+          if (skipProduct) {
+            continue;
+          }
+          
+          // If EAN is not provided, generate a placeholder
+          if (!productData.ean || productData.ean.trim() === '') {
+            // Generate a placeholder EAN based on brand and title
+            const brandPart = productData.brand ? productData.brand.substring(0, 5).replace(/\W/g, '') : 'brand';
+            const titlePart = productData.title ? productData.title.substring(0, 10).replace(/\W/g, '') : 'title';
+            const timestamp = Date.now().toString().substring(6);
+            productData.ean = `GEN${brandPart}${titlePart}${timestamp}`.substring(0, 30);
+            console.log(`Generated placeholder EAN for product: ${productData.title} -> ${productData.ean}`);
+          }
+          
+          mappedData.push(productData);
+        } catch (error) {
+          console.warn(`Skipping invalid product data: ${error instanceof Error ? error.message : 'Unknown error'}`);
         }
-        
-        if (skipProduct) {
-          continue;
-        }
-        
-        // If EAN is not provided, generate a placeholder
-        if (!productData.ean || productData.ean.trim() === '') {
-          // Generate a placeholder EAN based on brand and title
-          const brandPart = productData.brand ? productData.brand.substring(0, 5).replace(/\W/g, '') : 'brand';
-          const titlePart = productData.title ? productData.title.substring(0, 10).replace(/\W/g, '') : 'title';
-          const timestamp = Date.now().toString().substring(6);
-          productData.ean = `GEN${brandPart}${titlePart}${timestamp}`.substring(0, 30);
-          console.log(`Generated placeholder EAN for product: ${productData.title} -> ${productData.ean}`);
-        }
-        
-        mappedData.push(productData);
-      } catch (error) {
-        console.warn(`Skipping invalid product data: ${error instanceof Error ? error.message : 'Unknown error'}`);
       }
-    }
-    
-    
+      
       // Allow event loop to continue before next batch
       if (batchIndex < totalBatches - 1) {
         await new Promise(resolve => setTimeout(resolve, 100));
       }
-    }console.log(`Mapping complete. ${mappedData.length} valid products of ${csvData.length} total`);
+    }
+    
+    console.log(`Mapping complete. ${mappedData.length} valid products of ${csvData.length} total`);
     return mappedData;
   } catch (error) {
     console.error('Error mapping product data:', error);
     throw error;
   }
 }
+
+ 
+
+ 
+
+ 
 
 // Import supplier data function (reference to existing function)
 async function importSupplierData(mappedData, matchOptions, progressCallback, batchSize, matchColumns, jobId) {
@@ -2721,7 +2742,6 @@ async function importProductData(mappedData, progressCallback, batchSize) {
           console.log('Forced garbage collection between batches');
         }
       }
-      }
     }
     
     console.log(`Import complete. Processed ${results.length} products successfully`);
@@ -2737,9 +2757,38 @@ async function importProductData(mappedData, progressCallback, batchSize) {
 
 // Process the product file in manageable chunks using streaming with better progress reporting
 async function processProductFileInChunks(job, fieldMapping, results) {
-  const batchSize = job.batch_size || config.defaultBatchSize || 10; // Extremely reduced for memory optimization // Use smaller batches for memory optimization
-  const chunkSize = job.chunk_size || config.defaultChunkSize || 50; // Extremely reduced for memory optimization // Use smaller chunks for memory optimization
+  const batchSize = job.batch_size || config.defaultBatchSize || 10; // Extremely reduced for memory optimization 
+  const chunkSize = job.chunk_size || config.defaultChunkSize || 50; // Extremely reduced for memory optimization
   const totalRows = job.total_rows || 1000; // Use estimated total rows or default
+  
+  // Apply low memory mode if configured
+  if (config.lowMemoryMode) {
+    console.log('🚨 RUNNING IN LOW MEMORY MODE 🚨');
+    
+    // Override values with extremely conservative settings
+    if (chunkSize > 50) {
+      console.log(`Overriding chunk size ${chunkSize} with 50 due to low memory mode`);
+      chunkSize = 50;
+    }
+    
+    if (batchSize > 10) {
+      console.log(`Overriding batch size ${batchSize} with 10 due to low memory mode`);
+      batchSize = 10;
+    }
+    
+    // Hard limit on total rows to process in low memory mode
+    const hardRowLimit = config.maxRows || 50000;
+    if (totalRows > hardRowLimit) {
+      console.warn(`🚨 WARNING: File contains ${totalRows} rows, but low memory mode limits to ${hardRowLimit}`);
+      console.warn('The import will be truncated. Process your file in smaller chunks for complete import.');
+      
+      // Update job to warn user
+      await updateJobStatus(job.id, 'processing', 
+        `WARNING: File is too large (${totalRows} rows). Only processing first ${hardRowLimit} rows in low memory mode.`);
+      
+      totalRows = hardRowLimit;
+    }
+  }
   
       // Apply low memory mode if configured
     if (config.lowMemoryMode) {
@@ -2772,9 +2821,11 @@ async function processProductFileInChunks(job, fieldMapping, results) {
 
   console.log(`Processing product file in chunks. Batch size: ${batchSize}, Chunk size: ${chunkSize}, Estimated total rows: ${totalRows}`);
   console.log(`File path: ${job.file_path}`);
+  console.log(`File size: ${job.file_size} bytes`);
   
   let currentChunk = [];
   let totalProcessed = 0;
+  
   
   // Track memory usage and implement aggressive throttling
   let lastMemoryCheck = Date.now();
@@ -2824,26 +2875,26 @@ async function processProductFileInChunks(job, fieldMapping, results) {
   }let lastUpdateTime = Date.now();
   
   try {
-          // Set up aggressive stream handling to prevent memory issues
-      const streamOptions = { 
-        encoding: 'utf8',
-        highWaterMark: 16 * 1024, // Smaller buffer size of 16KB
-        emitClose: true,
-        autoDestroy: true
-      };
-      console.log('Creating read stream for product file with options:', streamOptions);
-      const fileStream = fs.createReadStream(job.file_path, streamOptions);
-    
-      // Set up CSV parser with strict limits
-      const csvOptions = {
-        skipLines: 0,
-        maxRows: config.maxRows || 50000, // Hard limit on rows
-        strict: false, // Be more forgiving with CSV format
-        objectMode: true,
-        highWaterMark: 50 // Process fewer objects at once
-      };
-      console.log('CSV parser options:', csvOptions);
-    
+    // Set up aggressive stream handling to prevent memory issues
+    const streamOptions = { 
+      encoding: 'utf8',
+      highWaterMark: config.csvHighWaterMark || 16 * 1024, // Use config setting or default to 16KB
+      emitClose: true,
+      autoDestroy: true
+    };
+    console.log('Creating read stream for product file with options:', streamOptions);
+    const fileStream = fs.createReadStream(job.file_path, streamOptions);
+  
+    // Set up CSV parser with strict limits
+    const csvOptions = {
+      skipLines: 0,
+      maxRows: config.maxRows || 50000, // Hard limit on rows
+      strict: false, // Be more forgiving with CSV format
+      objectMode: true,
+      highWaterMark: config.csvObjectHighWaterMark || 50 // Use config setting or default to 50
+    };
+    console.log('CSV parser options:', csvOptions);
+  
     // Initial progress update to show process has started
     await updateJobProgress(job.id, 32, `Started processing data`);
     
@@ -2855,6 +2906,8 @@ async function processProductFileInChunks(job, fieldMapping, results) {
         // When chunk reaches size, pause stream and process
         if (currentChunk.length >= chunkSize) {
           fileStream.pause();
+          // Give the event loop time to catch up and handle backpressure
+          await new Promise(resolve => setTimeout(resolve, 50));
           // Give the event loop time to catch up and handle backpressure
           await new Promise(resolve => setTimeout(resolve, 50));
           console.log(`Processing product chunk of ${currentChunk.length} rows...`);
