@@ -2,6 +2,7 @@
 require('dotenv').config();
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 // Find and load the .env file from the project root
 const rootDir = path.resolve(__dirname, '../..');
@@ -32,6 +33,75 @@ console.log('- SUPABASE_URL:', process.env.SUPABASE_URL ? '✅ Found' : '❌ Mis
 console.log('- SUPABASE_SERVICE_KEY:', process.env.SUPABASE_SERVICE_KEY ? '✅ Found' : '❌ Missing');
 console.log('- SUPABASE_ANON_KEY:', process.env.SUPABASE_ANON_KEY ? '✅ Found' : '❌ Missing');
 
+// Detect system capabilities
+const totalMemGB = Math.round(os.totalmem() / (1024 * 1024 * 1024));
+const cpuCount = os.cpus().length;
+const isLargeImportMode = process.env.LARGE_IMPORT_MODE === 'true';
+
+console.log(`System resources: ${totalMemGB}GB RAM, ${cpuCount} CPUs, Large Import Mode: ${isLargeImportMode}`);
+
+// Dynamically calculate optimal settings based on available resources
+const calculateOptimalSettings = () => {
+  // Determine if we're in a resource-constrained environment
+  const isResourceConstrained = totalMemGB < 4 || cpuCount < 2;
+  
+  // Base settings - conservative defaults
+  const settings = {
+    // File handling
+    chunkSize: 500,       // Rows per chunk
+    batchSize: 100,       // Database batch size
+    maxRows: 1000000,     // Maximum rows per file
+    
+    // Memory management
+    gcInterval: 2000,     // ms between forced GC
+    highMemoryThreshold: Math.min(1024, Math.floor(totalMemGB * 1024 * 0.6)),
+    
+    // Network settings
+    fetchTimeout: 30000,  // 30s timeout
+    retryCount: 3,
+    retryDelay: 1000,
+    
+    // Database settings
+    databaseTimeout: 30000,
+    databasePoolSize: 20
+  };
+  
+  // For 4GB+ RAM systems or Large Import Mode, optimize for throughput
+  if (!isResourceConstrained || isLargeImportMode) {
+    // Scale up with available resources, but cautiously
+    settings.chunkSize = Math.min(1000, Math.max(100, Math.floor(totalMemGB * 200)));
+    settings.batchSize = Math.min(200, Math.max(50, Math.floor(totalMemGB * 40)));
+    settings.databasePoolSize = Math.min(40, Math.max(20, cpuCount * 5));
+    
+    // More aggressive GC for large imports
+    if (isLargeImportMode) {
+      settings.gcInterval = 1000;  // More frequent GC
+      settings.highMemoryThreshold = Math.floor(totalMemGB * 1024 * 0.75); // Higher threshold
+    } else {
+      settings.gcInterval = 2000;
+      settings.highMemoryThreshold = Math.floor(totalMemGB * 1024 * 0.65);
+    }
+  } else {
+    // For constrained environments, be very conservative
+    settings.chunkSize = 250;
+    settings.batchSize = 50;
+    settings.databasePoolSize = 10;
+    settings.gcInterval = 1000;
+    settings.highMemoryThreshold = Math.floor(totalMemGB * 1024 * 0.5);
+  }
+  
+  console.log('Calculated optimal settings based on system resources:');
+  console.log(`- Chunk size: ${settings.chunkSize} rows`);
+  console.log(`- Batch size: ${settings.batchSize} records`);
+  console.log(`- Database pool: ${settings.databasePoolSize} connections`);
+  console.log(`- Memory threshold: ${Math.round(settings.highMemoryThreshold/1024*10)/10}GB`);
+  
+  return settings;
+};
+
+// Get optimal settings based on environment
+const optimalSettings = calculateOptimalSettings();
+
 // Load environment variables with fallbacks
 const config = {
   // Server settings
@@ -41,26 +111,31 @@ const config = {
   maxFileSize: process.env.MAX_FILE_SIZE || 2147483648, // 2GB max file size by default
   tempFileCleanupInterval: parseInt(process.env.TEMP_FILE_CLEANUP_INTERVAL || '3600000'), // Clean temp files every hour
   
-  // Large file processing settings - OPTIMIZED for memory efficiency
-  defaultChunkSize: parseInt(process.env.DEFAULT_CHUNK_SIZE || '2000'), // REDUCED from 10000 to 2000 rows for less memory usage
-  defaultBatchSize: parseInt(process.env.DEFAULT_BATCH_SIZE || '200'), // REDUCED from 500 to 200 for database operations
-  maxRows: parseInt(process.env.MAX_ROWS || '1000000'), // Maximum number of rows to process in a single file
+  // Large file processing settings - DYNAMICALLY OPTIMIZED
+  defaultChunkSize: parseInt(process.env.DEFAULT_CHUNK_SIZE || optimalSettings.chunkSize.toString()),
+  defaultBatchSize: parseInt(process.env.DEFAULT_BATCH_SIZE || optimalSettings.batchSize.toString()),
+  maxRows: parseInt(process.env.MAX_ROWS || optimalSettings.maxRows.toString()),
   
-  // Memory management settings - OPTIMIZED
-  forceGCInterval: parseInt(process.env.FORCE_GC_INTERVAL || '2000'), // REDUCED from 5000ms to 2000ms for more frequent GC
-  highMemoryThreshold: parseInt(process.env.HIGH_MEMORY_THRESHOLD || '1024'), // REDUCED from 1536MB to 1024MB to be more conservative
+  // Memory management settings - DYNAMICALLY OPTIMIZED
+  forceGCInterval: parseInt(process.env.FORCE_GC_INTERVAL || optimalSettings.gcInterval.toString()),
+  highMemoryThreshold: parseInt(process.env.HIGH_MEMORY_THRESHOLD || optimalSettings.highMemoryThreshold.toString()),
+  
+  // Resource usage tracking
+  systemMemoryGB: totalMemGB,
+  systemCPUs: cpuCount,
+  isLargeImportMode: isLargeImportMode,
   
   // Fetch/network settings - OPTIMIZED for reliability
-  fetchTimeout: parseInt(process.env.FETCH_TIMEOUT || '30000'), // REDUCED from 120s to 30s to prevent hanging connections
-  retryCount: parseInt(process.env.RETRY_COUNT || '3'), // REDUCED from 5 to 3 for faster failure recovery
-  retryDelay: parseInt(process.env.RETRY_DELAY || '1000'), // REDUCED from 3000ms to 1000ms
+  fetchTimeout: parseInt(process.env.FETCH_TIMEOUT || optimalSettings.fetchTimeout.toString()),
+  retryCount: parseInt(process.env.RETRY_COUNT || optimalSettings.retryCount.toString()),
+  retryDelay: parseInt(process.env.RETRY_DELAY || optimalSettings.retryDelay.toString()),
   
-  // Database settings - OPTIMIZED
+  // Database settings - DYNAMICALLY OPTIMIZED
   supabaseUrl: process.env.SUPABASE_URL || 'https://your_project_url.supabase.co',
   supabaseServiceKey: process.env.SUPABASE_SERVICE_KEY || 'your_service_key_here',
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY,
-  databaseTimeout: parseInt(process.env.DATABASE_TIMEOUT || '30000'), // REDUCED from 60s to 30s
-  databasePoolSize: parseInt(process.env.DATABASE_POOL_SIZE || '20'), // REDUCED from 30 to 20 connections
+  databaseTimeout: parseInt(process.env.DATABASE_TIMEOUT || optimalSettings.databaseTimeout.toString()),
+  databasePoolSize: parseInt(process.env.DATABASE_POOL_SIZE || optimalSettings.databasePoolSize.toString()),
   
   // Required fields for various data types - these can be overridden via the API
   requiredFields: {
@@ -68,5 +143,9 @@ const config = {
     supplier: ['Supplier Name', 'Cost']
   }
 };
+
+// Add some utility methods to the config
+config.isHighMemoryEnvironment = () => config.systemMemoryGB >= 4;
+config.getThreadCount = () => Math.max(1, Math.min(cpuCount - 1, 4)); // Leave 1 CPU for system, max 4
 
 module.exports = config; 

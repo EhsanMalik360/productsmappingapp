@@ -9,6 +9,9 @@ const config = require('./config');
 const https = require('https');
 const http = require('http');
 const fetch = require('node-fetch');
+const { Worker } = require('worker_threads');
+const workerpool = require('workerpool');
+const pool = workerpool.pool();
 
 // Save original console methods before overriding
 const originalConsole = {
@@ -939,13 +942,21 @@ async function processProductImportJob(jobId) {
 
 // Process the supplier file in manageable chunks using streaming with better progress reporting
 async function processFileInChunks(job, fieldMapping, results) {
-  const batchSize = job.batch_size || config.defaultBatchSize || 200; // Use smaller batch size
-  const chunkSize = config.defaultChunkSize || Math.min(2000, Math.max(500, Math.floor(20000000 / job.file_size))); // Smaller chunks for large files
-  const totalRows = job.total_rows || 1000; // Use estimated total rows or default
+  // Use much smaller batch size for large files
+  const fileSizeMB = job.file_size / (1024 * 1024);
+  const batchSize = fileSizeMB > 50 ? 50 : (job.batch_size || config.defaultBatchSize || 200);
+  
+  // Dynamically calculate chunk size based on file size - smaller chunks for larger files
+  const chunkSize = Math.min(
+    500, 
+    Math.max(100, Math.floor(10000000 / Math.max(job.file_size, 1000000)))
+  );
+  
+  const totalRows = job.total_rows || 1000;
   
   console.log(`Processing file in chunks. Batch size: ${batchSize}, Chunk size: ${chunkSize}, Estimated total rows: ${totalRows}`);
   console.log(`File path: ${job.file_path}`);
-  console.log(`File size: ${job.file_size} bytes, Adjusted chunk size: ${chunkSize} rows`);
+  console.log(`File size: ${job.file_size} bytes (${fileSizeMB.toFixed(2)}MB), Adjusted chunk size: ${chunkSize} rows`);
   
   let currentChunk = [];
   let totalProcessed = 0;
@@ -954,255 +965,328 @@ async function processFileInChunks(job, fieldMapping, results) {
   let lastMemoryCheck = Date.now();
   let gcInterval = null;
   let throttleDelay = 0; // Dynamic throttling delay
-  let consecutiveErrors = 0; // Track consecutive chunk processing errors
+  let consecutiveErrors = 0;
   
-  // Always set up garbage collection interval for all files to avoid memory issues
-  console.log('Setting up forced garbage collection interval for file processing');
-  gcInterval = setInterval(() => {
-    try {
-      const memUsage = process.memoryUsage();
-      const memUsageMB = Math.round(memUsage.heapUsed / 1024 / 1024);
-      const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
-      console.log(`Memory usage: ${memUsageMB}MB / ${heapTotalMB}MB (${Math.round(memUsage.heapUsed / memUsage.heapTotal * 100)}%)`);
+  // Track memory usage and adjust processing accordingly
+  const memoryMonitor = setInterval(() => {
+    const memUsage = process.memoryUsage();
+    const memUsageMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+    const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
+    console.log(`Memory usage: ${memUsageMB}MB / ${heapTotalMB}MB (${Math.round(memUsage.heapUsed / memUsage.heapTotal * 100)}%)`);
+    
+    // More aggressive memory management
+    const memThreshold = config.highMemoryThreshold || 1024;
+    if (memUsageMB > memThreshold * 0.7) {
+      throttleDelay = Math.min(5000, throttleDelay + 1000);
+      console.log(`High memory usage detected (${memUsageMB}MB), setting throttle delay to ${throttleDelay}ms`);
       
-      // Adjust throttling based on memory usage - use more aggressive threshold
-      const memThreshold = config.highMemoryThreshold || 1024;
-      if (memUsageMB > memThreshold * 0.8) { // Start throttling at 80% of threshold
-        throttleDelay = Math.min(5000, throttleDelay + 1000); // Increase throttling more aggressively
-        console.log(`High memory usage detected (${memUsageMB}MB), setting throttle delay to ${throttleDelay}ms`);
-      } else if (throttleDelay > 0 && memUsageMB < memThreshold * 0.6) {
-        // If memory usage is below 60% of threshold, reduce throttling
-        throttleDelay = Math.max(0, throttleDelay - 500);
-        console.log(`Memory usage acceptable (${memUsageMB}MB), reducing throttle delay to ${throttleDelay}ms`);
-      }
-      
+      // Force garbage collection more aggressively
       if (global.gc) {
+        console.log('Forcing garbage collection due to high memory usage');
         global.gc();
-        console.log('Forced garbage collection complete');
       }
-    } catch (err) {
-      console.error('Error during garbage collection:', err);
+    } else if (throttleDelay > 0 && memUsageMB < memThreshold * 0.5) {
+      throttleDelay = Math.max(0, throttleDelay - 500);
+      console.log(`Memory usage acceptable (${memUsageMB}MB), reducing throttle delay to ${throttleDelay}ms`);
     }
-  }, config.forceGCInterval || 2000);
+  }, 1000); // Check every second
+  
+  const failedRows = [];
+  
+  return new Promise((resolve, reject) => {
+    try {
+      // Create file stream with smaller buffer
+      const fileStream = fs.createReadStream(job.file_path, { 
+        encoding: 'utf8',
+        highWaterMark: 16 * 1024 // 16KB buffer size to reduce memory usage
+      });
+      
+      // Report initial progress
+      updateJobProgress(job.id, 32, `Started processing data`);
+      
+      // Use a transform stream to process data in controlled manner
+      const processor = new (require('stream').Transform)({
+        objectMode: true,
+        highWaterMark: 1, // Process one object at a time for better memory control
+        transform: async function(row, encoding, callback) {
+          try {
+            // Add row to current chunk
+            currentChunk.push(row);
+            
+            // Process chunk when it reaches desired size
+            if (currentChunk.length >= chunkSize) {
+              // Pause the stream to prevent more data from flowing in
+              processor.pause();
+              
+              // Apply throttling if necessary
+              if (throttleDelay > 0) {
+                await new Promise(resolve => setTimeout(resolve, throttleDelay));
+              }
+              
+              try {
+                const chunkToProcess = [...currentChunk]; // Create a copy
+                currentChunk = []; // Clear original immediately to help GC
+                
+                // Determine if we should use worker-based processing
+                const useWorkers = config.isLargeImportMode && 
+                                  config.isHighMemoryEnvironment() && 
+                                  chunkToProcess.length > 500 &&
+                                  fileSizeMB > 10;
+
+                if (useWorkers) {
+                  console.log(`Using worker-based parallel processing for ${chunkToProcess.length} rows`);
+                  await processChunkWithWorkers(chunkToProcess, job, fieldMapping, results);
+                } else {
+                  console.log(`Using standard sequential processing for ${chunkToProcess.length} rows`);
+                  await processChunk(chunkToProcess, job, fieldMapping, results);
+                }
+                
+                totalProcessed += chunkToProcess.length;
+                consecutiveErrors = 0;
+                
+                // Help garbage collection
+                chunkToProcess.length = 0;
+                
+                // Calculate progress
+                const dataProcessingRange = 55;
+                const completionPercentage = Math.min(totalProcessed / totalRows, 1);
+                const progress = Math.min(90, Math.floor(35 + (dataProcessingRange * completionPercentage)));
+                
+                // Update progress less frequently
+                const now = Date.now();
+                if (progress - lastProgressUpdate >= 5 || now - lastUpdateTime > 5000) {
+                  await updateJobProgress(job.id, progress, `Processing data... ${progress}%`);
+                  lastUpdateTime = now;
+                  lastProgressUpdate = progress;
+                }
+                
+                // Force garbage collection periodically
+                if (global.gc && (now - lastMemoryCheck > 10000)) {
+                  global.gc();
+                  lastMemoryCheck = now;
+                }
+              } catch (error) {
+                console.error('Error processing chunk:', error);
+                consecutiveErrors++;
+                
+                // Record failure but continue processing
+                failedRows.push({
+                  firstRow: totalProcessed + 1,
+                  lastRow: totalProcessed + chunkSize,
+                  count: chunkSize,
+                  error: error.message || 'Unknown error'
+                });
+                
+                totalProcessed += chunkSize;
+                
+                if (consecutiveErrors > 3) {
+                  // More aggressive throttling with consecutive errors
+                  throttleDelay = Math.min(10000, throttleDelay + 2000);
+                  console.log(`Multiple errors detected, increasing throttle to ${throttleDelay}ms`);
+                }
+              }
+              
+              // Resume processing
+              processor.resume();
+            }
+            
+            callback();
+          } catch (err) {
+            callback(err);
+          }
+        },
+        flush: async function(callback) {
+          try {
+            // Process remaining rows
+            if (currentChunk.length > 0) {
+              console.log(`Processing final chunk of ${currentChunk.length} rows...`);
+              await processChunk(currentChunk, job, fieldMapping, results);
+              totalProcessed += currentChunk.length;
+              currentChunk = [];
+            }
+            
+            callback();
+          } catch (err) {
+            callback(err);
+          }
+        }
+      });
+      
+      // Set up the pipeline with proper error handling
+      fileStream
+        .pipe(csv({
+          skipLines: 0,
+          maxRows: config.maxRows || (totalRows + 1),
+          strict: false
+        }))
+        .pipe(processor)
+        .on('error', (error) => {
+          console.error('Error in processing pipeline:', error);
+          clearInterval(memoryMonitor);
+          reject(error);
+        })
+        .on('finish', async () => {
+          console.log(`File processing complete. Total rows processed: ${totalProcessed}`);
+          clearInterval(memoryMonitor);
+          
+          // Add failed rows information to results
+          results.failedGroups = failedRows;
+          results.totalFailedGroups = failedRows.length;
+          
+          // Clean up any lingering resources
+          if (global.gc) {
+            global.gc();
+          }
+          
+          // Update job progress
+          await updateJobProgress(job.id, 95, 'Finalizing import');
+          
+          // Update job as completed
+          await supabase
+            .from('import_jobs')
+            .update({
+              status: 'completed',
+              status_message: failedRows.length > 0 
+                ? `Import completed with ${failedRows.length} error groups. See logs for details.` 
+                : 'Import completed successfully',
+              progress: 100,
+              results: {
+                totalRecords: results.totalRecords,
+                successfulImports: results.successfulImports,
+                failedImports: results.failedImports,
+                suppliersAdded: results.suppliersAdded,
+                matchStats: {
+                  totalMatched: results.matchStats?.totalMatched || 0,
+                  byMethod: {
+                    ean: results.matchStats?.byMethod?.ean || 0,
+                    mpn: results.matchStats?.byMethod?.mpn || 0,
+                    name: results.matchStats?.byMethod?.name || 0
+                  }
+                }
+              },
+              completed_at: new Date().toISOString()
+            })
+            .eq('id', job.id);
+          
+          // Clean up temporary file
+          fs.unlink(job.file_path, (err) => {
+            if (err) console.error('Error deleting temporary file:', err);
+            else console.log('Temporary file deleted');
+          });
+          
+          resolve();
+        });
+        
+      // Handle stream errors
+      fileStream.on('error', (error) => {
+        console.error('Error with file stream:', error);
+        clearInterval(memoryMonitor);
+        reject(error);
+      });
+    } catch (error) {
+      console.error('Error in processFileInChunks:', error);
+      clearInterval(memoryMonitor);
+      reject(error);
+    }
+  });
+}
+
+// Process the product file in manageable chunks using streaming with better progress reporting
+async function processProductFileInChunks(job, fieldMapping, results) {
+  const batchSize = job.batch_size || 100;
+  const chunkSize = 5000; // Process 5000 rows at a time in memory
+  const totalRows = job.total_rows || 1000; // Use estimated total rows or default
+  
+  console.log(`Processing product file in chunks. Batch size: ${batchSize}, Chunk size: ${chunkSize}, Estimated total rows: ${totalRows}`);
+  console.log(`File path: ${job.file_path}`);
+  
+  let currentChunk = [];
+  let totalProcessed = 0;
+  let lastUpdateTime = Date.now();
   
   try {
-    console.log('Creating read stream for file...');
-    const fileStream = fs.createReadStream(job.file_path, { 
-      encoding: 'utf8',
-      highWaterMark: 64 * 1024 // 64KB buffer size to reduce memory usage
-    });
+    console.log('Creating read stream for product file...');
+    const fileStream = fs.createReadStream(job.file_path, { encoding: 'utf8' });
     
     // Initial progress update to show process has started
     await updateJobProgress(job.id, 32, `Started processing data`);
     
-    // Setup stream processing with error handling and backpressure management
-    const csvStream = fileStream.pipe(csv({
-      skipLines: 0,
-      maxRows: config.maxRows || (totalRows + 1), // Limit to prevent memory issues
-      strict: false // Be more forgiving with CSV format
-    }));
-    
-    // Track failed rows for reporting
-    const failedRows = [];
-    
-    csvStream.on('data', async (row) => {
-      currentChunk.push(row);
-      
-      // When chunk reaches size, pause stream and process
-      if (currentChunk.length >= chunkSize) {
-        // Pause both streams to prevent buffer overflow
-        csvStream.pause();
-        fileStream.pause();
+    fileStream
+      .pipe(csv())
+      .on('data', async (row) => {
+        currentChunk.push(row);
         
-        console.log(`Processing chunk of ${currentChunk.length} rows...`);
-        
-        // Apply throttling if necessary
-        if (throttleDelay > 0) {
-          console.log(`Throttling processing for ${throttleDelay}ms to manage memory usage`);
-          await new Promise(resolve => setTimeout(resolve, throttleDelay));
-        }
-        
-        // Check memory usage before processing chunk
-        const memoryUsage = process.memoryUsage();
-        const memoryUsageMB = Math.round(memoryUsage.heapUsed / 1024 / 1024);
-        console.log(`Current memory usage: ${memoryUsageMB}MB`);
-        
-        try {
-          await processChunk(currentChunk, job, fieldMapping, results);
-          totalProcessed += currentChunk.length;
+        // When chunk reaches size, pause stream and process
+        if (currentChunk.length >= chunkSize) {
+          fileStream.pause();
+          console.log(`Processing product chunk of ${currentChunk.length} rows...`);
           
-          // Reset consecutive errors counter on success
-          consecutiveErrors = 0;
-          
-          // Empty array without creating a new one to avoid memory leaks
-          currentChunk.length = 0;
-          
-          // Calculate progress percentage
-          const dataProcessingRange = 55; // From 35% to 90%
-          const completionPercentage = Math.min(totalProcessed / totalRows, 1);
-          const progress = Math.min(90, Math.floor(35 + (dataProcessingRange * completionPercentage)));
-          
-          // Update progress, but not too frequently (at most every 2% or 2 seconds)
-          const now = Date.now();
-          if (progress - lastProgressUpdate >= 2 || now - lastUpdateTime > 2000) {
-            console.log(`Progress update: ${progress}% - Processed ${totalProcessed}/${totalRows} rows`);
-            await updateJobProgress(job.id, progress, `Processing data... ${progress}%`);
-            lastUpdateTime = now;
-            lastProgressUpdate = progress;
-          }
-        } catch (error) {
-          console.error('Error processing chunk:', error);
-          consecutiveErrors++;
-          
-          // Record error information
-          const firstRowNum = totalProcessed + 1;
-          const lastRowNum = totalProcessed + currentChunk.length;
-          failedRows.push({
-            firstRow: firstRowNum,
-            lastRow: lastRowNum,
-            count: currentChunk.length,
-            error: error.message || 'Unknown error'
-          });
-          
-          // If we have multiple consecutive errors, increase throttling
-          if (consecutiveErrors > 2) {
-            throttleDelay = Math.min(5000, throttleDelay + 1000);
-            console.log(`Multiple consecutive errors detected, increasing throttle delay to ${throttleDelay}ms`);
-          }
-          
-          // Still count these as processed
-          totalProcessed += currentChunk.length;
-          
-          // Update job with error information but don't fail the entire job
-          await updateJobStatus(job.id, 'processing', `Error processing rows ${firstRowNum}-${lastRowNum}: ${error.message}`);
-          
-          // Clear the chunk so we can continue
-          currentChunk.length = 0;
-        }
-        
-        // Force garbage collection if available
-        if (global.gc && (Date.now() - lastMemoryCheck > 30000)) {
-          console.log('Forcing garbage collection after chunk processing');
-          global.gc();
-          lastMemoryCheck = Date.now();
-        }
-        
-        // Resume both streams
-        csvStream.resume();
-        fileStream.resume();
-      }
-    });
-    
-    csvStream.on('end', async () => {
-      // Process any remaining rows
-      if (currentChunk.length > 0) {
-        console.log(`Processing final chunk of ${currentChunk.length} rows...`);
-        try {
-          await processChunk(currentChunk, job, fieldMapping, results);
-          totalProcessed += currentChunk.length;
-        } catch (error) {
-          console.error('Error processing final chunk:', error);
-          // Record error information
-          const firstRowNum = totalProcessed + 1;
-          const lastRowNum = totalProcessed + currentChunk.length;
-          failedRows.push({
-            firstRow: firstRowNum,
-            lastRow: lastRowNum,
-            count: currentChunk.length,
-            error: error.message || 'Unknown error'
-          });
-          
-          // Still count these as processed
-          totalProcessed += currentChunk.length;
-        }
-        currentChunk.length = 0; // Clear for GC
-      }
-      
-      console.log(`File processing complete. Total rows processed: ${totalProcessed}`);
-      
-      // Clear the garbage collection interval if set
-      if (gcInterval) {
-        clearInterval(gcInterval);
-        console.log('Cleared garbage collection interval');
-      }
-      
-      // Add failed rows information to results
-      results.failedGroups = failedRows;
-      results.totalFailedGroups = failedRows.length;
-      
-      console.log('Results:', results);
-      
-      // Update progress to 95% - finalizing import
-      await updateJobProgress(job.id, 95, 'Finalizing import');
-      
-      // Update job as completed
-      await supabase
-        .from('import_jobs')
-        .update({
-          status: 'completed',
-          status_message: failedRows.length > 0 
-            ? `Import completed with ${failedRows.length} error groups. See logs for details.` 
-            : 'Import completed successfully',
-          progress: 100,
-          results: {
-            totalRecords: results.totalRecords,
-            successfulImports: results.successfulImports,
-            failedImports: results.failedImports,
-            suppliersAdded: results.suppliersAdded,
-            // Ensure match statistics are properly included
-            matchStats: {
-              totalMatched: results.matchStats?.totalMatched || 0,
-              byMethod: {
-                ean: results.matchStats?.byMethod?.ean || 0,
-                mpn: results.matchStats?.byMethod?.mpn || 0,
-                name: results.matchStats?.byMethod?.name || 0
-              }
+          try {
+            await processProductChunk(currentChunk, job, fieldMapping, results);
+            totalProcessed += currentChunk.length;
+            currentChunk = [];
+            
+            // Calculate progress as a percentage between 35% (start) and 90% (end of data processing)
+            // This leaves room for remaining 10% for finalizing
+            const dataProcessingRange = 55; // From 35% to 90%
+            const completionPercentage = Math.min(totalProcessed / totalRows, 1);
+            const progress = Math.min(90, Math.floor(35 + (dataProcessingRange * completionPercentage)));
+            
+            // Update progress every 2 seconds or after processing large chunks
+            const now = Date.now();
+            if (now - lastUpdateTime > 2000) {
+              console.log(`Progress update: ${progress}% - Processed ${totalProcessed}/${totalRows} rows`);
+              await updateJobProgress(job.id, progress, `Processing data... ${progress}%`);
+              lastUpdateTime = now;
             }
-          },
-          completed_at: new Date().toISOString()
-        })
-        .eq('id', job.id);
-      
-      console.log('Job marked as completed');
+          } catch (error) {
+            console.error('Error processing product chunk:', error);
+          }
+          
+          fileStream.resume();
+        }
+      })
+      .on('end', async () => {
+        // Process any remaining rows
+        if (currentChunk.length > 0) {
+          console.log(`Processing final product chunk of ${currentChunk.length} rows...`);
+          await processProductChunk(currentChunk, job, fieldMapping, results);
+          totalProcessed += currentChunk.length;
+        }
         
-      // Clean up temporary file
-      fs.unlink(job.file_path, (err) => {
-        if (err) console.error('Error deleting temporary file:', err);
-        else console.log('Temporary file deleted');
+        console.log(`Product file processing complete. Total rows processed: ${totalProcessed}`);
+        console.log('Results:', results);
+        
+        // Update progress to 95% - finalizing import
+        await updateJobProgress(job.id, 95, 'Finalizing import');
+        
+        // Update job as completed
+        await supabase
+          .from('import_jobs')
+          .update({
+            status: 'completed',
+            status_message: 'Import completed successfully',
+            progress: 100,
+            results: results,
+            completed_at: new Date().toISOString()
+          })
+          .eq('id', job.id);
+        
+        console.log('Product import job marked as completed');
+          
+        // Clean up temporary file
+        fs.unlink(job.file_path, (err) => {
+          if (err) console.error('Error deleting temporary file:', err);
+          else console.log('Temporary file deleted');
+        });
+      })
+      .on('error', async (error) => {
+        console.error('Error reading product CSV file:', error);
+        await updateJobStatus(job.id, 'failed', `Error reading CSV file: ${error.message}`);
       });
-    });
-    
-    csvStream.on('error', async (error) => {
-      console.error('Error reading CSV file:', error);
-      await updateJobStatus(job.id, 'failed', `Error reading CSV file: ${error.message}`);
-      
-      // Clear the garbage collection interval if set
-      if (gcInterval) {
-        clearInterval(gcInterval);
-        console.log('Cleared garbage collection interval due to error');
-      }
-    });
-    
-    // Error handling for the file stream
-    fileStream.on('error', async (error) => {
-      console.error('Error with file stream:', error);
-      await updateJobStatus(job.id, 'failed', `Error reading file: ${error.message}`);
-      
-      // Clear the garbage collection interval if set
-      if (gcInterval) {
-        clearInterval(gcInterval);
-        console.log('Cleared garbage collection interval due to error');
-      }
-    });
   } catch (error) {
-    console.error('Error in processFileInChunks:', error);
-    await updateJobStatus(job.id, 'failed', `Error processing file: ${error.message}`);
-    
-    // Clear the garbage collection interval if set
-    if (gcInterval) {
-      clearInterval(gcInterval);
-      console.log('Cleared garbage collection interval due to error');
-    }
+    console.error('Error in processProductFileInChunks:', error);
+    await updateJobStatus(job.id, 'failed', `Error processing product file: ${error.message}`);
   }
 }
 
@@ -1211,29 +1295,38 @@ async function processChunk(chunk, job, fieldMapping, results) {
   try {
     console.log(`Processing chunk with ${chunk.length} rows...`);
     
-    // Only log first row for debugging (not entire object)
-    if (chunk[0]) {
-      console.log('First row keys:', Object.keys(chunk[0]));
-    }
+    // Only process necessary fields, discard the rest
+    const slimChunk = chunk.map(row => {
+      const slimRow = {};
+      // Only keep fields we need based on fieldMapping
+      Object.values(fieldMapping).forEach(columnName => {
+        if (columnName && row[columnName] !== undefined) {
+          slimRow[columnName] = row[columnName];
+        }
+      });
+      return slimRow;
+    });
     
-    // Map the data according to field mapping
+    // Map the data according to field mapping - using the slimmed down data
     console.log('Mapping CSV data with field mapping...');
-    const mappedData = await mapSupplierData(chunk, fieldMapping);
+    const mappedData = await mapSupplierData(slimChunk, fieldMapping);
     
     // Process in smaller batches for database operations
-    const batchSize = Math.min(job.batch_size || 100, 100); // Cap batch size at 100 for efficiency
+    const batchSize = Math.min(job.batch_size || 50, 50); // Cap batch size at 50 for better efficiency
     
-    // Clear chunk to help garbage collection
+    // Clear chunk references to help garbage collection
     chunk.length = 0;
+    slimChunk.length = 0;
     
-    console.log(`Mapping complete. Processing ${mappedData.data?.length || 0} mapped records`);
-    if (mappedData.warnings && mappedData.warnings.currencyWarning) {
-      console.warn('⚠️ Currency warning detected:', mappedData.warnings.message);
+    // Check if we actually have data to process
+    if (!mappedData.data || mappedData.data.length === 0) {
+      console.log('No valid data to process after mapping');
+      return results;
     }
     
-    // Process the supplier data with the chosen match options
-    console.log('Starting supplier data import...');
+    console.log(`Processing ${mappedData.data.length} mapped records`);
     
+    // Process the supplier data with the chosen match options
     const matchOptions = job.match_options || {
       useEan: true,
       useMpn: true,
@@ -1241,49 +1334,92 @@ async function processChunk(chunk, job, fieldMapping, results) {
       priority: ['ean', 'mpn', 'name']
     };
     
-    const importResults = await importSupplierData(
-      mappedData.data,
-      matchOptions,
-      null, // No progress callback needed here
-      batchSize,
-      job.match_column_mapping, // Pass the custom match column mapping
-      job.id // Pass the job ID
-    );
+    // Split data into smaller sub-batches for processing
+    const dataLength = mappedData.data.length;
+    const subBatchSize = Math.min(batchSize, 50); // Use even smaller batches for large imports
+    const batches = [];
     
-    // Update results - use nullish coalescing to avoid NaN issues
-    results.totalRecords = (results.totalRecords ?? 0) + (mappedData.data?.length ?? 0);
-    results.successfulImports = (results.successfulImports ?? 0) + (importResults.processedCount ?? 0);
-    results.failedImports = (results.failedImports ?? 0) + ((mappedData.data?.length ?? 0) - (importResults.processedCount ?? 0));
-    results.suppliersAdded = (results.suppliersAdded ?? 0) + (importResults.supplierCount ?? 0);
-    
-    // Make sure we capture match statistics
-    if (!results.matchStats) {
-      results.matchStats = {
-        totalMatched: 0,
-        byMethod: {
-          ean: 0,
-          mpn: 0,
-          name: 0
-        }
-      };
+    for (let i = 0; i < dataLength; i += subBatchSize) {
+      batches.push(mappedData.data.slice(i, i + subBatchSize));
     }
     
-    // Update match statistics from the import results
-    if (importResults.matchStats) {
-      results.matchStats.totalMatched = (results.matchStats.totalMatched || 0) + (importResults.matchStats.totalMatched || 0);
+    console.log(`Split data into ${batches.length} sub-batches of max ${subBatchSize} records`);
+    
+    // Process each batch sequentially with delays between to prevent memory spikes
+    let processedCount = 0;
+    
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      console.log(`Processing sub-batch ${i+1}/${batches.length} with ${batch.length} records`);
       
-      // Update match method counts
-      if (importResults.matchStats.byMethod) {
-        results.matchStats.byMethod.ean = (results.matchStats.byMethod.ean || 0) + (importResults.matchStats.byMethod.ean || 0);
-        results.matchStats.byMethod.mpn = (results.matchStats.byMethod.mpn || 0) + (importResults.matchStats.byMethod.mpn || 0);
-        results.matchStats.byMethod.name = (results.matchStats.byMethod.name || 0) + (importResults.matchStats.byMethod.name || 0);
+      try {
+        const batchResults = await importSupplierData(
+          batch,
+          matchOptions,
+          null, // No progress callback needed here
+          subBatchSize,
+          job.match_column_mapping,
+          job.id
+        );
+        
+        // Update batch results
+        results.totalRecords = (results.totalRecords || 0) + batch.length;
+        results.successfulImports = (results.successfulImports || 0) + (batchResults.processedCount || 0);
+        results.failedImports = (results.failedImports || 0) + (batch.length - (batchResults.processedCount || 0));
+        results.suppliersAdded = (results.suppliersAdded || 0) + (batchResults.supplierCount || 0);
+        
+        // Make sure we capture match statistics
+        if (!results.matchStats) {
+          results.matchStats = {
+            totalMatched: 0,
+            byMethod: {
+              ean: 0,
+              mpn: 0,
+              name: 0
+            }
+          };
+        }
+        
+        // Update match statistics from the batch results
+        if (batchResults.matchStats) {
+          results.matchStats.totalMatched = (results.matchStats.totalMatched || 0) + 
+            (batchResults.matchStats.totalMatched || 0);
+          
+          if (batchResults.matchStats.byMethod) {
+            results.matchStats.byMethod.ean = (results.matchStats.byMethod.ean || 0) + 
+              (batchResults.matchStats.byMethod.ean || 0);
+            results.matchStats.byMethod.mpn = (results.matchStats.byMethod.mpn || 0) + 
+              (batchResults.matchStats.byMethod.mpn || 0);
+            results.matchStats.byMethod.name = (results.matchStats.byMethod.name || 0) + 
+              (batchResults.matchStats.byMethod.name || 0);
+          }
+        }
+        
+        processedCount += batch.length;
+        
+        // Clear batch data
+        batch.length = 0;
+        
+        // Add a small delay between batches to allow GC to run
+        if (i < batches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          // Force garbage collection if available
+          if (global.gc) {
+            global.gc();
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing sub-batch ${i+1}:`, error);
+        // Continue with next batch instead of failing the entire process
       }
     }
     
-    console.log('Chunk processing complete');
+    // Clear any remaining references
+    mappedData.data = null;
+    batches.length = 0;
     
-    // Help garbage collection by explicitly clearing large objects
-    if (mappedData.data) mappedData.data.length = 0;
+    console.log(`Processed ${processedCount} records across ${batches.length} sub-batches`);
     
     // Force garbage collection if available
     if (global.gc) {
@@ -1294,7 +1430,7 @@ async function processChunk(chunk, job, fieldMapping, results) {
   } catch (error) {
     console.error('Error processing chunk:', error);
     
-    // Ensure chunk is cleared even on error
+    // Ensure references are cleared even on error
     chunk.length = 0;
     
     throw error;
@@ -1700,842 +1836,597 @@ async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 
   }
 }
 
-// Import supplier data function (reference to existing function)
+// Import supplier data function with optimized database operations
 async function importSupplierData(mappedData, matchOptions, progressCallback, batchSize, matchColumns, jobId) {
   try {
-    console.log(`🚀 IMPORT: Starting import of ${mappedData.length} supplier records with batch size ${batchSize}`);
-    console.log('🔧 IMPORT: Match options:', JSON.stringify(matchOptions));
-    
-    // Log custom match columns if provided
-    if (matchColumns) {
-      console.log('🔧 IMPORT: Custom match columns will be used for matching:', JSON.stringify(matchColumns));
-    }
+    console.log(`Starting import of ${mappedData.length} supplier records with batch size ${batchSize}`);
     
     if (!mappedData || mappedData.length === 0) {
-      console.warn('⚠️ IMPORT: No supplier data to import');
-      throw new Error('No supplier data to import');
+      console.warn('No supplier data to import');
+      return { 
+        processedCount: 0, 
+        supplierCount: 0,
+        matchStats: { totalMatched: 0, byMethod: { ean: 0, mpn: 0, name: 0 } }
+      };
     }
 
-    // Additional debug logging for diagnosing database issues
-    console.log('🔍 DEBUG: Checking database connection...');
-    try {
-      const { data: dbCheck, error: dbError } = await supabase.from('suppliers').select('count').limit(1);
-      if (dbError) {
-        console.error('❌ DEBUG: Database connection issue:', dbError);
-      } else {
-        console.log('✅ DEBUG: Database connection successful');
-      }
-    } catch (dbCheckError) {
-      console.error('❌ DEBUG: Exception testing database connection:', dbCheckError);
-    }
-
-    // Log sample of the data being imported
-    console.log('📋 IMPORT: Sample of first record to import:', JSON.stringify(mappedData[0]));
-
-    // Group data by supplier to reduce the number of upsert operations
-    console.log(`🔄 IMPORT: Grouping ${mappedData.length} rows by supplier name`);
-    
-    const supplierGroups = mappedData.reduce((acc, row) => {
+    // Group data by supplier to reduce database operations
+    const supplierGroups = {};
+    for (const row of mappedData) {
       const { supplier_name, custom_attributes, ...productData } = row;
       
       // Skip rows with empty supplier name
       if (!supplier_name || supplier_name.trim() === '') {
-        console.warn('⚠️ IMPORT: Found row with empty supplier_name, skipping');
-        return acc;
+        continue;
       }
       
-      if (!acc[supplier_name]) {
-        acc[supplier_name] = {
+      if (!supplierGroups[supplier_name]) {
+        supplierGroups[supplier_name] = {
           name: supplier_name,
           custom_attributes: custom_attributes || {},
           products: []
         };
       }
-      acc[supplier_name].products.push(productData);
-      return acc;
-    }, {});
+      supplierGroups[supplier_name].products.push(productData);
+    }
     
-    console.log(`🔄 IMPORT: Grouped into ${Object.keys(supplierGroups).length} unique suppliers`);
-    console.log('👥 IMPORT: Supplier names found:', Object.keys(supplierGroups));
+    console.log(`Grouped into ${Object.keys(supplierGroups).length} unique suppliers`);
 
+    // Prepare for tracking results
     const results = [];
     let processedCount = 0;
-    const batchErrors = [];
-
-    // Get custom attributes
-    console.log('🔄 IMPORT: Fetching supplier custom attributes from database');
-    const { data: customAttributes, error: customAttrError } = await supabase
-      .from('custom_attributes')
-      .select('*')
-      .eq('for_type', 'supplier');
-      
-    if (customAttrError) {
-      console.error('❌ IMPORT: Error fetching supplier custom attributes:', customAttrError);
-      throw customAttrError;
-    }
-
-    console.log(`✅ IMPORT: Found ${customAttributes?.length || 0} custom attributes for suppliers`);
-    if (customAttributes && customAttributes.length > 0) {
-      console.log('📋 IMPORT: Custom attributes:', customAttributes.map(attr => attr.name));
-    }
-
-    // Prepare supplier records for upsert
     const supplierNames = Object.keys(supplierGroups);
-    console.log(`🔄 IMPORT: Found ${supplierNames.length} unique suppliers to upsert`);
     
+    // Prepare supplier records for upsert
     const supplierUpsertData = supplierNames.map(name => {
       const supplierData = supplierGroups[name];
       const customAttrs = supplierData.custom_attributes || {};
       
-      const supplierRecord = { 
+      return { 
         name,
-        is_matched: false // Initialize all suppliers as unmatched
+        is_matched: false,
+        custom_ean: customAttrs['EAN'] || null,
+        custom_mpn: customAttrs['MPN'] || null,
+        custom_brand: customAttrs['Brand'] || null
       };
-      
-      // Map custom attributes if any
-      if (customAttrs) {
-        if (customAttrs['EAN']) supplierRecord.custom_ean = customAttrs['EAN'];
-        if (customAttrs['MPN']) supplierRecord.custom_mpn = customAttrs['MPN'];
-        if (customAttrs['Brand']) supplierRecord.custom_brand = customAttrs['Brand'];
-      }
-      
-      return supplierRecord;
     });
     
-    console.log('📋 IMPORT: First supplier record sample:', JSON.stringify(supplierUpsertData[0]));
+    if (supplierUpsertData.length === 0) {
+      console.warn('No suppliers to upsert');
+      return { 
+        processedCount: 0, 
+        supplierCount: 0,
+        matchStats: { totalMatched: 0, byMethod: { ean: 0, mpn: 0, name: 0 } }
+      };
+    }
     
-    // Detailed logging of supplier upsert attempt
-    console.log('🔍 DEBUG: About to upsert suppliers with the following data:');
-    console.log('🔍 DEBUG: First record (example):', JSON.stringify(supplierUpsertData[0]));
-    console.log('🔍 DEBUG: Total records to upsert:', supplierUpsertData.length);
-    
-    // Upsert all suppliers in a single operation
-    console.log('🔄 IMPORT: Upserting all suppliers to database');
+    // Upsert suppliers more efficiently - in smaller batches if needed
     let supplierIdsByName = {};
+    const supplierBatchSize = 50;
     
-    try {
-      // First, check if the suppliers table exists and has the expected structure
-      const { data: tableInfo, error: tableError } = await supabase
-        .from('suppliers')
-        .select('id')
-        .limit(1)
-        .maybeSingle();
-        
-      if (tableError) {
-        console.error('❌ IMPORT: Error accessing suppliers table:', tableError);
-        
-        if (jobId) {
-          await logImportError(
-            jobId,
-            'DATABASE_ACCESS',
-            `Error accessing suppliers table: ${tableError.message}`,
-            { error: tableError },
-            null,
-            null
-          );
-        }
-          
-        throw new Error(`Database error: ${tableError.message}`);
-      }
-      
-      // If no suppliers to upsert, log warning but continue
-      if (!supplierUpsertData.length) {
-        console.warn('⚠️ IMPORT: No suppliers to upsert');
-        if (jobId) {
-          await logImportError(
-            jobId,
-            'NO_SUPPLIERS',
-            'No supplier data to upsert',
-            null,
-            null,
-            null
-          );
-        }
-      } else {
-        // Proceed with upsert
-        console.log(`🔄 IMPORT: Upserting ${supplierUpsertData.length} suppliers`);
-        
+    for (let i = 0; i < supplierUpsertData.length; i += supplierBatchSize) {
+      const batch = supplierUpsertData.slice(i, i + supplierBatchSize);
+      try {
         const { data: upsertedSuppliers, error: suppliersError } = await supabase
           .from('suppliers')
-          .upsert(supplierUpsertData, { 
+          .upsert(batch, { 
             onConflict: 'name',
             ignoreDuplicates: false 
           })
           .select('id,name');
           
         if (suppliersError) {
-          console.error('❌ IMPORT: Error upserting suppliers:', suppliersError);
-          console.error('❌ DEBUG: Error details:', suppliersError.message, suppliersError.details, suppliersError.hint);
-          
+          console.error('Error upserting suppliers batch:', suppliersError);
           if (jobId) {
             await logImportError(
               jobId,
               'SUPPLIER_UPSERT',
-              `Error upserting suppliers: ${suppliersError.message}`,
-              { 
-                error: suppliersError, 
-                supplierCount: supplierUpsertData.length,
-                firstSupplier: supplierUpsertData[0] 
-              },
+              `Error upserting suppliers batch: ${suppliersError.message}`,
+              { error: suppliersError },
               null,
               null
             );
           }
-          
-          throw suppliersError;
+          // Continue with next batch instead of failing everything
+        } else if (upsertedSuppliers) {
+          // Add to our supplier ID lookup
+          upsertedSuppliers.forEach(s => {
+            supplierIdsByName[s.name] = s.id;
+          });
         }
-        
-        if (!upsertedSuppliers || upsertedSuppliers.length === 0) {
-          console.error('❌ IMPORT: Failed to upsert suppliers: no data returned');
-          
-          if (jobId) {
-            await logImportError(
-              jobId,
-              'SUPPLIER_EMPTY_RESULT',
-              'No suppliers were created - empty result returned',
-              { supplierCount: supplierUpsertData.length },
-              null,
-              null
-            );
-          }
-          
-          throw new Error('Failed to upsert suppliers: no data returned');
-        }
-        
-        console.log(`✅ IMPORT: Successfully upserted ${upsertedSuppliers.length} suppliers`);
-        console.log('📋 IMPORT: First few suppliers:', upsertedSuppliers.slice(0, 3).map(s => ({ id: s.id, name: s.name })));
-        
-        // Create lookup for supplier IDs
-        supplierIdsByName = {};
-        upsertedSuppliers.forEach(s => {
-          supplierIdsByName[s.name] = s.id;
-        });
+      } catch (error) {
+        console.error('Exception upserting suppliers batch:', error);
+        // Continue with next batch
       }
-      
-      // Collect product identifiers for matching
-      const eans = new Set();
-      const mpns = new Set();
-      const productNames = new Set();
-      
-      console.log('Collecting product identifiers for matching...');
-      
-      for (const supplierData of Object.values(supplierGroups)) {
-        supplierData.products.forEach(p => {
-          // Use custom match columns if provided, otherwise use standard fields
-          const eanValue = matchColumns?.ean ? p[matchColumns.ean] : p.ean;
-          const mpnValue = matchColumns?.mpn ? p[matchColumns.mpn] : p.mpn;
-          const nameValue = matchColumns?.name ? p[matchColumns.name] : p.product_name;
-          
-          if (matchOptions.useEan && eanValue) {
-            eans.add(eanValue);
-            console.log(`Added EAN for matching: ${eanValue}`);
-          }
-          if (matchOptions.useMpn && mpnValue) {
-            mpns.add(mpnValue);
-            console.log(`Added MPN for matching: ${mpnValue}`);
-          }
-          if (matchOptions.useName && nameValue) {
-            productNames.add(nameValue);
-            console.log(`Added product name for matching: ${nameValue}`);
-          }
-        });
-      }
-      
-      console.log(`Collected ${eans.size} unique EANs, ${mpns.size} unique MPNs, and ${productNames.size} unique product names for matching`);
-      
-      // Build filters for product queries
-      let filters = [];
-      
-      if (matchOptions.useEan && eans.size > 0) {
-        const eanChunks = chunkArray(Array.from(eans), 500);
-        for (const chunk of eanChunks) {
-          filters.push(`ean.in.(${chunk.map(ean => `"${ean}"`).join(',')})`);
-        }
-      }
-      
-      if (matchOptions.useMpn && mpns.size > 0) {
-        const mpnChunks = chunkArray(Array.from(mpns), 500);
-        for (const chunk of mpnChunks) {
-          filters.push(`mpn.in.(${chunk.map(mpn => `"${mpn}"`).join(',')})`);
-          filters.push(`custom_mpn.in.(${chunk.map(mpn => `"${mpn}"`).join(',')})`);
-        }
-      }
-      
-      if (matchOptions.useName && productNames.size > 0) {
-        const nameChunks = chunkArray(Array.from(productNames), 500);
-        for (const chunk of nameChunks) {
-          filters.push(`title.ilike.any.(${chunk.map(name => `"%${name}%"`).join(',')})`);
-        }
-      }
-      
-      console.log(`Built ${filters.length} filter chunks for product queries`);
-      
-      // Debug the first filter if available
-      if (filters.length > 0) {
-        console.log('First filter chunk example:', filters[0]);
-      }
-      
-      // Fetch products for matching
-      let allProducts = [];
-      
-      // Check if we have any filters to apply
-      if (filters.length === 0) {
-        console.warn('No filters available for product matching. This will result in no matches.');
-      } else {
-        console.log('Fetching products for matching...');
-        const productQueries = filters.map(f => 
-          supabase
-            .from('products')
-            .select('id, ean, mpn, title, custom_mpn')
-            .or(f)
-        );
-        
-        console.log(`Executing ${productQueries.length} product queries...`);
-        const productResults = await Promise.all(productQueries);
-        
-        for (const result of productResults) {
-          if (result.error) {
-            console.error('Error in product query:', result.error);
-            throw result.error;
-          }
-          if (result.data) {
-            console.log(`Query returned ${result.data.length} products`);
-            const newProducts = result.data.filter(newProduct => 
-              !allProducts.some(existingProduct => existingProduct.id === newProduct.id)
-            );
-            allProducts = [...allProducts, ...newProducts];
-          }
-        }
-      }
-      
-      console.log(`Fetched a total of ${allProducts.length} products for matching`);
-      
-      // Debug: Show sample of products if available
-      if (allProducts.length > 0) {
-        console.log('First few products for matching:', allProducts.slice(0, 3).map(p => ({ 
-          id: p.id, 
-          ean: p.ean, 
-          mpn: p.mpn, 
-          title: p.title 
-        })));
-      }
-      
-      // Create product lookup maps
-      const productsByEan = {};
-      const productsByMpn = {};
-      const productsByName = {};
-      
-      // Helper function to normalize MPNs for consistent matching
-      const normalizeMpn = (mpn) => {
-        if (!mpn) return '';
-        // First convert to string, lowercase, and trim whitespace
-        let normalized = mpn.toString().toLowerCase().trim();
-        // Remove all non-alphanumeric characters
-        normalized = normalized.replace(/[^a-z0-9]/g, '');
-        return normalized;
+    }
+    
+    // If no supplier IDs were found, exit early
+    if (Object.keys(supplierIdsByName).length === 0) {
+      console.error('Failed to upsert any suppliers');
+      return { 
+        processedCount: 0, 
+        supplierCount: 0,
+        matchStats: { totalMatched: 0, byMethod: { ean: 0, mpn: 0, name: 0 } }
       };
+    }
+    
+    // Get suppliers we successfully upserted
+    const validSupplierNames = Object.keys(supplierIdsByName);
+    console.log(`Retrieved ${validSupplierNames.length} valid supplier IDs`);
+    
+    // Prepare for product matching - collect only needed identifiers
+    const eans = new Set();
+    const mpns = new Set();
+    const productNames = new Set();
+    
+    // For tracking match methods
+    const matchMethodStats = {
+      ean: 0,
+      mpn: 0,
+      name: 0,
+      none: 0
+    };
+    
+    // Only collect identifiers for valid suppliers
+    for (const supplierName of validSupplierNames) {
+      const supplierData = supplierGroups[supplierName];
+      if (!supplierData || !supplierData.products) continue;
       
-      // Advanced MPN matching - tries multiple normalization techniques
-      const matchMpn = (supplierMpn, productMpns) => {
-        if (!supplierMpn) return null;
+      for (const p of supplierData.products) {
+        // Use custom match columns if provided, otherwise use standard fields
+        const eanValue = matchColumns?.ean ? p[matchColumns.ean] : p.ean;
+        const mpnValue = matchColumns?.mpn ? p[matchColumns.mpn] : p.mpn;
+        const nameValue = matchColumns?.name ? p[matchColumns.name] : p.product_name;
         
-        // Try multiple normalization techniques
-        const supplierNormalized = normalizeMpn(supplierMpn);
-        
-        // 1. Direct lookup with our standard normalization
-        if (productMpns[supplierNormalized]) {
-          return {
-            product: productMpns[supplierNormalized],
-            method: 'exact',
-            normalizedMpn: supplierNormalized
-          };
+        if (matchOptions.useEan && eanValue) {
+          eans.add(eanValue);
         }
-        
-        // 2. Try removing leading zeros (common variation)
-        const noLeadingZeros = supplierNormalized.replace(/^0+/, '');
-        if (noLeadingZeros !== supplierNormalized && productMpns[noLeadingZeros]) {
-          return {
-            product: productMpns[noLeadingZeros],
-            method: 'no-leading-zeros',
-            normalizedMpn: noLeadingZeros
-          };
+        if (matchOptions.useMpn && mpnValue) {
+          mpns.add(mpnValue);
         }
+        if (matchOptions.useName && nameValue) {
+          productNames.add(nameValue);
+        }
+      }
+    }
+    
+    // Fetch products in smaller, optimized batches
+    let allProducts = [];
+    const maxIdsPerQuery = 100; // Smaller batches for better memory usage
+    
+    // Helper to fetch products with a specific field filter
+    const fetchProductsWithFilter = async (fieldName, values, operator = 'in') => {
+      if (values.size === 0) return [];
+      
+      const valueArray = Array.from(values);
+      const products = [];
+      
+      // Process in smaller batches
+      for (let i = 0; i < valueArray.length; i += maxIdsPerQuery) {
+        const batchValues = valueArray.slice(i, i + maxIdsPerQuery);
         
-        // 3. Try partial matching (contained within or contains)
-        for (const [key, product] of Object.entries(productMpns)) {
-          // Skip very short MPNs for partial matching to avoid false positives
-          if (supplierNormalized.length < 4 || key.length < 4) continue;
+        try {
+          let query = supabase
+            .from('products')
+            .select('id, ean, mpn, title, custom_mpn');
+            
+          if (operator === 'in') {
+            query = query.in(fieldName, batchValues);
+          } else if (operator === 'ilike-any') {
+            const ilikeFilters = batchValues.map(v => `%${v}%`);
+            query = query.or(`${fieldName}.ilike.any.(${ilikeFilters.join(',')})`);
+          }
           
-          if (key.includes(supplierNormalized) || supplierNormalized.includes(key)) {
+          const { data, error } = await query;
+          
+          if (error) {
+            console.error(`Error fetching products by ${fieldName}:`, error);
+          } else if (data) {
+            products.push(...data);
+          }
+          
+          // Small delay to prevent overwhelming database
+          await new Promise(resolve => setTimeout(resolve, 50));
+        } catch (err) {
+          console.error(`Error in batch query for ${fieldName}:`, err);
+        }
+      }
+      
+      return products;
+    };
+    
+    // Fetch products by different identifiers in parallel
+    const [eanProducts, mpnProducts, nameProducts] = await Promise.all([
+      matchOptions.useEan ? fetchProductsWithFilter('ean', eans) : [],
+      matchOptions.useMpn ? fetchProductsWithFilter('mpn', mpns) : [], 
+      matchOptions.useName ? fetchProductsWithFilter('title', productNames, 'ilike-any') : []
+    ]);
+    
+    // Merge products (removing duplicates)
+    const productMap = new Map();
+    
+    // Add products to map by ID to remove duplicates
+    const addProductsToMap = (products) => {
+      for (const product of products) {
+        productMap.set(product.id, product);
+      }
+    };
+    
+    addProductsToMap(eanProducts);
+    addProductsToMap(mpnProducts);
+    addProductsToMap(nameProducts);
+    
+    // Convert map to array
+    allProducts = Array.from(productMap.values());
+    
+    console.log(`Fetched a total of ${allProducts.length} distinct products for matching`);
+    
+    // Build lookup maps
+    const productsByEan = {};
+    const productsByMpn = {};
+    const productsByName = {};
+    
+    // Helper function to normalize MPNs for consistent matching
+    const normalizeMpn = (mpn) => {
+      if (!mpn) return '';
+      let normalized = mpn.toString().toLowerCase().trim();
+      normalized = normalized.replace(/[^a-z0-9]/g, '');
+      return normalized;
+    };
+    
+    // Build efficient lookup structures
+    allProducts.forEach(product => {
+      if (product.ean) {
+        productsByEan[product.ean] = product;
+      }
+      
+      if (product.mpn) {
+        const normalizedMpn = normalizeMpn(product.mpn);
+        if (normalizedMpn) {
+          productsByMpn[normalizedMpn] = product;
+        }
+      }
+      
+      if (product.custom_mpn) {
+        const normalizedCustomMpn = normalizeMpn(product.custom_mpn);
+        if (normalizedCustomMpn) {
+          productsByMpn[normalizedCustomMpn] = product;
+        }
+      }
+      
+      if (product.title) {
+        productsByName[product.title.toLowerCase()] = product;
+      }
+    });
+    
+    // Process each supplier's products
+    const allSupplierProducts = [];
+    const unmatchedSupplierData = [];
+    const suppliersWithMatches = new Set();
+    
+    // Generate placeholder EAN helper function
+    const generatePlaceholderEan = (supplierId, productName, mpn) => {
+      const idPart = supplierId.substring(0, 6);
+      const namePart = productName ? productName.substring(0, 3).replace(/\W/g, '') : 'x';
+      const mpnPart = mpn ? mpn.substring(0, 3).replace(/\W/g, '') : 'x';
+      const timestamp = Date.now().toString().substring(8);
+      return `SP${idPart}${namePart}${mpnPart}${timestamp}`.substring(0, 20);
+    };
+    
+    // Advanced MPN matching
+    const matchMpn = (supplierMpn, productMpns) => {
+      if (!supplierMpn) return null;
+      
+      const supplierNormalized = normalizeMpn(supplierMpn);
+      if (!supplierNormalized) return null;
+      
+      // Direct lookup with standard normalization
+      if (productMpns[supplierNormalized]) {
+        return {
+          product: productMpns[supplierNormalized],
+          method: 'exact'
+        };
+      }
+      
+      // Try removing leading zeros
+      const noLeadingZeros = supplierNormalized.replace(/^0+/, '');
+      if (noLeadingZeros !== supplierNormalized && productMpns[noLeadingZeros]) {
+        return {
+          product: productMpns[noLeadingZeros],
+          method: 'no-leading-zeros'
+        };
+      }
+      
+      // Try partial matching for longer MPNs only
+      if (supplierNormalized.length >= 5) {
+        for (const [key, product] of Object.entries(productMpns)) {
+          if (key.length >= 5 && (key.includes(supplierNormalized) || supplierNormalized.includes(key))) {
             return {
               product,
-              method: 'partial',
-              normalizedMpn: key
+              method: 'partial'
             };
           }
         }
-        
-        // No match found
-        return null;
-      };
+      }
       
-      console.log(`Building product lookup maps for ${allProducts.length} products...`);
-      allProducts.forEach(product => {
-        if (product.ean) {
-          productsByEan[product.ean] = product;
-        }
-        
-        // Use normalized MPNs for lookup
-        if (product.mpn) {
-          const normalizedMpn = normalizeMpn(product.mpn);
-          if (normalizedMpn) {
-            console.log(`Adding product to MPN lookup: "${product.mpn}" → "${normalizedMpn}"`);
-            productsByMpn[normalizedMpn] = product;
-          }
-        }
-        
-        if (product.custom_mpn) {
-          const normalizedCustomMpn = normalizeMpn(product.custom_mpn);
-          if (normalizedCustomMpn) {
-            console.log(`Adding product to MPN lookup: "${product.custom_mpn}" → "${normalizedCustomMpn}"`);
-            productsByMpn[normalizedCustomMpn] = product;
-          }
-        }
-        
-        if (product.title) {
-          productsByName[product.title.toLowerCase()] = product;
-        }
-      });
+      return null;
+    };
+    
+    // Process each valid supplier
+    for (const supplierName of validSupplierNames) {
+      const supplierId = supplierIdsByName[supplierName];
+      const supplierData = supplierGroups[supplierName];
       
-      console.log(`Created lookup maps: ${Object.keys(productsByEan).length} EANs, ${Object.keys(productsByMpn).length} MPNs, ${Object.keys(productsByName).length} titles`);
+      if (!supplierId || !supplierData || !supplierData.products || supplierData.products.length === 0) {
+        continue;
+      }
       
-      // Debug: Log all the MPNs in our lookup
-      console.log('MPN lookup keys (first 20):', Object.keys(productsByMpn).slice(0, 20));
+      const matchedProducts = [];
+      const matchedIndices = new Set();
       
-      // Call diagnostic function AFTER allProducts is populated
-      debugMpnMatching(supplierGroups, allProducts);
-      
-      // Match supplier products to existing products
-      console.log(`Processing supplier products for ${Object.keys(supplierGroups).length} suppliers`);
-      
-      const allSupplierProducts = [];
-      const unmatchedSupplierData = [];
-      const suppliersWithMatches = new Set();
-      
-      // Generate placeholder EAN helper function
-      const generatePlaceholderEan = (supplierId, productName, mpn) => {
-        const idPart = supplierId.substring(0, 8);
-        const namePart = productName ? productName.substring(0, 5).replace(/\W/g, '') : 'item';
-        const mpnPart = mpn ? mpn.substring(0, 5).replace(/\W/g, '') : 'nompn';
-        const timestamp = Date.now().toString().substring(6);
-        return `SUP${idPart}${namePart}${mpnPart}${timestamp}`.substring(0, 30);
-      };
-      
-      // Statistics for different match methods
-      const matchMethodStats = {
-        ean: 0,
-        mpn: 0,
-        name: 0,
-        none: 0
-      };
-      
-      // Process each supplier and their products
-      for (const [supplierName, supplierData] of Object.entries(supplierGroups)) {
-        const supplierId = supplierIdsByName[supplierName];
-        
-        if (!supplierId) {
-          console.error(`No supplier ID found for supplier name: "${supplierName}"`);
+      // Match by priority
+      for (const method of matchOptions.priority) {
+        if (
+          (method === 'ean' && !matchOptions.useEan) ||
+          (method === 'mpn' && !matchOptions.useMpn) ||
+          (method === 'name' && !matchOptions.useName)
+        ) {
           continue;
         }
         
-        console.log(`Processing supplier: ${supplierName} (ID: ${supplierId}) with ${supplierData.products.length} products`);
-        
-        const matchedProducts = [];
-        const matchedSupplierProductIndices = new Set();
-        
-        // Match by priority
-        for (const method of matchOptions.priority) {
-          // Skip methods that are disabled
-          if (
-            (method === 'ean' && !matchOptions.useEan) ||
-            (method === 'mpn' && !matchOptions.useMpn) ||
-            (method === 'name' && !matchOptions.useName)
-          ) {
-            console.log(`Skipping disabled match method: ${method}`);
-            continue;
-          }
+        // Match supplier products
+        supplierData.products.forEach((supplierProduct, index) => {
+          if (matchedIndices.has(index)) return;
           
-          console.log(`Trying to match products using method: ${method}`);
+          let match = null;
           
-          // Match supplier products to products
-          supplierData.products.forEach((supplierProduct, index) => {
-            if (matchedSupplierProductIndices.has(index)) {
-              return; // Skip already matched products
+          if (method === 'ean' && matchOptions.useEan) {
+            const eanValue = matchColumns?.ean ? supplierProduct[matchColumns.ean] : supplierProduct.ean;
+            if (eanValue && productsByEan[eanValue]) {
+              match = productsByEan[eanValue];
+              if (match) {
+                matchedProducts.push({
+                  supplierProduct,
+                  product: match,
+                  matchMethod: method
+                });
+                matchedIndices.add(index);
+                suppliersWithMatches.add(supplierId);
+                matchMethodStats[method]++;
+              }
             }
-            
-            let match = null;
-            
-            if (method === 'ean' && matchOptions.useEan) {
-              // Use custom EAN column if provided
-              const eanValue = matchColumns?.ean ? supplierProduct[matchColumns.ean] : supplierProduct.ean;
-              if (eanValue) {
-                match = productsByEan[eanValue];
-                if (match) {
-                  console.log(`Matched by EAN: ${eanValue} -> Product ID: ${match.id}`);
-                }
+          } else if (method === 'mpn' && matchOptions.useMpn) {
+            const mpnValue = matchColumns?.mpn ? supplierProduct[matchColumns.mpn] : supplierProduct.mpn;
+            if (mpnValue) {
+              const matchResult = matchMpn(mpnValue, productsByMpn);
+              if (matchResult) {
+                matchedProducts.push({
+                  supplierProduct,
+                  product: matchResult.product,
+                  matchMethod: method
+                });
+                matchedIndices.add(index);
+                suppliersWithMatches.add(supplierId);
+                matchMethodStats[method]++;
               }
-            } else if (method === 'mpn' && matchOptions.useMpn) {
-              // Use custom MPN column if provided
-              const mpnValue = matchColumns?.mpn ? supplierProduct[matchColumns.mpn] : supplierProduct.mpn;
-              if (mpnValue) {
-                console.log(`Trying to match MPN: "${mpnValue}"`);
-                
-                // Use our advanced MPN matcher
-                const matchResult = matchMpn(mpnValue, productsByMpn);
-                
-                if (matchResult) {
-                  match = matchResult.product;
-                  console.log(`✅ MATCHED by MPN: "${mpnValue}" → "${matchResult.normalizedMpn}" (${matchResult.method} match)`);
-                  console.log(`  Product ID: ${match.id}, Title: "${match.title}"`);
-                  console.log(`  Original product MPNs: mpn="${match.mpn}", custom_mpn="${match.custom_mpn}"`);
-                } else {
-                  // No match found with any method
-                  console.log(`❌ No match found for MPN: "${mpnValue}"`);
-                }
-              }
-            } else if (method === 'name' && matchOptions.useName) {
-              // Use custom product name column if provided
-              const nameValue = matchColumns?.name ? supplierProduct[matchColumns.name] : supplierProduct.product_name;
-              if (nameValue) {
-                // For name matching, try case-insensitive exact match first
-                match = productsByName[nameValue.toLowerCase()];
-                
-                // If no exact match, try to find a product with a similar name
-                if (!match && allProducts.length > 0) {
-                  const productName = nameValue.toLowerCase();
-                  const possibleMatches = allProducts.filter(p => 
-                    p.title && p.title.toLowerCase().includes(productName)
-                  );
-                  
-                  if (possibleMatches.length > 0) {
-                    match = possibleMatches[0];
-                    console.log(`Matched by partial name: "${nameValue}" -> Product: "${match.title}" (ID: ${match.id})`);
+            }
+          } else if (method === 'name' && matchOptions.useName) {
+            const nameValue = matchColumns?.name ? supplierProduct[matchColumns.name] : supplierProduct.product_name;
+            if (nameValue) {
+              const lowerName = nameValue.toLowerCase();
+              match = productsByName[lowerName];
+              
+              if (!match) {
+                // Try to find partial match for longer names only
+                if (lowerName.length > 5) {
+                  for (const [key, product] of Object.entries(productsByName)) {
+                    if (key.length > 5 && (key.includes(lowerName) || lowerName.includes(key))) {
+                      match = product;
+                      break;
+                    }
                   }
                 }
               }
-            }
-            
-            if (match) {
-              matchedProducts.push({
-                supplierProduct,
-                product: match,
-                matchMethod: method
-              });
-              matchedSupplierProductIndices.add(index);
-              suppliersWithMatches.add(supplierId);
-              matchMethodStats[method]++;
               
-              // Update product MPN if matched by MPN but custom_mpn is empty
-              if (method === 'mpn' && supplierProduct.mpn && !match.custom_mpn) {
-                void supabase
-                  .from('products')
-                  .update({ 
-                    custom_mpn: supplierProduct.mpn,
-                    mpn: supplierProduct.mpn,
-                    updated_at: new Date().toISOString() 
-                  })
-                  .eq('id', match.id);
+              if (match) {
+                matchedProducts.push({
+                  supplierProduct,
+                  product: match,
+                  matchMethod: method
+                });
+                matchedIndices.add(index);
+                suppliersWithMatches.add(supplierId);
+                matchMethodStats[method]++;
               }
             }
-          });
-        }
-        
-        console.log(`Matched ${matchedProducts.length} out of ${supplierData.products.length} products for supplier ${supplierName}`);
-        
-        // Create supplier-product records for matches
-        const supplierProductsForThisSupplier = matchedProducts.map(match => {
-          const ean = match.supplierProduct.ean && match.supplierProduct.ean.trim() !== '' 
-            ? match.supplierProduct.ean 
-            : match.product.ean || generatePlaceholderEan(supplierId, match.supplierProduct.product_name, match.supplierProduct.mpn);
-
-          return {
-            supplier_id: supplierId,
-            product_id: match.product.id,
-            ean: ean,
-            cost: match.supplierProduct.cost,
-            moq: match.supplierProduct.moq || 1,
-            lead_time: match.supplierProduct.lead_time || '3 days',
-            payment_terms: match.supplierProduct.payment_terms || 'Net 30',
-            match_method: match.matchMethod,
-            updated_at: new Date().toISOString()
-          };
-        });
-        
-        console.log(`Created ${supplierProductsForThisSupplier.length} supplier-product records for supplier ${supplierName}`);
-        allSupplierProducts.push(...supplierProductsForThisSupplier);
-        
-        // Handle unmatched supplier products
-        const unmatchedProducts = [];
-        supplierData.products.forEach((supplierProduct, index) => {
-          if (!matchedSupplierProductIndices.has(index)) {
-            matchMethodStats.none++;
-            const ean = supplierProduct.ean && supplierProduct.ean.trim() !== '' 
-              ? supplierProduct.ean 
-              : generatePlaceholderEan(supplierId, supplierProduct.product_name, supplierProduct.mpn);
-              
-            unmatchedProducts.push({
-              supplier_id: supplierId,
-              product_id: null,
-              ean: ean,
-              cost: supplierProduct.cost,
-              moq: supplierProduct.moq || 1,
-              lead_time: supplierProduct.lead_time || '3 days',
-              payment_terms: supplierProduct.payment_terms || 'Net 30',
-              match_method: 'none',  // Ensure this is set for NOT NULL constraint
-              product_name: supplierProduct.product_name || '',
-              mpn: supplierProduct.mpn || '',
-              updated_at: new Date().toISOString()
-            });
           }
         });
-        
-        console.log(`Found ${unmatchedProducts.length} unmatched products for supplier ${supplierName}`);
-        unmatchedSupplierData.push(...unmatchedProducts);
-        
-        // Report progress
-        if (progressCallback) {
-          progressCallback(processedCount, mappedData.length);
-        }
       }
       
-      // Update is_matched flag for suppliers with matches
-      if (suppliersWithMatches.size > 0) {
-        console.log(`Updating is_matched flag for ${suppliersWithMatches.size} suppliers`);
-        const { error: matchUpdateError } = await supabase
-          .from('suppliers')
-          .update({ is_matched: true })
-          .in('id', Array.from(suppliersWithMatches));
-        
-        if (matchUpdateError) {
-          console.error('Error updating supplier match status:', matchUpdateError);
-        }
-      }
-      
-      // Process unmatched products by supplier ID
-      const unmatchedBySupplierId = {};
-      
-      unmatchedSupplierData.forEach(item => {
-        const supplierId = item.supplier_id;
-        if (!unmatchedBySupplierId[supplierId]) {
-          unmatchedBySupplierId[supplierId] = [];
-        }
-        unmatchedBySupplierId[supplierId].push(item);
+      // Create supplier-product records for matches
+      const supplierProductsForThisSupplier = matchedProducts.map(match => {
+        const ean = match.supplierProduct.ean && match.supplierProduct.ean.trim() !== '' 
+          ? match.supplierProduct.ean 
+          : match.product.ean || generatePlaceholderEan(supplierId, match.supplierProduct.product_name, match.supplierProduct.mpn);
+
+        return {
+          supplier_id: supplierId,
+          product_id: match.product.id,
+          ean: ean,
+          cost: match.supplierProduct.cost,
+          moq: match.supplierProduct.moq || 1,
+          lead_time: match.supplierProduct.lead_time || '3 days',
+          payment_terms: match.supplierProduct.payment_terms || 'Net 30',
+          match_method: match.matchMethod,
+          updated_at: new Date().toISOString()
+        };
       });
       
-      console.log(`Processing ${unmatchedSupplierData.length} unmatched supplier products for ${Object.keys(unmatchedBySupplierId).length} suppliers`);
+      allSupplierProducts.push(...supplierProductsForThisSupplier);
       
-      // Insert unmatched products
-      for (const [supplierId, supplierProducts] of Object.entries(unmatchedBySupplierId)) {
-        for (let i = 0; i < supplierProducts.length; i += batchSize) {
-          const batch = supplierProducts.slice(i, i + batchSize);
-          
-          if (batch.length > 0) {
-            try {
-              const validBatch = batch;
-              
-              // Make sure all records have match_method set
-              validBatch.forEach(item => {
-                if (!item.match_method) {
-                  console.log('🔍 DEBUG: Setting missing match_method to "none" for a record');
-                  item.match_method = 'none';
-                }
-              });
-              
-              if (validBatch.length === 0) {
-                continue;
-              }
-              
-              // Get EANs to check
-              const eansToCheck = validBatch.map(item => item.ean);
-              
-              // Delete any previous unmatched entries
-              if (eansToCheck.length > 0) {
-                try {
-                  console.log(`🔍 DEBUG: Attempting to delete existing unmatched supplier products for supplier ${supplierId}`);
-                  const { data: deleteData, error: deleteError } = await supabase
-                    .from('supplier_products')
-                    .delete()
-                    .eq('supplier_id', supplierId)
-                    .is('product_id', null)
-                    .in('ean', eansToCheck);
-                    
-                  if (deleteError) {
-                    console.error('❌ DEBUG: Error deleting existing unmatched supplier products:', deleteError);
-                    console.error('❌ DEBUG: Error details:', deleteError.message, deleteError.details, deleteError.hint);
-                  } else {
-                    console.log('✅ DEBUG: Successfully deleted existing unmatched supplier products');
-                  }
-                } catch (deleteError) {
-                  console.error('❌ DEBUG: Exception deleting existing unmatched supplier products:', deleteError);
-                }
-              }
-              
-              // Insert new unmatched records
-              console.log(`Inserting ${validBatch.length} unmatched supplier products for supplier ${supplierId}`);
-              console.log('🔍 DEBUG: First unmatched record sample:', JSON.stringify(validBatch[0]));
-              
-              try {
-                const { data: insertedUnmatched, error: unmatchedError } = await supabase
-                  .from('supplier_products')
-                  .insert(validBatch)
-                  .select();
-
-                if (unmatchedError) {
-                  console.error('Error inserting unmatched supplier products batch:', unmatchedError);
-                  console.error('❌ DEBUG: Error details:', unmatchedError.message, unmatchedError.details, unmatchedError.hint);
-                  batchErrors.push(unmatchedError);
-                } else if (insertedUnmatched) {
-                  console.log(`Successfully inserted ${insertedUnmatched.length} unmatched supplier products`);
-                  processedCount += insertedUnmatched.length;
-                } else {
-                  console.log('❓ DEBUG: No error but no data returned from insert operation');
-                }
-              } catch (insertError) {
-                console.error('❌ DEBUG: Exception during insert operation:', insertError);
-                batchErrors.push(insertError);
-              }
-            } catch (err) {
-              console.error('Exception processing unmatched supplier products batch:', err);
-              batchErrors.push(err);
-            }
-          }
+      // Handle unmatched supplier products
+      supplierData.products.forEach((supplierProduct, index) => {
+        if (!matchedIndices.has(index)) {
+          matchMethodStats.none++;
+          const ean = supplierProduct.ean && supplierProduct.ean.trim() !== '' 
+            ? supplierProduct.ean 
+            : generatePlaceholderEan(supplierId, supplierProduct.product_name, supplierProduct.mpn);
+            
+          unmatchedSupplierData.push({
+            supplier_id: supplierId,
+            product_id: null,
+            ean: ean,
+            cost: supplierProduct.cost,
+            moq: supplierProduct.moq || 1,
+            lead_time: supplierProduct.lead_time || '3 days',
+            payment_terms: supplierProduct.payment_terms || 'Net 30',
+            match_method: 'none',
+            product_name: supplierProduct.product_name || '',
+            mpn: supplierProduct.mpn || '',
+            updated_at: new Date().toISOString()
+          });
         }
-      }
-      
-      // Process matched products in batches
-      console.log(`Processing ${allSupplierProducts.length} matched supplier products in batches`);
-      for (let i = 0; i < allSupplierProducts.length; i += batchSize) {
-        const batch = allSupplierProducts.slice(i, i + batchSize);
-              
-        if (batch.length > 0) {
-          try {
-            const validBatch = batch.filter(item => 
-              item.supplier_id && 
-              item.product_id && // For matched products, we need product_id
-              item.ean && 
-              item.ean.trim() !== ''
-            );
-            
-            // Make sure all records have match_method set
-            validBatch.forEach(item => {
-              if (!item.match_method) {
-                console.log('🔍 DEBUG: Setting missing match_method to "ean" for a matched record');
-                item.match_method = 'ean'; // Default to EAN for matched products
-              }
-            });
-            
-            if (validBatch.length === 0) {
-              console.log('🔍 DEBUG: No valid records in this batch after filtering');
-              continue;
-            }
-            
-            console.log(`Upserting ${validBatch.length} matched supplier products (batch ${Math.floor(i/batchSize) + 1}/${Math.ceil(allSupplierProducts.length/batchSize)})`);
-            console.log('🔍 DEBUG: First valid record sample:', JSON.stringify(validBatch[0]));
-            
-            try {
-              const { data: insertedData, error: relationError } = await supabase
-                .from('supplier_products')
-                .upsert(validBatch, {
-                  onConflict: 'supplier_id,product_id',
-                  ignoreDuplicates: false
-                })
-                .select();
-
-              if (relationError) {
-                console.error('Error upserting supplier products batch:', relationError);
-                console.error('❌ DEBUG: Error details:', relationError.message, relationError.details, relationError.hint);
-                batchErrors.push(relationError);
-              } else if (insertedData) {
-                console.log(`Successfully upserted ${insertedData.length} supplier-product relationships`);
-                results.push(...insertedData);
-                processedCount += insertedData.length;
-              } else {
-                console.log('❓ DEBUG: No error but no data returned from upsert operation');
-              }
-            } catch (upsertError) {
-              console.error('❌ DEBUG: Exception during upsert operation:', upsertError);
-              batchErrors.push(upsertError);
-            }
-          } catch (err) {
-            console.error('Exception processing supplier products batch:', err);
-            batchErrors.push(err);
-          }
-        }
-      }
-      
-      // Handle errors
-      if (batchErrors.length > 0 && processedCount > 0) {
-        console.warn(`Completed import with ${batchErrors.length} batch errors, but processed ${processedCount} records successfully.`);
-      } else if (batchErrors.length > 0) {
-        throw batchErrors[0];
-      }
-
-      // Final results and statistics
-      const totalMatched = allSupplierProducts.length;
-      const totalUnmatched = unmatchedSupplierData.length;
-      const totalProcessed = totalMatched + totalUnmatched;
-      
-      console.log('============ IMPORT SUMMARY ============');
-      console.log(`Total processed: ${totalProcessed}`);
-      console.log(`Total matched: ${totalMatched}`);
-      console.log(`Total unmatched: ${totalUnmatched}`);
-      console.log(`Match by EAN: ${matchMethodStats.ean}`);
-      console.log(`Match by MPN: ${matchMethodStats.mpn}`);
-      console.log(`Match by Name: ${matchMethodStats.name}`);
-      console.log(`Unmatched count: ${matchMethodStats.none}`);
-      console.log('=======================================');
-      
-      // Enhance the final results to ensure match statistics are included
-      const finalResults = {
-        processedCount: totalProcessed,
-        supplierCount: Object.keys(supplierGroups).length,
-        totalRecords: totalProcessed,
-        successfulImports: totalProcessed,
-        failedImports: 0,
-        suppliersAdded: Object.keys(supplierGroups).length,
-        matchStats: {
-          totalMatched: totalMatched,
-          byMethod: {
-            ean: matchMethodStats.ean,
-            mpn: matchMethodStats.mpn,
-            name: matchMethodStats.name
-          },
-          unmatchedCount: totalUnmatched
-        }
-      };
-      
-      console.log('Returning final results to client:', finalResults);
-      return finalResults;
-    } catch (error) {
-      console.error('Error importing supplier data:', error);
-      throw error;
+      });
     }
+    
+    // Update is_matched flag for suppliers with matches - in a single operation
+    if (suppliersWithMatches.size > 0) {
+      await supabase
+        .from('suppliers')
+        .update({ is_matched: true })
+        .in('id', Array.from(suppliersWithMatches));
+    }
+    
+    // Process database operations in small batches
+    const dbBatchSize = Math.min(50, batchSize);
+    
+    // First handle the matched supplier products
+    let matchedSuccessCount = 0;
+    for (let i = 0; i < allSupplierProducts.length; i += dbBatchSize) {
+      const batch = allSupplierProducts.slice(i, i + dbBatchSize).filter(item => 
+        item.supplier_id && item.product_id && item.ean && item.ean.trim() !== ''
+      );
+      
+      if (batch.length === 0) continue;
+      
+      try {
+        const { data: insertedData, error: relationError } = await supabase
+          .from('supplier_products')
+          .upsert(batch, {
+            onConflict: 'supplier_id,product_id',
+            ignoreDuplicates: false
+          })
+          .select();
+
+        if (!relationError && insertedData) {
+          matchedSuccessCount += insertedData.length;
+          results.push(...insertedData);
+          processedCount += insertedData.length;
+        }
+      } catch (error) {
+        console.error('Error upserting supplier products batch:', error);
+        // Continue with next batch
+      }
+      
+      // Add a small delay between batches
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    
+    // Handle unmatched records by supplier ID to minimize operations
+    const unmatchedBySupplierId = {};
+    unmatchedSupplierData.forEach(item => {
+      if (!unmatchedBySupplierId[item.supplier_id]) {
+        unmatchedBySupplierId[item.supplier_id] = [];
+      }
+      unmatchedBySupplierId[item.supplier_id].push(item);
+    });
+    
+    // Process unmatched products by supplier
+    let unmatchedSuccessCount = 0;
+    for (const supplierId of Object.keys(unmatchedBySupplierId)) {
+      const supplierProducts = unmatchedBySupplierId[supplierId];
+      
+      // Process in smaller batches
+      for (let i = 0; i < supplierProducts.length; i += dbBatchSize) {
+        const batch = supplierProducts.slice(i, i + dbBatchSize).filter(item => 
+          item.supplier_id && item.ean && item.ean.trim() !== ''
+        );
+        
+        if (batch.length === 0) continue;
+        
+        try {
+          // Delete existing unmatched entries for these EANs
+          const eansToCheck = batch.map(item => item.ean);
+          await supabase
+            .from('supplier_products')
+            .delete()
+            .eq('supplier_id', supplierId)
+            .is('product_id', null)
+            .in('ean', eansToCheck);
+            
+          // Insert new unmatched records
+          const { data: insertedUnmatched, error: unmatchedError } = await supabase
+            .from('supplier_products')
+            .insert(batch)
+            .select();
+
+          if (!unmatchedError && insertedUnmatched) {
+            unmatchedSuccessCount += insertedUnmatched.length;
+            processedCount += insertedUnmatched.length;
+          }
+        } catch (error) {
+          console.error('Error inserting unmatched supplier products batch:', error);
+          // Continue with next batch
+        }
+        
+        // Add a small delay between batches
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
+    
+    // Final results and statistics
+    const totalMatched = matchedSuccessCount;
+    const totalUnmatched = unmatchedSuccessCount;
+    const totalProcessed = totalMatched + totalUnmatched;
+    
+    console.log('======== IMPORT SUMMARY ========');
+    console.log(`Total processed: ${totalProcessed}`);
+    console.log(`Total matched: ${totalMatched}`);
+    console.log(`Total unmatched: ${totalUnmatched}`);
+    console.log(`Match by EAN: ${matchMethodStats.ean}`);
+    console.log(`Match by MPN: ${matchMethodStats.mpn}`);
+    console.log(`Match by Name: ${matchMethodStats.name}`);
+    console.log(`Unmatched count: ${matchMethodStats.none}`);
+    console.log('===============================');
+    
+    return {
+      processedCount: totalProcessed,
+      supplierCount: Object.keys(supplierGroups).length,
+      matchStats: {
+        totalMatched: totalMatched,
+        byMethod: {
+          ean: matchMethodStats.ean,
+          mpn: matchMethodStats.mpn,
+          name: matchMethodStats.name
+        },
+        unmatchedCount: totalUnmatched
+      }
+    };
   } catch (error) {
     console.error('Error importing supplier data:', error);
-    throw error;
+    return {
+      processedCount: 0,
+      supplierCount: 0,
+      error: error.message,
+      matchStats: {
+        totalMatched: 0,
+        byMethod: { ean: 0, mpn: 0, name: 0 }
+      }
+    };
   }
 }
 
-// Helper function to chunk arrays for DB operations
-function chunkArray(array, chunkSize) {
-  const chunks = [];
-  for (let i = 0; i < array.length; i += chunkSize) {
-    chunks.push(array.slice(i, i + chunkSize));
-  }
-  return chunks;
-}
-
-// Import product data function
+// Import product data function (reference to existing function)
 async function importProductData(mappedData, progressCallback, batchSize) {
   try {
     console.log(`Importing ${mappedData.length} products with batch size ${batchSize}`);
@@ -3114,3 +3005,200 @@ router.get('/api/logs/files', (req, res) => {
     return res.status(500).json({ error: 'Failed to list log files' });
   }
 });
+
+// Worker-based processing for large imports using worker threads
+async function processChunkWithWorkers(chunk, job, fieldMapping, results) {
+  try {
+    console.log(`Processing chunk with ${chunk.length} rows using worker threads...`);
+    
+    // Only keep necessary data in memory
+    const slimChunk = chunk.map(row => {
+      const slimRow = {};
+      Object.values(fieldMapping).forEach(columnName => {
+        if (columnName && row[columnName] !== undefined) {
+          slimRow[columnName] = row[columnName];
+        }
+      });
+      return slimRow;
+    });
+    
+    // Create processing function for worker pool
+    async function processDataInWorker(data) {
+      // First map the data
+      const { slimmedData, fieldMap } = data;
+      
+      // Simple mapper that doesn't require database access
+      function mapSupplierDataNoDb(data, fieldMapping) {
+        const mappedData = [];
+        
+        for (const row of data) {
+          try {
+            // Process cost value
+            let cost = 0;
+            const costValue = row[fieldMapping['Cost']];
+            if (costValue) {
+              // Remove all non-numeric characters except decimal point
+              const numericValue = costValue.replace(/[^0-9.]/g, '');
+              cost = parseFloat(numericValue) || 0;
+            }
+            
+            const supplierData = {
+              supplier_name: row[fieldMapping['Supplier Name']]?.trim() || '',
+              ean: row[fieldMapping['EAN']]?.trim() || '',
+              mpn: row[fieldMapping['MPN']]?.trim() || '',
+              product_name: row[fieldMapping['Product Name']]?.trim() || '',
+              cost: cost,
+              moq: parseInt(row[fieldMapping['MOQ']]) || 1,
+              lead_time: row[fieldMapping['Lead Time']]?.trim() || '3 days',
+              payment_terms: row[fieldMapping['Payment Terms']]?.trim() || 'Net 30',
+              custom_attributes: {}
+            };
+            
+            // Validate supplier data
+            if (!supplierData.supplier_name) {
+              continue;
+            }
+            
+            mappedData.push(supplierData);
+          } catch (error) {
+            // Skip invalid entries
+          }
+        }
+        
+        return mappedData;
+      }
+      
+      // Process the data
+      return mapSupplierDataNoDb(slimmedData, fieldMap);
+    }
+    
+    // Determine optimal split based on CPUs
+    const workerCount = Math.min(config.getThreadCount(), chunk.length > 1000 ? 4 : 2);
+    const chunkSize = Math.ceil(slimChunk.length / workerCount);
+    
+    console.log(`Using ${workerCount} workers with ${chunkSize} rows per worker`);
+    
+    // Split data for workers
+    const tasks = [];
+    for (let i = 0; i < workerCount; i++) {
+      const start = i * chunkSize;
+      const end = Math.min(start + chunkSize, slimChunk.length);
+      if (start < end) {
+        tasks.push(pool.exec(processDataInWorker, [{
+          slimmedData: slimChunk.slice(start, end),
+          fieldMap: fieldMapping
+        }]));
+      }
+    }
+    
+    // Wait for all workers to complete
+    const workerResults = await Promise.all(tasks);
+    
+    // Combine results from all workers
+    let mappedData = [];
+    for (const result of workerResults) {
+      mappedData = mappedData.concat(result);
+    }
+    
+    // Clear original data to help GC
+    chunk.length = 0;
+    slimChunk.length = 0;
+    
+    console.log(`Worker processing complete. Mapped ${mappedData.length} records`);
+    
+    // Continue with database operations as before
+    if (mappedData.length === 0) {
+      console.log('No valid data to process after mapping');
+      return results;
+    }
+    
+    // Process the supplier data with the chosen match options
+    const matchOptions = job.match_options || {
+      useEan: true,
+      useMpn: true,
+      useName: false,
+      priority: ['ean', 'mpn', 'name']
+    };
+    
+    // Split data into smaller sub-batches for sequential DB processing
+    const batchSize = Math.min(job.batch_size || 50, 50);
+    const batches = [];
+    
+    for (let i = 0; i < mappedData.length; i += batchSize) {
+      batches.push(mappedData.slice(i, i + batchSize));
+    }
+    
+    // Process each batch with the database
+    let processedCount = 0;
+    
+    for (let i = 0; i < batches.length; i++) {
+      const batch = batches[i];
+      try {
+        const batchResults = await importSupplierData(
+          batch,
+          matchOptions,
+          null,
+          batchSize,
+          job.match_column_mapping,
+          job.id
+        );
+        
+        // Update results
+        results.totalRecords = (results.totalRecords || 0) + batch.length;
+        results.successfulImports = (results.successfulImports || 0) + (batchResults.processedCount || 0);
+        results.failedImports = (results.failedImports || 0) + (batch.length - (batchResults.processedCount || 0));
+        results.suppliersAdded = (results.suppliersAdded || 0) + (batchResults.supplierCount || 0);
+        
+        // Handle match statistics
+        if (!results.matchStats) {
+          results.matchStats = {
+            totalMatched: 0,
+            byMethod: {
+              ean: 0,
+              mpn: 0,
+              name: 0
+            }
+          };
+        }
+        
+        if (batchResults.matchStats) {
+          results.matchStats.totalMatched = (results.matchStats.totalMatched || 0) + 
+            (batchResults.matchStats.totalMatched || 0);
+          
+          if (batchResults.matchStats.byMethod) {
+            results.matchStats.byMethod.ean = (results.matchStats.byMethod.ean || 0) + 
+              (batchResults.matchStats.byMethod.ean || 0);
+            results.matchStats.byMethod.mpn = (results.matchStats.byMethod.mpn || 0) + 
+              (batchResults.matchStats.byMethod.mpn || 0);
+            results.matchStats.byMethod.name = (results.matchStats.byMethod.name || 0) + 
+              (batchResults.matchStats.byMethod.name || 0);
+          }
+        }
+        
+        processedCount += batch.length;
+        batch.length = 0;
+        
+        // Small delay between batches
+        if (i < batches.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          if (global.gc) global.gc();
+        }
+      } catch (error) {
+        console.error(`Error processing batch ${i+1}:`, error);
+        // Continue with next batch
+      }
+    }
+    
+    // Clean up 
+    mappedData = null;
+    batches.length = 0;
+    
+    if (global.gc) global.gc();
+    
+    return results;
+  } catch (error) {
+    console.error('Error in worker-based processing:', error);
+    chunk.length = 0;
+    throw error;
+  }
+}
