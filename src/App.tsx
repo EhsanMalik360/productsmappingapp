@@ -10,6 +10,7 @@ import CustomAttributes from './pages/CustomAttributes/CustomAttributes';
 import ProfitAnalysis from './pages/ProfitAnalysis/ProfitAnalysis';
 import Settings from './pages/Settings/Settings';
 import ProductDetail from './pages/Products/ProductDetail';
+import ImportedProducts from './pages/ImportData/ImportedProducts';
 import { AppProvider } from './context/AppContext';
 import { ProfitFormulaProvider } from './context/ProfitFormulaContext';
 import { Toaster } from 'react-hot-toast';
@@ -25,6 +26,7 @@ function App() {
               <Route path="/import-data" element={<ImportData />} />
               <Route path="/products" element={<Products />} />
               <Route path="/products/:id" element={<ProductDetail />} />
+              <Route path="/products/imported" element={<ImportedProducts />} />
               <Route path="/suppliers" element={<Suppliers />} />
               <Route path="/suppliers/:id" element={<SupplierDetail />} />
               <Route path="/attributes" element={<CustomAttributes />} />

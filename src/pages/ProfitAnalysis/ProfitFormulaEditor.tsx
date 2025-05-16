@@ -24,6 +24,7 @@ interface ProfitCalculationResult {
   productTitle: string;
   salePrice: number;
   amazonFee: number;
+  referralFee: number;
   supplierCost: number;
   customValues: Record<string, number>;
   profit: number;
@@ -197,6 +198,7 @@ const ProfitFormulaEditor: React.FC = () => {
   const standardFields = [
     { value: 'salePrice', displayValue: 'Sale Price' },
     { value: 'amazonFee', displayValue: 'Amazon Fee' },
+    { value: 'referralFee', displayValue: 'Referral Fee' },
     { value: 'supplierCost', displayValue: 'Supplier Cost' },
     { value: 'buyBoxPrice', displayValue: 'Buy Box Price' },
     { value: 'unitsSold', displayValue: 'Units Sold' }
@@ -234,7 +236,8 @@ const ProfitFormulaEditor: React.FC = () => {
         if (bestSupplier) {
           setExampleProduct({
             ...productWithSupplier,
-            supplierCost: bestSupplier.cost
+            supplierCost: bestSupplier.cost,
+            referralFee: productWithSupplier.referralFee !== undefined ? productWithSupplier.referralFee : 0
           });
         }
       }
@@ -270,6 +273,7 @@ const ProfitFormulaEditor: React.FC = () => {
         const values: Record<string, number> = {
           salePrice: product.salePrice || 0,
           amazonFee: product.amazonFee || 0,
+          referralFee: product.referralFee !== undefined ? product.referralFee : 0,
           supplierCost: bestSupplier.cost || 0,
           buyBoxPrice: product.buyBoxPrice || 0,
           unitsSold: product.unitsSold || 0
@@ -309,6 +313,7 @@ const ProfitFormulaEditor: React.FC = () => {
             productTitle: product.title,
             salePrice: product.salePrice,
             amazonFee: product.amazonFee,
+            referralFee: product.referralFee,
             supplierCost: bestSupplier.cost,
             customValues,
             profit,
@@ -383,6 +388,7 @@ const ProfitFormulaEditor: React.FC = () => {
       'Product Title',
       'Sale Price',
       'Amazon Fee',
+      'Referral Fee',
       'Supplier Cost',
       ...Object.keys(dataResults[0].customValues),
       'Profit',
@@ -396,6 +402,7 @@ const ProfitFormulaEditor: React.FC = () => {
           `"${result.productTitle.replace(/"/g, '""')}"`,
           result.salePrice.toFixed(2),
           result.amazonFee.toFixed(2),
+          result.referralFee.toFixed(2),
           result.supplierCost.toFixed(2),
           ...Object.values(result.customValues).map(v => v.toFixed(2)),
           result.profit.toFixed(2),
@@ -897,6 +904,17 @@ const ProfitFormulaEditor: React.FC = () => {
                       )}
                     </th>
                     <th 
+                      className={`px-4 py-2 text-left text-sm font-medium text-gray-500 cursor-pointer ${sortField === 'referralFee' ? 'bg-gray-100' : ''}`}
+                      onClick={() => handleSort('referralFee')}
+                    >
+                      Referral Fee
+                      {sortField === 'referralFee' && (
+                        <span className="ml-1">
+                          {sortDirection === 'asc' ? '↑' : '↓'}
+                        </span>
+                      )}
+                    </th>
+                    <th 
                       className={`px-4 py-2 text-left text-sm font-medium text-gray-500 cursor-pointer ${sortField === 'supplierCost' ? 'bg-gray-100' : ''}`}
                       onClick={() => handleSort('supplierCost')}
                     >
@@ -945,6 +963,7 @@ const ProfitFormulaEditor: React.FC = () => {
                       </td>
                       <td className="px-4 py-2 text-gray-900">${result.salePrice.toFixed(2)}</td>
                       <td className="px-4 py-2 text-red-600">${result.amazonFee.toFixed(2)}</td>
+                      <td className="px-4 py-2 text-red-600">${result.referralFee.toFixed(2)}</td>
                       <td className="px-4 py-2 text-red-600">${result.supplierCost.toFixed(2)}</td>
                       {/* Custom attribute values */}
                       {Object.values(result.customValues).map((value, idx) => (

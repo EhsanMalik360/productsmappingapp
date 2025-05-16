@@ -11,6 +11,7 @@ export interface Product {
   salePrice: number;
   unitsSold: number;
   amazonFee: number;
+  referralFee: number;
   buyBoxPrice: number;
   category?: string | null;
   rating?: number | null;
@@ -64,6 +65,7 @@ interface AppContextType {
   customAttributes: CustomAttribute[];
   supplierProducts: SupplierProduct[];
   loading: boolean;
+  initialLoading: boolean;
   error: Error | null;
   totalProductCount: number;
   addProduct: (product: Omit<Product, 'id'>) => Promise<Product>;
@@ -90,24 +92,29 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 // Provider component
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Add a state to keep track of whether initial data has been loaded
+  const [dataInitialized, setDataInitialized] = useState<boolean>(false);
+  
   const { 
     products: dbProducts, 
     loading: productsLoading, 
+    initialLoading: productsInitialLoading,
     error: productsError,
     addProduct: addProductToDb,
     refreshProducts,
     totalProductCount 
-  } = useProducts();
+  } = useProducts(dataInitialized);
 
   const { 
     suppliers: dbSuppliers, 
     loading: suppliersLoading, 
+    initialLoading: suppliersInitialLoading,
     error: suppliersError,
     addSupplier: addSupplierToDb,
     updateSupplier: updateSupplierInDb,
     deleteSupplier: deleteSupplierFromDb,
     refreshSuppliers 
-  } = useSuppliers();
+  } = useSuppliers(dataInitialized);
 
   // Convert DB products to app format
   const products = useMemo(() => dbProducts.map(dbProduct => ({
@@ -118,6 +125,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     salePrice: dbProduct.sale_price,
     unitsSold: dbProduct.units_sold,
     amazonFee: dbProduct.amazon_fee,
+    referralFee: dbProduct.referral_fee || 0,
     buyBoxPrice: dbProduct.buy_box_price,
     category: dbProduct.category,
     rating: dbProduct.rating,
@@ -226,6 +234,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sale_price: product.salePrice,
       units_sold: product.unitsSold,
       amazon_fee: product.amazonFee,
+      referral_fee: product.referralFee,
       buy_box_price: product.buyBoxPrice,
       category: product.category,
       rating: product.rating,
@@ -238,6 +247,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       salePrice: newProduct.sale_price,
       unitsSold: newProduct.units_sold,
       amazonFee: newProduct.amazon_fee,
+      referralFee: newProduct.referral_fee || 0,
       buyBoxPrice: newProduct.buy_box_price,
       reviewCount: newProduct.review_count,
       mpn: newProduct.mpn
@@ -256,6 +266,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         sale_price: product.salePrice,
         units_sold: product.unitsSold,
         amazon_fee: product.amazonFee,
+        referral_fee: product.referralFee,
         buy_box_price: product.buyBoxPrice,
         category: product.category,
         rating: product.rating,
@@ -287,6 +298,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         salePrice: data.sale_price,
         unitsSold: data.units_sold,
         amazonFee: data.amazon_fee,
+        referralFee: data.referral_fee || 0,
         buyBoxPrice: data.buy_box_price,
         category: data.category,
         rating: data.rating,
@@ -723,6 +735,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Mark data as initialized after first load
+  useEffect(() => {
+    if (!productsInitialLoading && !suppliersInitialLoading && products.length > 0 && suppliers.length > 0) {
+      setDataInitialized(true);
+    }
+  }, [productsInitialLoading, suppliersInitialLoading, products.length, suppliers.length]);
+
   return (
     <AppContext.Provider
       value={{
@@ -730,8 +749,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         suppliers,
         customAttributes,
         supplierProducts,
-        loading,
-        error,
+        loading: productsLoading || suppliersLoading,
+        initialLoading: (productsInitialLoading || suppliersInitialLoading) && !dataInitialized,
+        error: productsError || suppliersError,
         totalProductCount,
         addProduct,
         updateProduct,

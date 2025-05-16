@@ -57,7 +57,7 @@ const calculateOptimalSettings = () => {
     highMemoryThreshold: Math.min(1024, Math.floor(totalMemGB * 1024 * 0.6)),
     
     // Network settings
-    fetchTimeout: 30000,  // 30s timeout
+    fetchTimeout: 120000,  // 120s timeout (increased from 30s)
     retryCount: 3,
     retryDelay: 1000,
     

@@ -292,13 +292,40 @@ const Dashboard: React.FC = () => {
   }), [profitDistributionData]);
 
   // After all hooks are defined, we can render based on conditions
-  if (loading || isRefreshing) {
+  if (loading && !hasData) {
     return (
-      <div className="flex flex-col items-center justify-center h-[70vh]">
-        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-        <p className="text-lg text-gray-600">
-          {isRefreshing ? 'Refreshing dashboard data...' : 'Loading dashboard data...'}
-        </p>
+      <div>
+        <div className="flex justify-between items-center mb-8">
+          <h1 className="text-3xl font-bold">Dashboard</h1>
+          <div className="flex items-center gap-2 px-4 py-2">
+            <div className="animate-spin h-5 w-5 text-blue-600">
+              <RefreshCcw size={20} />
+            </div>
+            <span className="text-gray-500">Loading dashboard...</span>
+          </div>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="bg-white rounded-lg shadow p-6 animate-pulse">
+              <div className="h-6 bg-gray-200 rounded w-1/2 mb-4"></div>
+              <div className="h-8 bg-gray-200 rounded w-1/3"></div>
+              <div className="flex justify-between items-end mt-4">
+                <div className="h-10 w-10 bg-gray-200 rounded-full"></div>
+                <div className="h-4 w-20 bg-gray-200 rounded"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+        
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+          {[...Array(2)].map((_, i) => (
+            <div key={i} className="bg-white rounded-lg shadow p-6 animate-pulse">
+              <div className="h-6 bg-gray-200 rounded w-1/3 mb-4"></div>
+              <div className="h-40 bg-gray-200 rounded w-full"></div>
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
@@ -307,13 +334,24 @@ const Dashboard: React.FC = () => {
     <div>
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold">Dashboard</h1>
-        <button 
-          onClick={handleRefresh}
-          className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors"
-        >
-          <RefreshCcw size={16} />
-          Refresh Data
-        </button>
+        <div className="flex items-center gap-2">
+          {(loading || isRefreshing) && (
+            <div className="flex items-center text-sm text-gray-500 mr-2">
+              <div className="animate-spin h-4 w-4 text-blue-600 mr-1">
+                <RefreshCcw size={16} />
+              </div>
+              <span>{isRefreshing ? 'Refreshing...' : 'Loading...'}</span>
+            </div>
+          )}
+          <button 
+            onClick={handleRefresh}
+            className="flex items-center gap-2 bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg transition-colors"
+            disabled={isRefreshing}
+          >
+            <RefreshCcw size={16} className={isRefreshing ? 'animate-spin' : ''} />
+            Refresh Data
+          </button>
+        </div>
       </div>
       
       {!hasData ? (

@@ -13,6 +13,39 @@ const { Worker } = require('worker_threads');
 const workerpool = require('workerpool');
 const pool = workerpool.pool();
 
+// Add this function at the top of the file, after imports and before the first route or function
+
+/**
+ * Fixes scientific notation in EAN codes
+ * @param {string|number} value - The value to fix
+ * @returns {string} The fixed string value
+ */
+function fixScientificNotation(value) {
+  if (value === null || value === undefined) return '';
+  
+  const stringValue = String(value).trim();
+  
+  // Check if the value is in scientific notation (e.g., 8.40E+11)
+  const scientificNotationRegex = /^(\d+\.\d+)e\+(\d+)$/i;
+  const match = stringValue.match(scientificNotationRegex);
+  
+  if (match) {
+    // Extract base number and exponent
+    const baseNumber = parseFloat(match[1]);
+    const exponent = parseInt(match[2], 10);
+    
+    // Calculate the actual number and convert to string
+    // For example: 8.40E+11 becomes 840000000000
+    const actualNumber = baseNumber * Math.pow(10, exponent);
+    
+    // Convert to string and remove any decimal part
+    return actualNumber.toFixed(0);
+  }
+  
+  // If not in scientific notation, just return the trimmed string
+  return stringValue;
+}
+
 // Save original console methods before overriding
 const originalConsole = {
   log: console.log,
@@ -1488,7 +1521,7 @@ async function mapSupplierData(csvData, fieldMapping) {
         
         const supplierData = {
           supplier_name: row[fieldMapping['Supplier Name']]?.trim() || '',
-          ean: row[fieldMapping['EAN']]?.trim() || '',
+          ean: fixScientificNotation(row[fieldMapping['EAN']]),
           mpn: row[fieldMapping['MPN']]?.trim() || '',
           product_name: row[fieldMapping['Product Name']]?.trim() || '',
           cost: costResult.cost,
@@ -1723,7 +1756,7 @@ async function mapProductData(csvData, fieldMapping, requiredFields = ['Title', 
       try {
         const productData = {
           title: row[fieldMapping['Title']]?.trim() || '',
-          ean: row[fieldMapping['EAN']]?.trim() || '',
+          ean: fixScientificNotation(row[fieldMapping['EAN']]),
           brand: row[fieldMapping['Brand']]?.trim() || '',
           sale_price: parseFloat(row[fieldMapping['Sale Price']]) || 0,
           amazon_fee: parseFloat(row[fieldMapping['Amazon Fee']]) || 0,

@@ -1,0 +1,30 @@
+/* Import Data Styles */
+
+.dropzone {
+  transition: all 0.3s ease;
+  border: 2px dashed #e2e8f0;
+  border-radius: 0.5rem;
+}
+
+.dropzone:hover {
+  border-color: #3b82f6;
+  background-color: rgba(59, 130, 246, 0.05);
+}
+
+.step {
+  transition: all 0.3s ease;
+}
+
+.step-active {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+}
+
+/* Add fade-in animation for success modal */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
+} 

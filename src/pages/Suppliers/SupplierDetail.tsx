@@ -4,7 +4,6 @@ import { ArrowLeft, RefreshCcw, Edit, Save, X } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
-import LoadingOverlay from '../../components/UI/LoadingOverlay';
 import EmptyState from '../../components/Dashboard/EmptyState';
 import SupplierModal from './SupplierModal';
 import SupplierProducts from '../../components/Suppliers/SupplierProducts';
@@ -35,12 +34,18 @@ const SupplierDetail: React.FC = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedSupplier, setEditedSupplier] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Add progressive loading states - initialize as false to show content immediately
+  const [headerLoaded, setHeaderLoaded] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [attributesLoading, setAttributesLoading] = useState(false);
+  const [productsLoading, setProductsLoading] = useState(false);
 
   // Ensure ID is properly formatted - remove any UUID format issues
   const normalizedId = useMemo(() => {
     if (!id) return '';
     // Return the full ID without any processing that might truncate it
-    return id;
+    return String(id); // Convert to string to ensure it's a string type
   }, [id]);
 
   // Memoize the fetchLatestData function to prevent it from changing on every render
@@ -84,6 +89,18 @@ const SupplierDetail: React.FC = () => {
     };
   }, [normalizedId, fetchLatestData, dataFetched]);
 
+  // Progress loading state for faster perceived performance
+  useEffect(() => {
+    // When we get a supplier, immediately set all sections as loaded
+    const supplier = suppliers.find(s => s.id === normalizedId);
+    if (supplier) {
+      setHeaderLoaded(true);
+      setStatsLoading(false);
+      setAttributesLoading(false);
+      setProductsLoading(false);
+    }
+  }, [suppliers, normalizedId]);
+
   // Add additional logging for debugging - only run once after data is loaded
   useEffect(() => {
     if (dataFetched && suppliers.length > 0) {
@@ -99,6 +116,7 @@ const SupplierDetail: React.FC = () => {
     }
   }, [dataFetched, suppliers, normalizedId]);
 
+  // Get supplier data
   const supplier = suppliers.find(s => s.id === normalizedId);
   
   // Get supplier products for statistics calculation
@@ -106,22 +124,33 @@ const SupplierDetail: React.FC = () => {
   
   // Join with product data for statistics
   const productsWithDetails = useMemo(() => {
+    if (!supplierProductsList || !products || !Array.isArray(supplierProductsList) || !Array.isArray(products)) {
+      return [];
+    }
+    
     return supplierProductsList
-      .filter(sp => sp.product_id) // Only consider matched products for stats
+      .filter(sp => sp && sp.product_id) // Only consider matched products with valid product_id
       .map(sp => {
-        const product = products.find(p => p.id === sp.product_id);
+        const product = products.find(p => p && p.id === sp.product_id);
         if (!product) return null;
         
-        const profitPerUnit = product.salePrice - product.amazonFee - sp.cost;
-        const profitMargin = (profitPerUnit / product.salePrice) * 100;
+        // Updated profit margin calculation using Buy Box Price instead of Sale Price
+        const buyBoxPrice = product.buyBoxPrice || 0;
+        const amazonFee = product.amazonFee || 0;
+        const referralFee = product.referralFee || 0;
+        const cost = sp.cost || 0;
+        
+        const margin = buyBoxPrice - amazonFee - referralFee - cost;
+        const profitMargin = buyBoxPrice > 0 ? (margin / buyBoxPrice) * 100 : 0;
         
         return {
           ...sp,
           product,
-          profitPerUnit,
+          margin,
           profitMargin
         };
-      }).filter(Boolean);
+      })
+      .filter(Boolean); // Remove null values
   }, [supplierProductsList, products]);
   
   // When supplier data is loaded, initialize editedSupplier
@@ -200,89 +229,87 @@ const SupplierDetail: React.FC = () => {
     setIsModalOpen(false);
   };
   
-  // Calculate supplier statistics
-  const stats = useMemo(() => {
-    if (productsWithDetails.length === 0) {
-      return {
-        avgCost: 0,
-        avgMargin: 0
-      };
-    }
-    
-    // Filter out null items before reducing
-    const validProducts = productsWithDetails.filter(item => item !== null);
-    
-    const totalCost = validProducts.reduce((sum, item) => sum + item.cost, 0);
-    const avgCost = validProducts.length > 0 ? totalCost / validProducts.length : 0;
-    
-    const totalMargin = validProducts.reduce((sum, item) => sum + item.profitMargin, 0);
-    const avgMargin = validProducts.length > 0 ? totalMargin / validProducts.length : 0;
-    
-    return {
-      avgCost,
-      avgMargin
-    };
-  }, [productsWithDetails]);
-  
-  if (loading || isRefreshing || isSaving) {
+  // If no supplier found and done loading, show error state
+  if (!loading && !isRefreshing && !isSaving && dataFetched && supplierNotFound) {
     return (
-      <LoadingOverlay message={
-        isSaving ? "Saving supplier data..." :
-        isRefreshing ? "Refreshing supplier data..." : 
-        "Loading supplier details..."
-      } />
-    );
-  }
-  
-  if (supplierNotFound) {
-    return (
-      <div className="text-center py-10">
-        <h2 className="text-2xl font-bold mb-4">Supplier Not Found</h2>
-        <p className="mb-3">{errorMessage}</p>
-        
-        <div className="bg-amber-50 border border-amber-200 p-4 rounded-md mb-5 text-left max-w-lg mx-auto">
-          <p className="font-semibold text-amber-800 mb-2">Diagnostic Information:</p>
-          <ul className="text-sm text-amber-800 space-y-1">
-            <li><span className="font-medium">Supplier ID:</span> {normalizedId || 'Not provided'}</li>
-            <li><span className="font-medium">Suppliers loaded:</span> {suppliers.length}</li>
-            <li><span className="font-medium">Loading state:</span> {loading ? 'Loading' : 'Not loading'}</li>
-            <li>
-              <span className="font-medium">Available IDs:</span>{' '}
-              {suppliers.length > 0 
-                ? suppliers.slice(0, 3).map(s => s.id).join(', ') + (suppliers.length > 3 ? '...' : '')
-                : 'None'}
-            </li>
-          </ul>
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-300 rounded-md p-4 mb-6">
+          <h2 className="text-xl font-semibold text-red-700 mb-2">Supplier Not Found</h2>
+          <p className="text-red-600">{errorMessage || 'The supplier you are looking for could not be found.'}</p>
+          <Button 
+            onClick={() => navigate('/suppliers')} 
+            className="mt-4 flex items-center"
+          >
+            <ArrowLeft size={16} className="mr-2" /> Back to Suppliers
+          </Button>
         </div>
-        
-        <Button onClick={() => navigate('/suppliers')} className="flex items-center mx-auto">
-          <ArrowLeft size={16} className="mr-2" /> Back to Suppliers
-        </Button>
       </div>
     );
   }
   
-  if (!supplier) {
-    return (
-      <LoadingOverlay message="Finding supplier..." />
-    );
-  }
-  
+  // Calculate statistics
+  const totalProducts = supplierProductsList.length;
+  const matchedProducts = supplierProductsList.filter(sp => sp.product_id).length;
+  const avgCost = supplierProductsList.length > 0 
+    ? supplierProductsList.reduce((sum, sp) => sum + sp.cost, 0) / supplierProductsList.length
+    : 0;
+
+  // Calculate average profit margin
+  const avgProfitMargin = productsWithDetails.length > 0 
+    ? productsWithDetails.reduce((sum, item) => sum + (item?.profitMargin || 0), 0) / productsWithDetails.length
+    : 0;
+
+  // Get custom attributes for this supplier
+  const customAttributes = useMemo(() => {
+    if (!supplier || !supplier.id || typeof getEntityAttributes !== 'function') return [];
+    try {
+      return getEntityAttributes(supplier.id, 'supplier') || [];
+    } catch (error) {
+      console.error('Error getting entity attributes:', error);
+      return [];
+    }
+  }, [supplier, getEntityAttributes]);
+
+  // Start rendering the UI with a progressive loading approach
   return (
-    <div>
+    <div className="p-6">
+      {/* Header - always show */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center">
           <Button 
             variant="secondary" 
-            className="mr-4"
+            className="mr-3"
             onClick={() => navigate('/suppliers')}
           >
-            <ArrowLeft size={16} className="mr-2" /> Back
+            <ArrowLeft size={16} className="mr-2" /> Back to Suppliers
           </Button>
-          <h1 className="text-3xl font-bold">Supplier Details</h1>
+          
+          {!headerLoaded ? (
+            <div className="h-8 bg-gray-200 rounded animate-pulse w-48"></div>
+          ) : isEditing ? (
+            <input
+              type="text"
+              value={editedSupplier?.name || ''}
+              onChange={(e) => handleEditChange('name', e.target.value)}
+              className="text-2xl font-bold border border-blue-300 rounded px-2 py-1 w-64"
+              placeholder="Supplier Name"
+            />
+          ) : (
+            <h1 className="text-2xl font-bold">{supplier?.name || "Loading..."}</h1>
+          )}
         </div>
+        
         <div className="flex space-x-2">
-          {isEditing ? (
+          {loading || isRefreshing || isSaving ? (
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+              <div className="animate-spin h-4 w-4 text-blue-600 mr-1">
+                <RefreshCcw size={16} />
+              </div>
+              <span>
+                {isSaving ? "Saving..." : isRefreshing ? "Refreshing..." : "Loading..."}
+              </span>
+            </div>
+          ) : isEditing ? (
             <>
               <Button 
                 variant="secondary" 
@@ -293,230 +320,266 @@ const SupplierDetail: React.FC = () => {
               </Button>
               <Button 
                 onClick={handleSave}
-                className="flex items-center bg-green-600 hover:bg-green-700"
+                className="flex items-center"
               >
                 <Save size={16} className="mr-2" /> Save
               </Button>
             </>
           ) : (
             <>
-              <Button onClick={handleRefresh} className="flex items-center">
-                <RefreshCcw size={16} className="mr-2" /> Refresh
-              </Button>
               <Button 
+                variant="secondary" 
                 onClick={() => setIsEditing(true)} 
                 className="flex items-center" 
-                variant="secondary"
               >
                 <Edit size={16} className="mr-2" /> Edit
+              </Button>
+              <Button 
+                variant="secondary" 
+                onClick={handleRefresh}
+                className="flex items-center"
+              >
+                <RefreshCcw size={16} className="mr-2" /> Refresh
               </Button>
             </>
           )}
         </div>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-6 mb-6">
-        <div className="col-span-2">
-          <Card>
-            {isEditing ? (
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Supplier Name</label>
-                <input
-                  type="text"
-                  value={editedSupplier?.name || ''}
-                  onChange={(e) => handleEditChange('name', e.target.value)}
-                  className="w-full border p-2 rounded"
-                  placeholder="Enter supplier name"
-                />
+      {/* Overview Card */}
+      <Card className="mb-6">
+        <h2 className="text-xl font-semibold mb-4">Supplier Overview</h2>
+        
+        {statsLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="bg-gray-100 p-4 rounded-lg animate-pulse">
+                <div className="h-4 bg-gray-200 rounded w-20 mb-2"></div>
+                <div className="h-8 bg-gray-200 rounded w-16"></div>
+              </div>
+            ))}
               </div>
             ) : (
-              <h2 className="text-xl font-bold mb-4">{supplier.name}</h2>
-            )}
-            <div className="text-gray-600 mb-2">ID: {supplier.id}</div>
-            <div className="text-gray-600">
-              Added: {new Date().toLocaleDateString()}
-            </div>
-          </Card>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <div className="text-sm text-blue-700 mb-1">Total Products</div>
+              <div className="text-2xl font-bold">{totalProducts}</div>
         </div>
         
-        <div className="col-span-3">
-          <Card>
-            <h3 className="text-lg font-semibold mb-3">Supplier Statistics</h3>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <div>
-                <div className="text-sm text-gray-500">Products</div>
-                <div className="text-lg font-semibold">{productsWithDetails.length}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500">Avg. Cost</div>
-                <div className="text-lg font-semibold">${stats.avgCost.toFixed(2)}</div>
-              </div>
-              <div>
-                <div className="text-sm text-gray-500">Avg. Margin</div>
-                <div className="text-lg font-semibold">{stats.avgMargin.toFixed(1)}%</div>
-              </div>
-            </div>
-          </Card>
+            <div className="bg-green-50 p-4 rounded-lg">
+              <div className="text-sm text-green-700 mb-1">Matched Products</div>
+              <div className="text-2xl font-bold">{matchedProducts}</div>
+              <div className="text-sm text-green-700">
+                ({totalProducts > 0 ? Math.round((matchedProducts / totalProducts) * 100) : 0}%)
         </div>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        <div className="md:col-span-2">
-          <Card>
-            <div className="flex justify-between items-start mb-4">
-              {isEditing ? (
-                <div className="w-full">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Supplier Name</label>
-                  <input
-                    type="text"
-                    value={editedSupplier?.name || ''}
-                    onChange={(e) => handleEditChange('name', e.target.value)}
-                    className="w-full border p-2 rounded"
-                    placeholder="Enter supplier name"
-                  />
-                </div>
-              ) : (
-                <>
-                  <h2 className="text-2xl font-bold">{supplier?.name}</h2>
-                  <Button variant="secondary" onClick={openEditModal} className="flex items-center">
-                    <Edit size={16} className="mr-2" /> Edit
-                  </Button>
-                </>
-              )}
+            <div className="bg-amber-50 p-4 rounded-lg">
+              <div className="text-sm text-amber-700 mb-1">Average Cost</div>
+              <div className="text-2xl font-bold">${avgCost.toFixed(2)}</div>
             </div>
             
-            <p className="text-gray-600 mb-6">
-              This page shows details about the supplier and their products.
-            </p>
-            
-            <div className="bg-blue-50 p-4 rounded mb-4">
-              <h3 className="font-semibold text-blue-800 mb-2">Supplier Overview</h3>
-              <ul className="space-y-2">
-                <li>
-                  <span className="font-medium">Products:</span> {productsWithDetails.length}
-                </li>
-                <li>
-                  <span className="font-medium">Average Cost:</span> ${stats.avgCost.toFixed(2)}
-                </li>
-                <li>
-                  <span className="font-medium">Average Margin:</span> {stats.avgMargin.toFixed(1)}%
-                </li>
-              </ul>
+            <div className="bg-purple-50 p-4 rounded-lg">
+              <div className="text-sm text-purple-700 mb-1">Avg Profit Margin</div>
+              <div className="text-2xl font-bold">{avgProfitMargin.toFixed(1)}%</div>
             </div>
-          </Card>
         </div>
-
-        <div className="md:col-span-2">
-          <Card>
-            <h3 className="text-lg font-semibold mb-3">Custom Attributes</h3>
+        )}
+        
+        {/* Custom Attributes Section */}
+        {customAttributes.length > 0 && (
+          <div className="border-t border-gray-200 pt-4 mt-2">
+            <h3 className="text-lg font-medium mb-3">Custom Attributes</h3>
             
-            {(() => {
-              const attributes = getEntityAttributes(supplier?.id || '', 'supplier');
-              
-              if (attributes.length === 0) {
-                return (
-                  <div className="text-gray-500 text-sm">
-                    No custom attributes defined. Add custom attributes in the Settings menu.
+            {attributesLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {[...Array(3)].map((_, i) => (
+                  <div key={i} className="border rounded-lg p-3 relative bg-gray-50 animate-pulse">
+                    <div className="h-4 bg-gray-200 rounded w-24 mb-2"></div>
+                    <div className="h-6 bg-gray-200 rounded w-full"></div>
                   </div>
-                );
-              }
-              
-              return (
-                <div className="space-y-4">
-                  {attributes.map(({ attribute, value }) => {
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {customAttributes.map(({ attribute, value }) => {
+                  const displayValue = value === null || value === undefined 
+                    ? "Not set" 
+                    : attribute.type === 'Yes/No' 
+                      ? value ? 'Yes' : 'No'
+                      : value.toString();
+                      
                     const handleValueChange = async (newValue: any) => {
                       try {
-                        await setAttributeValue(attribute.id, supplier?.id || '', newValue);
-                      } catch (err) {
-                        console.error('Error updating attribute value:', err);
+                      // Convert the value to the appropriate type
+                      let typedValue = newValue;
+                      if (attribute.type === 'Number') {
+                        typedValue = parseFloat(newValue);
+                      } else if (attribute.type === 'Yes/No') {
+                        typedValue = newValue === 'true' || newValue === true;
                       }
-                    };
-                    
-                    let inputElement;
-                    
+                      
+                      if (supplier) {
+                        await setAttributeValue(attribute.id, supplier.id, typedValue);
+                        toast.success(`Updated ${attribute.name}`);
+                      }
+                    } catch (error) {
+                      console.error('Error updating attribute:', error);
+                      toast.error('Failed to update attribute');
+                    }
+                  };
+                  
+                  return (
+                    <div key={attribute.id} className="border rounded-lg p-3 relative bg-gray-50">
+                      <div className="text-sm font-medium text-gray-700 mb-1">{attribute.name}</div>
+                      
+                      {isEditing ? (
+                        <>
+                          {attribute.type === 'Text' && (
+                            <input
+                              type="text"
+                              className="w-full border rounded p-1.5"
+                              value={value === null ? '' : value.toString()}
+                              onChange={(e) => handleValueChange(e.target.value)}
+                            />
+                          )}
+                          
+                          {attribute.type === 'Number' && (
+                            <input
+                              type="number"
+                              className="w-full border rounded p-1.5"
+                              value={value === null ? '' : value.toString()}
+                              onChange={(e) => handleValueChange(e.target.value)}
+                            />
+                          )}
+                          
+                          {attribute.type === 'Date' && (
+                            <input
+                              type="date"
+                              className="w-full border rounded p-1.5"
+                              value={value === null ? '' : value.toString()}
+                              onChange={(e) => handleValueChange(e.target.value)}
+                            />
+                          )}
+                          
+                          {attribute.type === 'Yes/No' && (
+                            <select
+                              className="w-full border rounded p-1.5"
+                              value={value === null ? '' : value ? 'true' : 'false'}
+                              onChange={(e) => handleValueChange(e.target.value === 'true')}
+                            >
+                              <option value="true">Yes</option>
+                              <option value="false">No</option>
+                            </select>
+                          )}
+                          
+                          {attribute.type === 'Selection' && (
+                            <input
+                              type="text"
+                              className="w-full border rounded p-1.5"
+                              value={value === null ? '' : value.toString()}
+                              onChange={(e) => handleValueChange(e.target.value)}
+                            />
+                          )}
+                        </>
+                      ) : (
+                        <div className="font-medium">{displayValue}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
+      
+      {/* Complete Supplier Data Section - Moved above Supplier Products Section */}
+      {!productsLoading && supplier && (
+        <Card className="mb-6">
+          <h3 className="text-lg font-medium mb-2">Supplier Data</h3>
+          
+          <div className="bg-gray-50 rounded border border-gray-200 overflow-x-auto">
+            <table className="min-w-full text-xs">
+              <tbody>
+                <tr className="border-b border-gray-200">
+                  <td className="px-2 py-1.5 font-medium">Name</td>
+                  <td className="px-2 py-1.5">{supplier?.name}</td>
+                </tr>
+                <tr className="border-b border-gray-200">
+                  <td className="px-2 py-1.5 font-medium">ID</td>
+                  <td className="px-2 py-1.5">{supplier?.id}</td>
+                </tr>
+                <tr className="border-b border-gray-200">
+                  <td className="px-2 py-1.5 font-medium">Total Products</td>
+                  <td className="px-2 py-1.5">{totalProducts}</td>
+                </tr>
+                <tr className="border-b border-gray-200">
+                  <td className="px-2 py-1.5 font-medium">Matched Products</td>
+                  <td className="px-2 py-1.5">{matchedProducts}</td>
+                </tr>
+                <tr className="border-b border-gray-200">
+                  <td className="px-2 py-1.5 font-medium">Average Cost</td>
+                  <td className="px-2 py-1.5">${avgCost.toFixed(2)}</td>
+                </tr>
+                
+                {/* Map all custom attributes */}
+                {customAttributes && customAttributes.length > 0 && customAttributes.map(({ attribute, value }) => {
+                  if (!attribute) return null;
+                  
+                  let displayValue: string;
+                  
+                  try {
                     switch (attribute.type) {
                       case 'Number':
-                        inputElement = (
-                          <input
-                            type="number"
-                            value={value !== null ? value : ''}
-                            onChange={(e) => handleValueChange(Number(e.target.value))}
-                            className="border p-2 rounded w-full"
-                          />
-                        );
+                        displayValue = typeof value === 'number' ? value.toFixed(2) : 'N/A';
                         break;
                       case 'Date':
-                        inputElement = (
-                          <input
-                            type="date"
-                            value={value || ''}
-                            onChange={(e) => handleValueChange(e.target.value)}
-                            className="border p-2 rounded w-full"
-                          />
-                        );
+                        displayValue = value ? new Date(value).toLocaleDateString() : 'N/A';
                         break;
                       case 'Yes/No':
-                        inputElement = (
-                          <select
-                            value={value === true ? 'true' : 'false'}
-                            onChange={(e) => handleValueChange(e.target.value === 'true')}
-                            className="border p-2 rounded w-full"
-                          >
-                            <option value="false">No</option>
-                            <option value="true">Yes</option>
-                          </select>
-                        );
+                        displayValue = value === true ? 'Yes' : value === false ? 'No' : 'N/A';
                         break;
-                      case 'Selection':
-                        // For simplicity, using a text input for selections
-                        inputElement = (
-                          <input
-                            type="text"
-                            value={value || ''}
-                            onChange={(e) => handleValueChange(e.target.value)}
-                            className="border p-2 rounded w-full"
-                          />
-                        );
-                        break;
-                      case 'Text':
                       default:
-                        inputElement = (
-                          <input
-                            type="text"
-                            value={value || ''}
-                            onChange={(e) => handleValueChange(e.target.value)}
-                            className="border p-2 rounded w-full"
-                          />
-                        );
+                        displayValue = value ? String(value) : 'N/A';
+                    }
+                  } catch (error) {
+                    console.error("Error formatting attribute value:", error);
+                    displayValue = 'Error';
                     }
                     
                     return (
-                      <div key={attribute.id}>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-sm font-medium">
-                            {attribute.name}
-                            {attribute.required && <span className="text-red-500 ml-1">*</span>}
-                          </label>
-                        </div>
-                        {inputElement}
-                      </div>
+                    <tr key={attribute.id} className="border-b border-gray-200">
+                      <td className="px-2 py-1.5 font-medium">{attribute.name}</td>
+                      <td className="px-2 py-1.5">{displayValue}</td>
+                    </tr>
                     );
                   })}
-                </div>
-              );
-            })()}
-          </Card>
-        </div>
-      </div>
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
       
-      <SupplierProducts supplierId={supplier.id} />
+      {/* Supplier Products Section */}
+      {productsLoading ? (
+        <Card>
+          <div className="h-7 bg-gray-200 rounded animate-pulse w-40 mb-4"></div>
+          <div className="animate-pulse space-y-4">
+            <div className="h-10 bg-gray-200 rounded"></div>
+            <div className="h-10 bg-gray-200 rounded"></div>
+            <div className="h-10 bg-gray-200 rounded"></div>
+          </div>
+        </Card>
+      ) : (
+        supplier && <SupplierProducts supplierId={supplier.id} />
+      )}
       
-      {isModalOpen && (
+      {isModalOpen && supplier && (
         <SupplierModal
           isOpen={isModalOpen}
           onClose={closeModal}
           supplier={supplier}
-          onUpdate={fetchLatestData}
         />
       )}
     </div>

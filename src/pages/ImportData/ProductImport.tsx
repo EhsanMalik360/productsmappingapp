@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { UploadCloud, Download, ArrowLeft } from 'lucide-react';
+import { UploadCloud, Download, ArrowLeft, Loader2 } from 'lucide-react';
 import Button from '../../components/UI/Button';
-import LoadingOverlay from '../../components/UI/LoadingOverlay';
 import SuccessModal from '../../components/UI/SuccessModal';
 import { parseCSV, validateRequiredFields } from '../../utils/csvImport';
 import { autoMapProductColumns, mapProductData, importProductData } from '../../utils/productImport';
@@ -374,7 +373,36 @@ const ProductImport: React.FC = () => {
 
   return (
     <div className="max-w-5xl mx-auto">
-      {isLoading && <LoadingOverlay message={loadingMessage} progress={loadingProgress} />}
+      {isLoading && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-white p-8 rounded-lg shadow-2xl flex flex-col items-center" style={{ minWidth: '400px', maxWidth: '90%' }}>
+            <div className="mb-6 flex items-center justify-center relative">
+              <Loader2 className="h-20 w-20 text-blue-600 animate-spin" />
+              
+              {loadingProgress !== undefined && loadingProgress >= 0 && (
+                <div className="absolute">
+                  <span className="text-2xl font-bold text-blue-700">{Math.round(loadingProgress)}%</span>
+                </div>
+              )}
+            </div>
+            
+            <div className="w-full mb-4">
+              <div className="relative pt-1">
+                <div className="overflow-hidden h-5 mb-2 text-xs flex rounded-full bg-blue-100 shadow-inner">
+                  <div 
+                    style={{ width: `${loadingProgress || 0}%` }} 
+                    className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center rounded-full transition-all duration-500 ease-out ${loadingProgress < 30 ? 'bg-blue-500' : loadingProgress < 70 ? 'bg-sky-600' : loadingProgress < 100 ? 'bg-blue-700' : 'bg-green-600'}`}
+                  ></div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="w-full text-center mb-3">
+              <p className="text-gray-800 font-semibold text-lg">{loadingMessage}</p>
+            </div>
+          </div>
+        </div>
+      )}
       
       <SuccessModal
         isOpen={showSuccess}

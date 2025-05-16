@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
-import { Save, FileDown, AlertTriangle } from 'lucide-react';
+import { Save, FileDown, AlertTriangle, RefreshCcw } from 'lucide-react';
 import { useSettings } from '../../hooks/useSettings';
-import LoadingOverlay from '../../components/UI/LoadingOverlay';
 import { toast } from 'react-hot-toast';
 
 const Settings: React.FC = () => {
@@ -124,10 +123,6 @@ const Settings: React.FC = () => {
     }
   };
   
-  if (loading) {
-    return <LoadingOverlay message="Loading settings..." />;
-  }
-
   if (error) {
     return (
       <div className="p-6 bg-red-50 border border-red-200 rounded-lg">
@@ -138,7 +133,7 @@ const Settings: React.FC = () => {
   }
   
   return (
-    <div>
+    <div className="container mx-auto px-4 py-6">
       <h1 className="text-3xl font-bold mb-8">Settings</h1>
       
       <div className="grid grid-cols-1 gap-6 mb-6">
@@ -153,7 +148,7 @@ const Settings: React.FC = () => {
                 type="text"
                 name="companyName"
                 className="w-full border p-2 rounded"
-                value={localGeneralSettings.companyName}
+                value={localGeneralSettings.companyName || ''}
                 onChange={handleGeneralSettingsChange}
               />
             </div>
@@ -202,179 +197,239 @@ const Settings: React.FC = () => {
                 value={localGeneralSettings.defaultProductView}
                 onChange={handleGeneralSettingsChange}
               >
-                <option value="list">List View</option>
-                <option value="grid">Grid View</option>
-                <option value="detailed">Detailed View</option>
+                <option value="grid">Grid</option>
+                <option value="list">List</option>
+                <option value="table">Table</option>
               </select>
             </div>
           </div>
           
           <Button 
-            className="flex items-center" 
+            variant="primary" 
+            className="flex items-center"
             onClick={handleSaveGeneralSettings}
             disabled={savingGeneral}
           >
-            <Save size={16} className="mr-1" /> {savingGeneral ? 'Saving...' : 'Save Settings'}
+            <Save size={16} className="mr-2" />
+            {savingGeneral ? 'Saving...' : 'Save General Settings'}
           </Button>
         </Card>
         
         <Card>
           <h2 className="text-xl font-semibold mb-4">Notification Settings</h2>
-          
-          <div className="mb-4">
-            <div className="flex items-center mb-2">
-              <input
-                type="checkbox"
-                id="lowProfitAlert"
-                name="lowProfitAlert"
-                className="h-4 w-4 text-blue-600 rounded"
-                checked={localNotificationSettings.lowProfitAlert}
-                onChange={handleNotificationSettingsChange}
-              />
-              <label htmlFor="lowProfitAlert" className="ml-2 block text-sm text-gray-700">
-                Alert me when products have low profit margins
-              </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            <div>
+              <div className="flex items-center mb-2">
+                <input 
+                  type="checkbox"
+                  id="emailNotifications"
+                  name="emailNotifications"
+                  checked={localNotificationSettings.emailNotifications}
+                  onChange={handleNotificationSettingsChange}
+                  className="mr-2"
+                />
+                <label htmlFor="emailNotifications" className="text-sm font-medium text-gray-700">
+                  Enable Email Notifications
+                </label>
+              </div>
+              
+              <div className="flex items-center mb-2">
+                <input 
+                  type="checkbox"
+                  id="stockAlerts"
+                  name="stockAlerts"
+                  checked={localNotificationSettings.stockAlerts}
+                  onChange={handleNotificationSettingsChange}
+                  className="mr-2"
+                />
+                <label htmlFor="stockAlerts" className="text-sm font-medium text-gray-700">
+                  Stock Level Alerts
+                </label>
+              </div>
+              
+              <div className="flex items-center mb-2">
+                <input 
+                  type="checkbox"
+                  id="priceAlerts"
+                  name="priceAlerts"
+                  checked={localNotificationSettings.priceAlerts}
+                  onChange={handleNotificationSettingsChange}
+                  className="mr-2"
+                />
+                <label htmlFor="priceAlerts" className="text-sm font-medium text-gray-700">
+                  Price Change Alerts
+                </label>
+              </div>
             </div>
             
-            <div className="flex items-center ml-6 mb-4">
-              <label htmlFor="lowProfitThreshold" className="block text-sm text-gray-700 mr-2">
-                Threshold:
-              </label>
-              <input
-                type="number"
-                id="lowProfitThreshold"
-                name="lowProfitThreshold"
-                className="border p-1 rounded w-16"
-                value={localNotificationSettings.lowProfitThreshold}
-                onChange={handleNotificationSettingsChange}
-                min="0"
-                max="100"
-              />
-              <span className="ml-1 text-sm text-gray-700">%</span>
-            </div>
-            
-            <div className="flex items-center mb-2">
-              <input
-                type="checkbox"
-                id="priceChangeAlert"
-                name="priceChangeAlert"
-                className="h-4 w-4 text-blue-600 rounded"
-                checked={localNotificationSettings.priceChangeAlert}
-                onChange={handleNotificationSettingsChange}
-              />
-              <label htmlFor="priceChangeAlert" className="ml-2 block text-sm text-gray-700">
-                Alert me when Buy Box price changes significantly
-              </label>
-            </div>
-            
-            <div className="flex items-center ml-6 mb-4">
-              <label htmlFor="priceChangeThreshold" className="block text-sm text-gray-700 mr-2">
-                Threshold:
-              </label>
-              <input
-                type="number"
-                id="priceChangeThreshold"
-                name="priceChangeThreshold"
-                className="border p-1 rounded w-16"
-                value={localNotificationSettings.priceChangeThreshold}
-                onChange={handleNotificationSettingsChange}
-                min="0"
-                max="100"
-              />
-              <span className="ml-1 text-sm text-gray-700">%</span>
-            </div>
-            
-            <div className="flex items-center mb-2">
-              <input
-                type="checkbox"
-                id="emailNotifications"
-                name="emailNotifications"
-                className="h-4 w-4 text-blue-600 rounded"
-                checked={localNotificationSettings.emailNotifications}
-                onChange={handleNotificationSettingsChange}
-              />
-              <label htmlFor="emailNotifications" className="ml-2 block text-sm text-gray-700">
-                Send notifications to my email
-              </label>
-            </div>
-            
-            <div className="flex items-center ml-6 mb-4">
-              <label htmlFor="emailAddress" className="block text-sm text-gray-700 mr-2">
-                Email:
-              </label>
-              <input
-                type="email"
-                id="emailAddress"
-                name="emailAddress"
-                className="border p-1 rounded w-64"
-                value={localNotificationSettings.emailAddress}
-                onChange={handleNotificationSettingsChange}
-              />
+            <div>
+              <div className="mb-3">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Alert Threshold (%)
+                </label>
+                <input
+                  type="number"
+                  name="alertThreshold"
+                  className="w-full border p-2 rounded"
+                  value={localNotificationSettings.alertThreshold}
+                  onChange={handleNotificationSettingsChange}
+                  min="1"
+                  max="100"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Trigger alerts when prices change by this percentage
+                </p>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Low Stock Threshold
+                </label>
+                <input
+                  type="number"
+                  name="lowStockThreshold"
+                  className="w-full border p-2 rounded"
+                  value={localNotificationSettings.lowStockThreshold}
+                  onChange={handleNotificationSettingsChange}
+                  min="1"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Trigger alerts when stock level falls below this number
+                </p>
+              </div>
             </div>
           </div>
           
           <Button 
+            variant="primary" 
             className="flex items-center"
             onClick={handleSaveNotificationSettings}
             disabled={savingNotifications}
           >
-            <Save size={16} className="mr-1" /> {savingNotifications ? 'Saving...' : 'Save Notification Settings'}
+            <Save size={16} className="mr-2" />
+            {savingNotifications ? 'Saving...' : 'Save Notification Settings'}
           </Button>
         </Card>
         
         <Card>
           <h2 className="text-xl font-semibold mb-4">Data Management</h2>
           
-          <div className="mb-4">
-            <h3 className="text-lg mb-2">Import/Export</h3>
-            <p className="text-sm text-gray-600 mb-3">Manage your data by exporting it for backup or importing from file.</p>
+          <div className="mb-6">
+            <h3 className="text-md font-medium mb-2">Export Data</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Export your data in CSV format for backup or analysis
+            </p>
             
-            <div className="flex flex-wrap gap-2 mb-4">
+            <div className="flex gap-2">
               <Button 
+                variant="secondary" 
+                className="flex items-center"
                 onClick={() => handleExportData('products')}
                 disabled={exporting}
-                className="flex items-center"
               >
-                <FileDown size={16} className="mr-1" /> Export Products as CSV
+                <FileDown size={16} className="mr-2" />
+                {exporting ? 'Exporting...' : 'Export Products'}
               </Button>
+              
               <Button 
+                variant="secondary" 
+                className="flex items-center"
                 onClick={() => handleExportData('suppliers')}
                 disabled={exporting}
-                className="flex items-center"
               >
-                <FileDown size={16} className="mr-1" /> Export Suppliers as CSV
+                <FileDown size={16} className="mr-2" />
+                {exporting ? 'Exporting...' : 'Export Suppliers'}
               </Button>
+              
               <Button 
+                variant="secondary" 
+                className="flex items-center"
                 onClick={() => handleExportData('all')}
                 disabled={exporting}
-                className="flex items-center"
               >
-                <FileDown size={16} className="mr-1" /> Export All Data as CSV
+                <FileDown size={16} className="mr-2" />
+                {exporting ? 'Exporting...' : 'Export All Data'}
               </Button>
             </div>
           </div>
           
-          <div className="border-t pt-4">
-            <h3 className="text-lg mb-2 text-red-600">Danger Zone</h3>
-            <p className="text-sm text-gray-600 mb-3">These actions cannot be undone. Please be certain.</p>
+          <div className="border-t border-gray-200 pt-6 mb-6">
+            <h3 className="text-md font-medium mb-2 text-amber-700">Clear Product Data</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Remove all product data from the system. This action cannot be undone.
+            </p>
             
             {showClearConfirm ? (
-              <div className="bg-red-50 border border-red-200 p-4 rounded-md mb-4">
+              <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-3">
                 <div className="flex items-start">
-                  <AlertTriangle className="text-red-500 mr-2 mt-0.5 flex-shrink-0" size={18} />
+                  <AlertTriangle size={20} className="text-amber-500 mr-2 flex-shrink-0 mt-0.5" />
                   <div>
-                    <h4 className="text-red-700 font-medium">Are you sure you want to clear all products?</h4>
-                    <p className="text-sm text-red-600 mb-3">This will delete all products and their supplier relationships. This action cannot be undone.</p>
-                    <div className="flex space-x-2">
+                    <p className="font-medium text-amber-800">Are you sure you want to clear all products?</p>
+                    <p className="text-sm text-amber-700 mt-1">This will permanently delete all product data and cannot be undone.</p>
+                    
+                    <div className="flex gap-2 mt-3">
                       <Button 
-                        variant="danger" 
+                        variant="secondary" 
+                        className="text-amber-800 bg-white border-amber-300 hover:bg-amber-50"
+                        onClick={() => setShowClearConfirm(false)}
+                      >
+                        Cancel
+                      </Button>
+                      
+                      <Button 
+                        variant="secondary" 
+                        className="bg-amber-600 text-white border-amber-700 hover:bg-amber-700"
                         onClick={handleClearProducts}
                         disabled={clearingProducts}
                       >
                         {clearingProducts ? 'Clearing...' : 'Yes, Clear All Products'}
                       </Button>
-                      <Button onClick={() => setShowClearConfirm(false)}>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <Button 
+                variant="secondary" 
+                className="flex items-center bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
+                onClick={() => setShowClearConfirm(true)}
+              >
+                <AlertTriangle size={16} className="mr-2" />
+                Clear All Products
+              </Button>
+            )}
+          </div>
+          
+          <div className="border-t border-gray-200 pt-6">
+            <h3 className="text-md font-medium mb-2 text-red-700">Reset Application</h3>
+            <p className="text-sm text-gray-600 mb-3">
+              Reset the entire application to its initial state. This will delete all data.
+            </p>
+            
+            {showResetConfirm ? (
+              <div className="bg-red-50 border border-red-200 rounded p-3 mb-3">
+                <div className="flex items-start">
+                  <AlertTriangle size={20} className="text-red-500 mr-2 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-red-800">Are you sure you want to reset the application?</p>
+                    <p className="text-sm text-red-700 mt-1">This will permanently delete all data and cannot be undone.</p>
+                    
+                    <div className="flex gap-2 mt-3">
+                      <Button 
+                        variant="secondary" 
+                        className="text-red-800 bg-white border-red-300 hover:bg-red-50"
+                        onClick={() => setShowResetConfirm(false)}
+                      >
                         Cancel
+                      </Button>
+                      
+                      <Button 
+                        variant="secondary" 
+                        className="bg-red-600 text-white border-red-700 hover:bg-red-700"
+                        onClick={handleResetApplication}
+                        disabled={resetting}
+                      >
+                        {resetting ? 'Resetting...' : 'Yes, Reset Application'}
                       </Button>
                     </div>
                   </div>
@@ -382,38 +437,11 @@ const Settings: React.FC = () => {
               </div>
             ) : (
               <Button 
-                variant="danger" 
-                onClick={() => setShowClearConfirm(true)}
-                className="mr-2"
+                variant="secondary" 
+                className="flex items-center bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                onClick={() => setShowResetConfirm(true)}
               >
-                Clear All Products
-              </Button>
-            )}
-            
-            {showResetConfirm ? (
-              <div className="bg-red-50 border border-red-200 p-4 rounded-md">
-                <div className="flex items-start">
-                  <AlertTriangle className="text-red-500 mr-2 mt-0.5 flex-shrink-0" size={18} />
-                  <div>
-                    <h4 className="text-red-700 font-medium">Are you sure you want to reset the application?</h4>
-                    <p className="text-sm text-red-600 mb-3">This will delete ALL data including products, suppliers, custom attributes, and import history. Settings will be reset to defaults. This action cannot be undone.</p>
-                    <div className="flex space-x-2">
-                      <Button 
-                        variant="danger" 
-                        onClick={handleResetApplication}
-                        disabled={resetting}
-                      >
-                        {resetting ? 'Resetting...' : 'Yes, Reset Everything'}
-                      </Button>
-                      <Button onClick={() => setShowResetConfirm(false)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <Button variant="danger" onClick={() => setShowResetConfirm(true)}>
+                <AlertTriangle size={16} className="mr-2" />
                 Reset Application
               </Button>
             )}

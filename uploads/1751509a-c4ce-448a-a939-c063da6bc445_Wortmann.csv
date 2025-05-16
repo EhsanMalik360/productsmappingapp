@@ -1,0 +1,601 @@
+Supplier Name,Product name,MPN,Supplier Cost,Supplier stock,Brand
+Wortmann,"SSD 2.5"" WD ULTRASTAR SN655  3.84TB (PCIe 4.0/NVMe)###",0TS2461,520.80,38,Western Digital
+Wortmann,"SSD 2.5"" WD ULTRASTAR SN655  7.68TB (PCIe 4.0/NVMe)###",0TS2462,918.40,26,Western Digital
+Wortmann,"SSD 2.5"" WD ULTRASTAR SN655 15.36TB (PCIe 4.0/NVMe)###",0TS2463,1618.40,13,Western Digital
+Wortmann,"WD HD2.5"" SATA3 1TB WD10SPZX /5.4k/ 7mm###***",WD10SPZX,44.80,506,Western Digital
+Wortmann,"WD HD2.5"" SATA3 500GB WD5000LPZX /5.4k/ 7mm###***",WD5000LPZX,28.00,569,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 1TB Elements Portable black ",WDBUZG0010BBK-WESN,54.60,740,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 2TB Elements Portable black",WDBU6Y0020BBK-WESN,66.64,543,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 4TB Elements Portable black",WDBU6Y0040BBK-WESN,102.48,"1,133",Western Digital
+Wortmann,"WD HDex 2.5"" USB3 1.5TB Elements Portable black***",WDBU6Y0015BBK-WESN,61.60,"2,447",Western Digital
+Wortmann,"WD HDex 3.5"" USB3 10TB Elements Desktop black",WDBWLG0100HBK-EESN,201.60,317,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 5TB My Passport Black",WDBPKJ0050BBK-WESN,117.04,339,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 4TB My Passport Black",WDBPKJ0040BBK-WESN,108.36,414,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 2TB My Passport Black",WDBYVG0020BBK-WESN,72.24,647,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 1TB My Passport Black",WDBYVG0010BBK-WESN,59.36,397,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 4TB My Passport Red",WDBPKJ0040BRD-WESN,108.08,105,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 2TB My Passport Red",WDBYVG0020BRD-WESN,72.24,128,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 4TB My Passport Blue",WDBPKJ0040BBL-WESN,106.40,250,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 2TB My Passport Blue",WDBYVG0020BBL-WESN,69.44,307,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 12TB Elements Desktop black",WDBWLG0120HBK-EESN,253.12,95,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 14TB Elements Desktop black",WDBWLG0140HBK-EESN,260.96,89,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 6TB Elements Desktop black",WDBWLG0060HBK-EESN,140.00,174,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 12TB My Book black",WDBBGB0120HBK-EESN,252.00,73,Western Digital
+Wortmann,WD SSDEX USB3.2 My Passport SSD 1TB Space Gray,WDBAGF0010BGY-WESN,93.52,40,Western Digital
+Wortmann,WD SSDEX USB3.2 My Passport SSD 2TB Space Gray,WDBAGF0020BGY-WESN,142.24,35,Western Digital
+Wortmann,WD SSDEX USB3.2 My Passport SSD 4TB Space Gray,WDBAGF0040BGY-WESN,266.56,24,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 16TB My Book black",WDBBGB0160HBK-EESN,306.32,101,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 5TB Elements Portable black",WDBU6Y0050BBK-WESN,111.72,259,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 18TB Elements Desktop black",WDBWLG0180HBK-EESN,347.20,15,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 20TB Elements Desktop black",WDBWLG0200HBK-EESN,372.96,182,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 14TB My Book black",WDBBGB0140HBK-EESN,291.20,74,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 18TB My Book black",WDBBGB0180HBK-EESN,347.20,134,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 22TB My Book black",WDBBGB0220HBK-EESN,446.88,54,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 22TB Elements Desktop black",WDBWLG0220HBK-EESN,414.40,33,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 6TB My Passport Silicon Gray",WDBY3J0060BGY-WESN,152.88,14,Western Digital
+Wortmann,"WD HDex 2.5"" USB3 6TB My Passport Black",WDBR9S0060BBK-WESN,152.88,83,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 8TB Elements Desktop black",WDBWLG0080HBK-EESN,160.16,182,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 4TB Elements Desktop black",WDBWLG0040HBK-EESN,105.28,62,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 4TB My Book black ",WDBBGB0040HBK-EESN,110.32,145,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 6TB My Book black ",WDBBGB0060HBK-EESN,135.52,368,Western Digital
+Wortmann,"WD HDex 3.5"" USB3 8TB My Book black ",WDBBGB0080HBK-EESN,166.32,183,Western Digital
+Wortmann,"WD HD3.5"" SATA3 1TB WD10EZEX / 7.2k ~~~***",WD10EZEX,49.28,46,Western Digital
+Wortmann,"WD HD3.5"" SATA3-Raid 2TB WD2005FBYZ/ WD Gold~~~",WD2005FBYZ,116.20,102,Western Digital
+Wortmann,"WD HD2.5"" SATA3 2TB WD20SPZX /5.4k/ 7mm ###",WD20SPZX,81.20,107,Western Digital
+Wortmann,"WD HD3.5"" SATA3 10TB WD101EFBX / 24x7 / NAS ~~~***",WD101EFBX,227.08,16,Western Digital
+Wortmann,"WD HD3.5"" SATA3-Raid  4TB HUS726T4TALE6L4/512e (Di)",0B36040,143.36,93,Western Digital
+Wortmann,"WD HD3.5"" SATA3 1TB WD11PURZ / Surveillance~~~",WD11PURZ,46.76,33,Western Digital
+Wortmann,"WD SSD 2.5"" 500GB Blue SATA3 ~~~",WDS500G3B0A,32.48,156,Western Digital
+Wortmann,WD SSD M.2 (2280) 2TB Black SN850X PCIe 4.0/NVMe ~~~,WDS200T2X0E,136.64,40,Western Digital
+Wortmann,WD SSD M.2 (2280) 1TB Black SN850X PCIe 4.0/NVMe ~~~,WDS100T2X0E,80.08,36,Western Digital
+Wortmann,"WD SSD 2.5"" 1TB Blue SATA3 ~~~",WDS100T3B0A,55.44,99,Western Digital
+Wortmann,WD SSD M.2 (2280) 2TB Black SN770 PCIe 4.0/NVMe ~~~***,WDS200T3X0E,109.20,11,Western Digital
+Wortmann,"WD SSD 2.5"" 4TB Red / NAS 24x7 /SATA3 ~~~",WDS400T2R0A,300.16,19,Western Digital
+Wortmann,WD SSD M.2 (2280) 1TB Black SN770 PCIe 4.0/NVMe ~~~***,WDS100T3X0E,61.32,20,Western Digital
+Wortmann,"WD HD3.5"" SATA3 2TB WD2002FFSX / 24x7 / NAS~~~***",WD2002FFSX,95.48,16,Western Digital
+Wortmann,"WD HD3.5"" SATA3 12TB WD120EFBX / 24x7 / NAS~~~***",WD120EFBX,241.36,42,Western Digital
+Wortmann,"WD HD3.5"" SATA3 4TB WD40EFPX / 24x7 / NAS ~~~",WD40EFPX,99.40,411,Western Digital
+Wortmann,"WD HD3.5"" SATA3 6TB WD60EFPX / 24x7 / NAS ~~~",WD60EFPX,139.16,184,Western Digital
+Wortmann,"WD HD3.5"" SATA3 4TB WD43PURZ / Surveillance ~~~",WD43PURZ,90.44,77,Western Digital
+Wortmann,"WD HD3.5"" SATA3 2TB WD20EFPX / 24x7 / NAS ~~~",WD20EFPX,80.92,120,Western Digital
+Wortmann,"WD HD3.5"" SATA3 8TB WD80EFPX / 24x7 / NAS ~~~",WD80EFPX,177.52,108,Western Digital
+Wortmann,"WD HD3.5"" SATA3 14TB WD142PURP / Surveillance~~~",WD142PURP,382.48,21,Western Digital
+Wortmann,"WD HD3.5"" SATA3 8TB WD85PURZ / Surveillance ~~~",WD85PURZ,183.12,26,Western Digital
+Wortmann,"WD HD3.5"" SATA3 4TB WD4005FFBX / 24x7 /NAS ~~~",WD4005FFBX,127.40,163,Western Digital
+Wortmann,"WD HD3.5"" SATA3 8TB WD8005FFBX / 24x7 /NAS ~~~",WD8005FFBX,208.60,33,Western Digital
+Wortmann,"WD HD3.5"" SATA3 6TB WD6005FFBX / 24x7 / NAS~~~",WD6005FFBX,181.72,24,Western Digital
+Wortmann,"WD HD3.5"" SATA3 26TB WD260KFGX / 24x7 / NAS (Di)",WD260KFGX,687.96,10,Western Digital
+Wortmann,WD SSD M.2 (2280) 500GB Red / NAS 24x7 /SATA3 (Di),WDS500G1R0B,52.08,45,Western Digital
+Wortmann,WD SSD M.2 (2280) 1TB Black SN850X PCIe 4.0/NVMe (Di),WDS100T2X0E,84.00,53,Western Digital
+Wortmann,Ubiquiti Access-Point UniFi Mesh UAP-AC-M 802.11ac,UAP-AC-M,91.73,215,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi UAP-AC-HD 802.11ac Wave 2 ***,UAP-AC-HD,173.49,125,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 16xRJ45 GBit/2xSFP Managed 8xPoE 42W Gen2,USW-16-POE,278.88,209,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 24xRJ45 GBit/2xSFP Managed 16xPoE 95W Gen2,USW-24-POE,379.68,18,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 48xRJ45 GBit/4xSFP Managed 32xPoE 195W Gen2,USW-48-POE,558.88,156,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 24xRJ45 GBit/2xSFP+ Managed PoE+ 400W Gen2,USW-PRO-24-POE,648.48,303,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 48xRJ45 GBit/4xSFP+ Managed PoE+ 600W Gen2,USW-PRO-48-POE,1006.88,378,Ubiquiti 
+Wortmann,Ubiquiti UniFi Cloud Key Gen2 Controller with Hybrid Cloud,UCK-G2,128.69,"1,256",Ubiquiti 
+Wortmann,Ubiquiti UniFi Cloud Key Gen2 Plus Controller with Hybrid Cloud (incl. 1TB HDD),UCK-G2-PLUS,201.49,204,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 24xRJ45 GBit/2xSFP+ Managed Gen2,USW-PRO-24,386.29,100,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 48xRJ45 GBit/4xSFP+ Managed Gen2,USW-PRO-48,576.69,15,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 24xRJ45 GBit/2xSFP Managed Gen2,USW-24,227.25,10,Ubiquiti 
+Wortmann,Ubiquiti UniFi Dream Machine Pro UDM-PRO (Sec. Gateway/Netw. Appliance),UDM-PRO,365.01,264,Ubiquiti 
+Wortmann,"Ubiquiti UniFi Dream Machine UDM (WiFi AP, 4-Port Switch, Security Gateway)",UDM,302.29,64,Ubiquiti 
+Wortmann,Ubiquiti PoE Adapter/Injector POE-48-24W-G 48VDC 24W Gigabit,POE-48-24W-G,14.00,150,Ubiquiti 
+Wortmann,Ubiquiti UniFi Cloud Key Gen2 Rackmount Kit,CKG2-RM,96.88,65,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 5xRJ45 GBit Compact (inkl. NT),USW-FLEX-MINI,29.01,372,Ubiquiti 
+Wortmann,Ubiquiti Camera G4 Bullet 4MP UVC-G4-BULLET,UVC-G4-BULLET,189.28,15,Ubiquiti 
+Wortmann,Ubiquiti Camera G4 Dome 4MP UVC-G4-DOME,UVC-G4-DOME,190.29,25,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 28xSFP+ 10GBit/4xSFP28 25GBit Managed,USW-PRO-AGGREGATION,805.28,176,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi Mesh UAP-AC-M 802.11ac (5er-Pack),UAP-AC-M-5,458.08,13,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 8xSFP+ 10GBit Managed,USW-AGGREGATION,255.25,59,Ubiquiti 
+Wortmann,Ubiquiti Ethernet Surge Protector ETH-SP-G2 (max. 1Gigabit),ETH-SP-G2,11.76,16,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi U6-LR Long-Range 802.11ax (ohne PoE-Adapter),U6-LR,181.33,"1,129",Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi UAP-FLEXHD 802.11ac,UAP-FLEXHD,183.68,16,Ubiquiti 
+Wortmann,"Ubiquiti Switch UniFi 12xRJ45 2,5G/12xRJ45 1G/2xSFP+ 10G Managed PoE+",USW-ENTERPRISE-24-POE,805.28,49,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 5xRJ45 GBit PoE Indoor/Outdoor,USW-FLEX,100.69,62,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 16xRJ45 GBit Managed 8xPoE 45W,USW-LITE-16-POE,199.92,131,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi UAP-IW-HD 802.11ac (In-Wall),UAP-IW-HD,161.28,23,Ubiquiti 
+Wortmann,"Ubiquiti Switch UniFi 48xRJ45 2,5G/4xSFP+ 10G Managed PoE+",USW-ENTERPRISE-48-POE,1454.88,130,Ubiquiti 
+Wortmann,"Ubiquiti Switch UniFi 8xRJ45 2,5G/2xSFP+ 10G Managed PoE+",USW-ENTERPRISE-8-POE,461.44,20,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 24xRJ45 10G/2xSFP28 25G Managed,USW-ENTERPRISEXG-24,1342.88,48,Ubiquiti 
+Wortmann,"Ubiquiti PoE Adapter/Injector U-POE-AF 48VDC 15,4W Gigabit",U-POE-AF,8.40,584,Ubiquiti 
+Wortmann,Ubiquiti PoE Adapter/Injector POE-50-60W 50VDC 60W Gigabit,POE-50-60W,29.01,20,Ubiquiti 
+Wortmann,Ubiquiti UniFi Protect G4 Doorbell UVC-G4-DOORBELL,UVC-G4-DOORBELL,189.28,12,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi U6-Pro 802.11ax (ohne PoE-Adapter),U6-PRO,152.21,"2,226",Ubiquiti 
+Wortmann,Ubiquiti PoE+ Adapter/Injector U-POE-AT 48VDC 30W Gigabit,U-POE-AT,15.34,"1,410",Ubiquiti 
+Wortmann,Ubiquiti UniFi SmartPower Redundant Power System USP-RPS,USP-RPS,409.81,35,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 4xRJ45 10GBit / 1xRJ45 1GBit PoE+ Input,USW-FLEX-XG,290.08,18,Ubiquiti 
+Wortmann,Ubiquiti UniFi Dream Machine Special Edition UDM-SE (Sec. Gateway/Netw. Appliance),UDM-SE,470.29,18,Ubiquiti 
+Wortmann,Ubiquiti SFP+ UACC-OM-MM-10G-D-2 Multi-Mode Fiber LC (2er-Pack),UACC-OM-MM-10G-D-2,37.97,387,Ubiquiti 
+Wortmann,Ubiquiti SFP UACC-CM-RJ45-1G (1er-Pack),UACC-CM-RJ45-1G,17.36,174,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi U6-Mesh 802.11ax (inkl. PoE-Adapter),U6-MESH,175.73,116,Ubiquiti 
+Wortmann,Ubiquiti SFP+ UACC-OM-SM-10G-D-2 Single-Mode Fiber LR LC-Duplex (2er-Pack),UACC-OM-SM-10G-D-2,87.25,12,Ubiquiti 
+Wortmann,Ubiquiti SFP UACC-OM-MM-1G-D-2 Multi-Mode Fiber LC (2er-Pack),UACC-OM-MM-1G-D-2,17.02,151,Ubiquiti 
+Wortmann,"Ubiquiti Network Video Recorder UNVR (4 HDD bays for 2.5""/3.5"")",UNVR,307.89,17,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi U6-Enterprise 802.11ax (ohne PoE-Adapter),U6-ENTERPRISE,274.29,229,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 8xRJ45 GBit Managed 4xPoE 52W,USW-LITE-8-POE,107.41,333,Ubiquiti 
+Wortmann,"Ubiquiti Direct Attach Copper Cable SFP+ 10Gbps 0,5m UACC-DAC-SFP10-0.5M",UACC-DAC-SFP10-0.5M,13.66,185,Ubiquiti 
+Wortmann,Ubiquiti SFP UACC-OM-SM-1G-S-2 Single-Mode Fiber LC-Simplex (2er-Pack),UACC-OM-SM-1G-S-2,24.08,11,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi U6-IW In-Wall 802.11ax (ohne PoE-Adapter),U6-IW,177.52,188,Ubiquiti 
+Wortmann,Ubiquiti SFP28 UACC-OM-SFP28-SR Multi-Mode Fiber LC,UACC-OM-SFP28-SR,50.29,17,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi 6 Extender U6-Extender 802.11ax,U6-EXTENDER,153.33,77,Ubiquiti 
+Wortmann,Ubiquiti NanoBeam AC Gen2 5GHz Bridge NBE-5AC-GEN2,NBE-5AC-GEN2,93.97,36,Ubiquiti 
+Wortmann,Ubiquiti Camera G4 Instant 2K 30fps WiFi UVC-G4-INS,UVC-G4-INS,107.41,98,Ubiquiti 
+Wortmann,Ubiquiti SFP+ UACC-CM-RJ45-MG 10/5/2.5 Gbps (1er-Pack),UACC-CM-RJ45-MG,70.45,712,Ubiquiti 
+Wortmann,Ubiquiti Camera G5 Bullet 2K HD 30fps UVC-G5-BULLET,UVC-G5-BULLET,127.57,124,Ubiquiti 
+Wortmann,Ubiquiti Camera G5 Dome 2K HD 30fps UVC-G5-DOME,UVC-G5-DOME,181.33,52,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi U6-Plus (U6+) 802.11ax (ohne PoE-Adapter),U6+,92.85,"1,731",Ubiquiti 
+Wortmann,Ubiquiti Camera G5 Flex 2K HD 30fps UVC-G5-FLEX,UVC-G5-FLEX,132.05,62,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi U6-Enterprise-IW 802.11ax (ohne PoE-Adapter),U6-ENTERPRISE-IW,296.69,19,Ubiquiti 
+Wortmann,Ubiquiti Camera G5 Pro 4K 30fps UVC-G5-PRO,UVC-G5-PRO,346.08,510,Ubiquiti 
+Wortmann,Ubiquiti Camera AI Pro 8MP (Black) UVC-AI-PRO,UVC-AI-PRO,509.49,92,Ubiquiti 
+Wortmann,Ubiquiti Direct Attach Copper Cable SFP+ 10Gbps 1m UACC-DAC-SFP10-1M,UACC-DAC-SFP10-1M,14.45,122,Ubiquiti 
+Wortmann,Ubiquiti Direct Attach Copper Cable SFP+ 10Gbps 3m UACC-DAC-SFP10-3M,UACC-DAC-SFP10-3M,20.05,97,Ubiquiti 
+Wortmann,Ubiquiti Direct Attach Cable SFP+ 10Gbps 5m UACC-AOC-SFP10-5M,UACC-AOC-SFP10-5M,44.69,65,Ubiquiti 
+Wortmann,Ubiquiti Direct Attach Copper Cable SFP28 25Gbps 1m UACC-DAC-SFP28-1M,UACC-DAC-SFP28-1M,27.89,32,Ubiquiti 
+Wortmann,"Ubiquiti UniFi Express UX (1x GbE WAN, 1x GbE LAN, WiFi 6 AP)",UX,120.40,480,Ubiquiti 
+Wortmann,Ubiquiti UniFi Gateway Lite (1xWAN 1G/1xLAN 1G) UXG-Lite,UXG-LITE,100.69,84,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 16xRJ45 GBit/8xRJ45 2.5G/2xSFP+ Managed PoE+ 400W Max,USW-PRO-MAX-24-POE,812.00,125,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 32xRJ45 GBit/16xRJ45 2.5G/4xSFP+ Managed PoE+ 720W Max,USW-PRO-MAX-48-POE,1186.08,207,Ubiquiti 
+Wortmann,Ubiquiti Switch UniFi 16xRJ45 GBit/8xRJ45 2.5G/2xSFP+ Managed Max,USW-PRO-MAX-24,423.25,31,Ubiquiti 
+Wortmann,Ubiquiti Access-Point UniFi U7-Pro 802.11be WiFi 7 (ohne PoE-Adapter),U7-PRO,170.80,"3,097",Ubiquiti 
+Wortmann,Ubiquiti Direct Attach Copper Cable SFP28 25Gbps 3m UACC-DAC-SFP28-3M,UACC-DAC-SFP28-3M,37.97,17,Ubiquiti 
+Wortmann,Ubiquiti Protect Viewport PoE HDMI-Output UFP-VIEWPORT,UFP-VIEWPORT,219.41,13,Ubiquiti 
+Wortmann,"SSD 2.5"" 960GB  Samsung PM883 SATA 3 Ent. OEM",MZ7LH960HAJR-00005,97.44,"3,195",Samsung
+Wortmann,"SSD 2.5"" 2TB  Samsung 870 QVO SATA 3 ",MZ-77Q2T0BW,156.69,117,Samsung
+Wortmann,"SSD 2.5"" 500GB  Samsung 870 EVO SATA 3 ",MZ-77E500B/EU,67.09,409,Samsung
+Wortmann,"SSD 2.5"" 1TB  Samsung 870 EVO SATA 3 ",MZ-77E1T0B/EU,109.65,31,Samsung
+Wortmann,"SSD 2.5"" 2TB  Samsung 870 EVO SATA 3 ",MZ-77E2T0B/EU,180.21,53,Samsung
+Wortmann,"SSD 2.5"" 4TB  Samsung 870 EVO SATA 3 ",MZ-77E4T0B/EU,322.45,54,Samsung
+Wortmann,SSD M.2 (2280) 1TB Samsung 980 Basic (PCIe/NVMe),MZ-V8V1T0BW,93.97,356,Samsung
+Wortmann,"SSD 2.5"" 960GB  Samsung PM9A3 Series (PCIe 4.0/NVMe)",MZQL2960HCJR-00A07,181.33,386,Samsung
+Wortmann,"SSD 2.5"" 500GB  Samsung 870 EVO SATA 3~~~",MZ-77E500B/EU.,51.41,320,Samsung
+Wortmann,"SSD 2.5"" 7.68TB  Samsung PM893 SATA 3 Ent. OEM ",MZ7L37T6HBLA-00A07,794.95,402,Samsung
+Wortmann,"SSD 2.5"" 250GB  Samsung 870 EVO SATA 3~~~",MZ-77E250B/EU,43.57,157,Samsung
+Wortmann,"SSD 2.5"" 1.92TB  Samsung PM893 SATA 3 Ent. OEM ",MZ7L31T9HBLT-00A07,275.41,249,Samsung
+Wortmann,"SSD 2.5"" 2TB  Samsung 870 EVO SATA 3 ~~~",MZ-77E2T0B/EU.,145.49,242,Samsung
+Wortmann,"SSD 2.5"" 3.84TB  Samsung PM893 SATA 3 Ent. OEM ",MZ7L33T8HBLT-00A07,514.08,234,Samsung
+Wortmann,"SSD 2.5"" 15.36TB  Samsung PM9A3 Series (PCIe 4.0/NVMe)",MZQL215THBLA-00A07,1668.80,69,Samsung
+Wortmann,"SSD 2.5"" 8TB  Samsung 870 QVO SATA 3 ~~~",MZ-77Q8T0BW.,536.48,139,Samsung
+Wortmann,SSD M.2 (2280) 250GB Samsung 970 EVO Plus (NVMe) ~~~,MZ-V7S250BW,54.77,11,Samsung
+Wortmann,SSD M.2 (22110) 960GB  Samsung PM9A3 Series (PCIe 4.0/NVMe),MZ1L2960HCJR-00A07,185.81,50,Samsung
+Wortmann,SSD M.2 (2280) 1TB Samsung 990 PRO (PCIe 4.0/NVMe) ~~~,MZ-V9P1T0BW.,98.45,609,Samsung
+Wortmann,SSD M.2 (2280) 4TB Samsung 990 PRO (PCIe 4.0/NVMe),MZ-V9P4T0BW,363.89,186,Samsung
+Wortmann,SSD M.2 (2280) 1TB Samsung 990 EVO (PCIe/NVMe)***,MZ-V9E1T0BW,129.81,127,Samsung
+Wortmann,SSD M.2 (2280) 2TB Samsung 990 EVO (PCIe/NVMe),MZ-V9E2T0BW,184.69,33,Samsung
+Wortmann,SSD M.2 (2280) 4TB Samsung 990 PRO (PCIe 4.0/NVMe) ~~~,MZ-V9P4T0BW.,277.65,210,Samsung
+Wortmann,SSD M.2 (2280) 2TB Samsung 990 PRO (PCIe 4.0/NVMe) ~~~,MZ-V9P2T0BW.,155.68,63,Samsung
+Wortmann,SSD M.2 (2280) 1TB Samsung 990 EVO Plus (PCIe 5.0 /NVMe),MZ-V9S1T0BW,90.61,33,Samsung
+Wortmann,SSD M.2 (2280) 2TB Samsung 990 EVO Plus (PCIe 5.0 /NVMe),MZ-V9S2T0BW,137.65,408,Samsung
+Wortmann,SSD M.2 (2280) 4TB Samsung 990 EVO Plus (PCIe 5.0 /NVMe ,MZ-V9S4T0BW,320.21,186,Samsung
+Wortmann,SSD M.2 (2280) 1TB Samsung 990 EVO Plus (PCIe 5.0 /NVMe)~~~,MZ-V9S1T0BW.,71.57,"1,825",Samsung
+Wortmann,SSD M.2 (2280) 2TB Samsung 990 EVO Plus (PCIe 5.0 /NVMe)~~~,MZ-V9S2T0BW.,125.44,741,Samsung
+Wortmann,SSD M.2 (2280) 4TB Samsung 990 EVO Plus (PCIe 5.0 /NVMe~~~,MZ-V9S4T0BW.,245.28,613,Samsung
+Wortmann,SSD M.2 (2280) 1TB Samsung 9100 Pro (PCIe 5.0 /NVMe),MZ-VAP1T0BW,157.81,390,Samsung
+Wortmann,SSD M.2 (2280) 2TB Samsung 9100 Pro (PCIe 5.0 /NVMe),MZ-VAP2T0BW,239.57,396,Samsung
+Wortmann,SSD M.2 (2280) 4TB Samsung 9100 Pro (PCIe 5.0 /NVMe),MZ-VAP4T0BW,438.93,250,Samsung
+Wortmann,"SSD 2.5"" SAS3 960GB  Samsung PM1653",MZILG960HCHQ-00A07,291.09,111,Samsung
+Wortmann,"SSD 2.5"" SAS3 7.68TB  Samsung PM1653",MZILG7T6HBLA-00A07,1155.34,15,Samsung
+Wortmann,"SSD 2.5"" SAS3 1.92TB  Samsung PM1653",MZILG1T9HCJR-00A07,458.08,361,Samsung
+Wortmann,"SSD 2.5"" SAS3 3.84TB  Samsung PM1653",MZILG3T8HCLS-00A07,771.68,156,Samsung
+Wortmann,Brother HL-L2400DW SW-Laser,HLL2400DWRE1,113.68,115,Brother 
+Wortmann,Papierzuf. Brother 520 Blatt LT-6500,LT-6500,166.88,16,Brother 
+Wortmann,Toner Brother TN-2000 black,TN2000,69.33,10,Brother 
+Wortmann,Toner Brother TN-3512 (12k Seiten) black,TN3512,134.74,15,Brother 
+Wortmann,Tinte Brother LC-3217C Cyan,LC3217C,11.42,11,Brother 
+Wortmann,Toner Brother TN-3230 (3.000 Seiten) black,TN3230,72.24,10,Brother 
+Wortmann,Toner Brother TN-3280 (8.000 Seiten) black,TN3280,117.60,23,Brother 
+Wortmann,Toner Brother TN-2220 (2.600 Seiten) black,TN2220,58.91,16,Brother 
+Wortmann,Trommel Brother DR-2200,DR2200,66.98,12,Brother 
+Wortmann,Toner Brother TN-325BK black,TN325BK,60.26,25,Brother 
+Wortmann,Toner Brother TN-325C cyan,TN325C,125.78,14,Brother 
+Wortmann,Toner Brother TN-325M magenta,TN325M,125.78,14,Brother 
+Wortmann,Toner Brother TN-325Y yellow,TN325Y,125.78,14,Brother 
+Wortmann,Tinte Brother LC-1240Y yellow ( 600 Blatt),LC1240Y,12.88,11,Brother 
+Wortmann,Tinte Brother LC-123BK Black,LC123BK,19.60,11,Brother 
+Wortmann,Tinte Brother LC-123C cyan,LC123C,12.54,49,Brother 
+Wortmann,Tinte Brother LC-123M magenta,LC123M,12.54,45,Brother 
+Wortmann,Tinte Brother LC-123Y yellow,LC123Y,12.54,40,Brother 
+Wortmann,Tinte Brother LC-129XLBK Black,LC129XLBK,27.44,15,Brother 
+Wortmann,Toner Brother TN-2320 black,TN2320,61.49,12,Brother 
+Wortmann,Tinte Brother LC-223BK Black,LC223BK,18.03,29,Brother 
+Wortmann,Tinte Brother LC-223Y Yellow,LC223Y,11.76,28,Brother 
+Wortmann,Toner Brother TN-242BK black,TN242BK,60.48,11,Brother 
+Wortmann,Toner Brother TN-3480 (8.000 Seiten) black,TN3480,119.50,24,Brother 
+Wortmann,Trommel Brother DR-3400,DR3400,140.11,30,Brother 
+Wortmann,Toner Brother TN-421BK black,TN421BK,88.82,30,Brother 
+Wortmann,Toner Brother TN-421Y Yellow,TN421Y,78.18,19,Brother 
+Wortmann,Toner Brother TN-421C Cyan,TN421C,78.18,11,Brother 
+Wortmann,Toner Brother TN-421M Magenta,TN421M,78.18,14,Brother 
+Wortmann,Toner Brother TN-246C cyan,TN-246C,84.90,14,Brother 
+Wortmann,Toner Brother TN-910C cyan,TN910C,255.70,16,Brother 
+Wortmann,Toner Brother TN-910M magenta,TN910M,255.70,16,Brother 
+Wortmann,Toner Brother TN-910Y yellow,TN910Y,255.70,14,Brother 
+Wortmann,Toner Brother TN-247BK black (3.0k),TN-247BK,77.17,20,Brother 
+Wortmann,Toner Brother TN-247M magenta (2.3k),TN-247M,89.38,30,Brother 
+Wortmann,Trommel Brother DR-243CL (18k),DR-243CL,98.34,14,Brother 
+Wortmann,Toner Brother TN-423BK black,TN423BK,102.03,16,Brother 
+Wortmann,Toner Brother TN-423C cyan,TN423C,137.98,20,Brother 
+Wortmann,Toner Brother TN-423M magenta,TN423M,137.98,17,Brother 
+Wortmann,Toner Brother TN-426C cyan  6.5k,TN426C,205.18,12,Brother 
+Wortmann,Toner Brother TN-245C cyan  2.2k,TN245C,84.90,10,Brother 
+Wortmann,Tinte Brother LC-427C Cyan,LC427C,23.52,13,Brother 
+Wortmann,Tinte Brother LC-427Y Yellow,LC427Y,23.52,12,Brother 
+Wortmann,Toner Brother TN-241CMY Value Pack,TN241CMY,161.73,23,Brother 
+Wortmann,Toner Brother TN-2420TWIN TWIN Pack Black,TN2420TWIN,127.57,23,Brother 
+Wortmann,Toner Brother TN-247BKTWIN TWIN Pack Black,TN247BKTWIN,147.50,16,Brother 
+Wortmann,Tinte Brother LC-422BK BLACK,LC422BK,17.81,69,Brother 
+Wortmann,Tinte Brother LC-422C CYAN,LC422C,12.88,70,Brother 
+Wortmann,Tinte Brother LC-422M Magenta,LC422M,12.88,63,Brother 
+Wortmann,Tinte Brother LC-422Y Yellow,LC422Y,12.88,101,Brother 
+Wortmann,Toner Brother TN-3520 (20.000 Seiten) black,TN3520,169.11,14,Brother 
+Wortmann,Tinte Brother LC-422VAL Value Pack,LC422VAL,54.77,12,Brother 
+Wortmann,Tinte Brother LC-422XLBK BLACK,LC422XLBK,34.16,41,Brother 
+Wortmann,Tinte Brother LC-422XLC Cyan,LC422XLC,23.52,39,Brother 
+Wortmann,Tinte Brother LC-422XLY Yellow,LC422XLY,23.52,34,Brother 
+Wortmann,Tinte Brother LC-422XLM Magenta,LC422XLM,23.52,23,Brother 
+Wortmann,Toner Brother TN-248 Black (1k),TN248BK,44.91,17,Brother 
+Wortmann,Toner Brother TN-248 Yellow (1k),TN248Y,48.94,16,Brother 
+Wortmann,"Toner Brother TN-248XL Magenta (2,3k)",TN248XLM,88.93,29,Brother 
+Wortmann,"Toner Brother TN-248XL Yellow (2,3k)",TN248XLY,88.93,31,Brother 
+Wortmann,Trommel Brother DR-248CL (30k),DR248CL,97.78,10,Brother 
+Wortmann,Toner Brother TN-2510XL Black (3k),TN2510XL,70.56,43,Brother 
+Wortmann,Trommel Brother DR-2510 (15k),DR2510,78.06,18,Brother 
+Wortmann,Trommel Brother DR-3600 (75k),DR3600,211.68,12,Brother 
+Wortmann,GIGA GC-WB1733D-I WLAN AC & Bluetooth 5.1 (PCIe x1),GC-WB1733D-I,24.53,80, GIGABYTE 
+Wortmann,GIGA BRIX GB-BRi3H-10110 Barebone (Intel Core i3-10110U 2C/4T) ***,GB-BRI3H-10110,155.68,"3,228", GIGABYTE 
+Wortmann,GIGA B550 GAMING X V2 AM4 B550/DDR4/ATX,B550 GAMING X V2,93.26,37, GIGABYTE 
+Wortmann,GIGA B550 AORUS ELITE V2 AM4 B550/DDR4/ATX,B550 AORUS ELITE V2,112.27,27, GIGABYTE 
+Wortmann,GIGA Z790 AORUS ELITE AX S1700/DDR5/HDMI-DP/4xM.2/WIFI/ATX,Z790 AORUS ELITE AX,230.01,12, GIGABYTE 
+Wortmann,GIGA B650M AORUS ELITE AX AM5/DDR5/µATX,B650M AORUS ELITE AX,152.32,13, GIGABYTE 
+Wortmann,GIGA B760M GAMING X DDR4 S1700/DDR4/µATX,B760M GAMING X DDR4,106.40,17, GIGABYTE 
+Wortmann,GIGA B760 GAMING X DDR4 S1700/DDR4/2xM.2/HDMI-DP/ATX,B760 GAMING X DDR4,115.36,100, GIGABYTE 
+Wortmann,GIGA TPM Modul CTM000_TPM 2.0 (LPC),CTM000_TPM 2.0,26.76,94, GIGABYTE 
+Wortmann,GIGA H610I DDR4 S1700/DDR4/mITX,H610I DDR4,98.56,17, GIGABYTE 
+Wortmann,GIGA B760 DS3H DDR4 S1700/DDR4/ATX,B760 DS3H DDR4,103.04,9, GIGABYTE 
+Wortmann,GIGA B650M GAMING X AX AM5/DDR5/µATX,B650M GAMING X AX,145.60,24, GIGABYTE 
+Wortmann,GIGA A520M DS3H V2 AM4/DDR4/HDMI-DP/µATX,A520M DS3H V2,59.15,443, GIGABYTE 
+Wortmann,GIGA TPM Modul GC-TPM2.0 SPI V2 (SPI),GC-TPM2.0 SPI V2,22.29,13, GIGABYTE 
+Wortmann,GIGA B650 AORUS ELITE AX V2 AM5/DDR5/ATX,B650 AORUS ELITE AX V2,168.00,101, GIGABYTE 
+Wortmann,GIGA B650 EAGLE AX AM5/DDR5/3xM.2/WIFI/Type-C/ATX,B650 EAGLE AX,130.19,607, GIGABYTE 
+Wortmann,GIGA B650 GAMING X AX V2 AM5/DDR5/ATX,B650 GAMING X AX V2,151.95,145, GIGABYTE 
+Wortmann,GIGA H610M S2H V3 DDR4 S1700/DDR4/µATX,H610M S2H V3 DDR4,66.02,26, GIGABYTE 
+Wortmann,GIGA B650I AX AM5/DDR5/mITX,B650I AX,138.88,17, GIGABYTE 
+Wortmann,GIGA GC-WIFI7 Wi-Fi 7 & Bluetooth 5.3 (PCIe x1) Rev1.0 Qualcomm,GC-WIFI7,41.33,279, GIGABYTE 
+Wortmann,GIGA H610M H V3 DDR4 S1700/DDR4/µATX,H610M H V3 DDR4,60.78,14, GIGABYTE 
+Wortmann,GIGA X870E AORUS MASTER AM5/DDR5/ATX,X870E AORUS MASTER,470.56,76, GIGABYTE 
+Wortmann,GIGA X870E AORUS ELITE WIFI7 AM5/DDR5/ATX,X870E AORUS ELITE WIFI7,282.24,142, GIGABYTE 
+Wortmann,GIGA X870 AORUS ELITE WIFI7 AM5/DDR5/ATX,X870 AORUS ELITE WIFI7,271.43,21, GIGABYTE 
+Wortmann,GIGA X870 AORUS ELITE WF7 ICE AM5/DDR5/ATX,X870 A ELITE WF7 ICE,262.00,37, GIGABYTE 
+Wortmann,GIGA X870E AORUS PRO AM5/DDR5/ATX,X870E AORUS PRO,323.84,21, GIGABYTE 
+Wortmann,GIGA X870E AORUS PRO ICE AM5/DDR5/ATX,X870E AORUS PRO ICE,313.35,10, GIGABYTE 
+Wortmann,GIGA X870 GAMING X WIFI7 AM5/DDR5/ATX,X870 GAMING X WIFI7,235.80,29, GIGABYTE 
+Wortmann,GIGA X870 EAGLE WIFI7 AM5/DDR5/ATX,X870 EAGLE WIFI7,214.84,619, GIGABYTE 
+Wortmann,GIGA H610M D3W DDR4 S1700/DDR4/DP-HDMI/µATX,H610M D3W DDR4,69.69,"3,463", GIGABYTE 
+Wortmann,GIGA Z890 AORUS PRO ICE S1851/DDR5/ATX,Z890 AORUS PRO ICE,313.60,30, GIGABYTE 
+Wortmann,GIGA Z890 AERO G S1851/DDR5/ATX,Z890 AERO G,303.52,26, GIGABYTE 
+Wortmann,GIGA Z890 AORUS ELITE X ICE S1851/DDR5/ATX,Z890 AORUS ELITE X ICE,282.24,32, GIGABYTE 
+Wortmann,GIGA Z890 AORUS ELITE WIFI7 ICE S1851/DDR5/ATX,Z890 AORUS ELITE WIFI7 ICE,246.40,16, GIGABYTE 
+Wortmann,GIGA Z890 EAGLE WIFI7 S1851/DDR5/ATX,Z890 EAGLE WIFI7,204.96,59, GIGABYTE 
+Wortmann,GIGA Z890 UD WIFI6E S1851/DDR5/ATX,Z890 UD WIFI6E,183.68,26, GIGABYTE 
+Wortmann,GIGA X870 GAMING WF6 AM5/DDR5/ATX,X870 GAMING WF6,199.12,381, GIGABYTE 
+Wortmann,GIGA B650E AORUS STEALTH ICE AM5/DDR5/ATX,B650E AORUS STEALTH ICE,254.24,12, GIGABYTE 
+Wortmann,GIGA B860 AORUS ELITE WF7 ICE S1851/DDR5/ATX,B860 AORUS ELITE WF7 ICE,204.96,29, GIGABYTE 
+Wortmann,GIGA B860 GAMING X WIFI6E S1851/DDR5/ATX,B860 GAMING X WIFI6E,188.16,32, GIGABYTE 
+Wortmann,GIGA B860 EAGLE WIFI6E S1851/DDR5/ATX,B860 EAGLE WIFI6E,166.88,23, GIGABYTE 
+Wortmann,GIGA B860 DS3H WIFI6E S1851/DDR5/ATX,B860 DS3H WIFI6E,152.32,25, GIGABYTE 
+Wortmann,GIGA B860 DS3H S1851/DDR5/ATX,B860 DS3H,152.32,24, GIGABYTE 
+Wortmann,GIGA B860I AORUS PRO ICE S1851/DDR5/MITX,B860I AORUS PRO ICE,250.88,18, GIGABYTE 
+Wortmann,GIGA B860M D3HP S1851/DDR5/µATX,B860M D3HP,120.96,20, GIGABYTE 
+Wortmann,GIGA B860M DS3H S1851/DDR5/µATX,B860M DS3H,131.04,580, GIGABYTE 
+Wortmann,GIGA B860M GAMING X WIFI6E S1851/DDR5/µATX,B860M GAMING X WIFI6E,166.88,35, GIGABYTE 
+Wortmann,GIGA B850M DS3H AM5/DDR5/µATX,B850M DS3H,131.04,17, GIGABYTE 
+Wortmann,GIGA B850I AORUS PRO AM5/DDR5/mITX,B850I AORUS PRO,257.60,38, GIGABYTE 
+Wortmann,GIGA B850 EAGLE WIFI6E AM5/DDR5/3xM.2/WIFI/Type-C/ATX,B850 EAGLE WIFI6E,166.88,10, GIGABYTE 
+Wortmann,GIGA B860M AORUS ELITE WF6E ICE S1851/DDR5/µATX,B860M AORUS ELITE WF6E ICE,188.16,24, GIGABYTE 
+Wortmann,GIGA B850 AI TOP AM5/DDR5/µATX,B850 AI TOP,372.96,27, GIGABYTE 
+Wortmann,GIGA B850 GAMING X WIFI6E AM5/DDR5/ATX,B850 GAMING X WIFI6E,188.16,21, GIGABYTE 
+Wortmann,GIGA B850M D3HP AM5/DDR5/µATX,B850M D3HP,120.96,29, GIGABYTE 
+Wortmann,GIGA B850M GAMING X WF6E AM5/DDR5/µATX,B850M GAMING X WF6E,166.88,14, GIGABYTE 
+Wortmann,GIGA VGA 2GB GT1030 LP H/DVI,GV-N1030D4-2GL,73.83,58, GIGABYTE 
+Wortmann,GIGA VGA 12GB RTX3060 WINDFORCE-OC 12G 2.0  2xDP/2xHDMI,GV-N3060WF2OC-12GD 2.0,259.73,230, GIGABYTE 
+Wortmann,GIGA VGA 6GB RTX3050 OC-6GL/LP 2xDP/2xHDMI,GV-N3050OC-6GL,171.25,80, GIGABYTE 
+Wortmann,GIGA VGA 16GB RTX5080 GAMING OC-16G 3xDP/HDMI,GV-N5080GAMING OC-16GD,1213.97,21, GIGABYTE 
+Wortmann,GIGA VGA 12GB RTX5070 EAGLE OC ICE-12G 3xDP/HDMI,GV-N5070EAGLEOC ICE-12GD,636.05,11, GIGABYTE 
+Wortmann,GIGA VGA 12GB RTX5070 EAGLE OC-12G 3xDP/HDMI,GV-N5070EAGLE OC-12GD,643.89,14, GIGABYTE 
+Wortmann,Asus NUC Barebone NUC11ATKC40000 Atlas Canyon Retail,90AB1ATK-MB3100,174.61,691,Asus
+Wortmann,Asus NUC  Barebone NUC12WSKV7 vPro Wall Street Canyon,90AB2WSK-MRE100,525.28,19,Asus
+Wortmann,Asus NUC  Barebone NUC13ANKI7 Arena Canyon,90AB3ANK-MR8120,570.08,86,Asus
+Wortmann,Asus NUC  Barebone NUC12WSHI7 Wall Street Canyon,90AR00E1-M000J0,525.28,126,Asus
+Wortmann,Asus NUC  Barebone NUC13ANKI5 Arena Canyon,90AR0031-M00060,443.41,261,Asus
+Wortmann,Asus NUC  Barebone NUC13ANKI3 Arena Canyon,90AR0031-M00010,334.77,335,Asus
+Wortmann,Asus NUC  Barebone NUC13ANKI5 Arena Canyon,90AR0031-M00090,446.88,225,Asus
+Wortmann,Asus NUC  Barebone RNUC14RVHI3 Revel Canyon,90AR0072-M00040,357.28,500,Asus
+Wortmann,Asus NUC  Barebone RNUC14RVHI3 Revel Canyon,90AR0072-M00010,357.28,350,Asus
+Wortmann,Asus NUC  Barebone RNUC14RVHU5 Revel Canyon,90AR0072-M000P0,480.48,325,Asus
+Wortmann,ASUS PRIME H510M-A S1200/DDR4/DP-HDMI-VGA/1xM.2/µATX***,90MB17C0-M0EAY0,78.29,468,Asus
+Wortmann,ASUS PRO Q570M-C/CSM S1200/2xDP-HDMI/2xM.2/24-7/vPro/µATX,90MB1700-M0EAYC,99.68,844,Asus
+Wortmann,ASUS ROG STRIX Z790-A GAMING WIFI D4 S1700/DDR4/ATX,90MB1CN0-M0EAY0,287.16,12,Asus
+Wortmann,ASUS PRIME N100I-D D4-CSM N100/VGA-HDMI-DP/COM/mITX,90MB1F70-M0EAYC,89.60,48,Asus
+Wortmann,ASUS PRIME H610M-A D4-CSM S1700/DDR4/DP-HDMI-VGA/2xM.2/µATX,90MB19P0-M0EAYC,87.16,"1,029",Asus
+Wortmann,ASUS SERVER P11C-I S1151v2 C242/VGA/2xGBL/mITX ***,90SB06T0-M0UBN0,208.10,318,Asus
+Wortmann,ASUS PRO WS W680M-ACE SE S1700/DDR5/DP-HDMI/3xLAN/24-7/µATX,90MB1FA0-M0EAY0,487.20,38,Asus
+Wortmann,ASUS TUF GAMING B650-PLUS WIFI B650/AM5/ATX,90MB1BZ0-M0EAY0,193.88,12,Asus
+Wortmann,ASUS ROG STRIX B650E-F GAMING WIFI B650/AM5/ATX,90MB1BQ0-M0EAY0,249.41,12,Asus
+Wortmann,ASUS ROG STRIX X870-I GAMING X870/AM5/mITX,90MB1IW0-M0EAY0,431.78,10,Asus
+Wortmann,ASUS TUF GAMING X870-PLUS WIFI X870/AM5/ATX,90MB1IU0-M0EAY0,324.88,84,Asus
+Wortmann,ASUS ROG STRIX X870E-E GAMING WIFI X870E/AM5/ATX,90MB1IB0-M0EAY0,485.22,10,Asus
+Wortmann,ASUS PRIME X870-P WIFI X870/AM5/HDMI-USB4-C/4xM.2/ATX,90MB1IS0-M0EAY0,268.80,288,Asus
+Wortmann,ASUS PRIME Z890-P WIFI S1851/DDR5/DP-HDMI/3xM.2/ATX,90MB1I70-M0EAY0,268.80,47,Asus
+Wortmann,ASUS TUF GAMING Z890-PLUS WIFI S1851/DDR5/DP-HDMI/4xM.2/ATX,90MB1IQ0-M0EAY0,301.28,231,Asus
+Wortmann,ASUS VGA 2GB GT1030 LP Silent H/DVI,90YV0AT0-M0NA00,76.05,49,Asus
+Wortmann,ASUS VGA NV 2GB GT1030 LP H/DP,90YV0AT2-M0NA00,71.57,65,Asus
+Wortmann,ASUS VGA 12GB RTX3060 DUAL-O12G-V2 3xDP/HDMI,90YV0GB2-M0NA10,257.49,37,Asus
+Wortmann,ASUS VGA 2GB GT730-SL-2 GD5-BRK-LP SILENT HDMI/DVI/VGA,90YV06N2-M0NA00,61.49,39,Asus
+Wortmann,ASUS VGA 2GB GT730 PCIe x1/ Silent/ 4xHDMI,90YV0H20-M0NA00,64.85,189,Asus
+Wortmann,ASUS VGA 6GB RTX3050 DUAL-O6G DP/HDMI/DVI-D,90YV0K60-M0NA00,191.41,66,Asus
+Wortmann,ASUS VGA 16GB RX9070XT PRIME OC 3xDP/HDMI,90YV0L71-M0NA00,707.73,27,Asus
+Wortmann,ASUS VGA 12GB RTX5070 PRIME-O12G 3xDP/1xHDMI,90YV0M10-M0NA00,605.81,26,Asus
+Wortmann,TP-LINK Switch TL-SG108PE 8xGBit (4x PoE+ / 64W) Unmanaged,TL-SG108PE,50.96,52,TP-LINK 
+Wortmann,TP-LINK WLAN 1200MBit Repeater (1xLAN) RE305,RE305,31.92,19,TP-LINK 
+Wortmann,TP-LINK WLAN AC1350 Access Point Dualband EAP225,EAP225,68.31,260,TP-LINK 
+Wortmann,TP-LINK WLAN AC1750 Access Point Dualband EAP245,EAP245,84.84,130,TP-LINK 
+Wortmann,TP-LINK PCIe LAN Adapter GBit (10/100/1000MBit),TG-3468,9.73,70,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG1005D 5xGBit Unmanaged,TL-SG1005D,13.43,382,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG1008D 8xGBit Unmanaged,TL-SG1008D,17.35,246,TP-LINK 
+Wortmann,"TP-LINK Switch TL-SG1016 16xGBit Unmanaged 19""",TL-SG1016,66.08,54,TP-LINK 
+Wortmann,"TP-LINK Switch TL-SG1024 24xGBit Unmanaged 19""",TL-SG1024,73.81,56,TP-LINK 
+Wortmann,"TP-LINK Switch TL-SG1048 48xGBit Unmanaged 19""",TL-SG1048,250.77,15,TP-LINK 
+Wortmann,TP-LINK Switch TL-SF1005D 5x 10/100MBit Unmanaged ,TL-SF1005D,8.40,75,TP-LINK 
+Wortmann,TP-LINK Konverter GBit RJ45 > GBit SFP,MC220L,16.24,21,TP-LINK 
+Wortmann,TP-LINK Konverter GBit RJ45 > GBit SM SC,MC210CS,28.00,24,TP-LINK 
+Wortmann,TP-LINK Konverter GBit RJ45 > GBit MM SC,MC200CM,28.00,48,TP-LINK 
+Wortmann,TP-LINK MiniGBIC Modul 1GBit SFP LC Singlemode LX SM311LS,SM311LS,14.84,32,TP-LINK 
+Wortmann,TP-LINK PoE Injektor POE150S,POE150S,13.43,89,TP-LINK 
+Wortmann,TP-LINK PoE Receiver POE10R,POE10R,9.97,283,TP-LINK 
+Wortmann,TP-LINK WLAN AC1200 Access Point Dualband EAP225-Outdoor,EAP225-OUTDOOR,81.20,40,TP-LINK 
+Wortmann,TP-LINK WLAN 150MBit USB Adap. Lite-N High-Gain,TL-WN722N,8.40,171,TP-LINK 
+Wortmann,TP-LINK WLAN 750MBit Repeater RE200,RE200,25.65,37,TP-LINK 
+Wortmann,TP-LINK WLAN 300MBit Router (2T2R),TL-WR841N,16.80,64,TP-LINK 
+Wortmann,TP-LINK Omada Hardware Controller OC200,OC200,84.84,93,TP-LINK 
+Wortmann,TP-LINK WLAN 300MBit USB Adapter (2T2R) High,TL-WN822N,11.19,38,TP-LINK 
+Wortmann,TP-LINK 600MBit WLAN-USB Adapter Dualband AC,ARCHER T2U PLUS,15.12,10,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG1005P 5xGBit (4xPoE / 65W) Unmanaged,TL-SG1005P,34.72,144,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG1008MP 8xGBit Unmanaged (8x PoE / 126W),TL-SG1008MP,94.07,13,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG1016D 16xGBit Unmanaged Desktop,TL-SG1016D,51.52,100,TP-LINK 
+Wortmann,TP-LINK WLAN 3000MBit AX3000 Wi-Fi 6 Bluetooth 5.0 PCIe Adapter LP,ARCHER TX50E,38.64,18,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG1024D 24xGBit Unmanaged Desktop,TL-SG1024D,74.93,63,TP-LINK 
+Wortmann,TP-LINK WLAN 300MBit PCIe Adapter (2T2R),TL-WN881ND,12.87,44,TP-LINK 
+Wortmann,TP-LINK WLAN 300MBit USB Adapter Mini,TL-WN823N,8.50,88,TP-LINK 
+Wortmann,TP-LINK WLAN 300MBit Repeater (1xLAN),TL-WA850RE,15.67,25,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG105 5xGBit Unmanaged Metallgehäuse ,TL-SG105,14.55,388,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG108 8xGBit Unmanaged Metallgehäuse ,TL-SG108,20.71,427,TP-LINK 
+Wortmann,TP-LINK WLAN 300MBit USB High Power Adapter (1T2R)***,TL-WN8200ND,15.68,24,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG1008P 8xGBit Unmanaged (4xPoE),TL-SG1008P,45.25,24,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG1016DE 16xGBit Easy Managed Desktop,TL-SG1016DE,62.16,21,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG1024DE 24xGBit Easy Smart Managed Desktop,TL-SG1024DE,91.96,28,TP-LINK 
+Wortmann,TP-LINK Switch SG2428P 24xGBit/4xSFP Managed PoE+ (250W),SG2428P,282.23,211,TP-LINK 
+Wortmann,TP-LINK Switch SG3428 24xGBit/4xSFP Managed,SG3428,165.20,34,TP-LINK 
+Wortmann,TP-LINK Switch SG3428MP 24xGBit/4xSFP PoE+ Managed,SG3428MP,365.12,63,TP-LINK 
+Wortmann,TP-LINK 1300MBit WLAN-USB Adapter Dualband AC,ARCHER T4U,21.60,162,TP-LINK 
+Wortmann,TP-LINK 600MBit WLAN-USB Adapter Dualband AC,ARCHER T2U,13.72,11,TP-LINK 
+Wortmann,TP-LINK Switch SG2210P 8xGBit/2xSFP Managed PoE+ (53W),SG2210P,118.71,49,TP-LINK 
+Wortmann,"TP-LINK WLAN 300MBit Access Point 2,4GHz CPE210",CPE210,35.83,55,TP-LINK 
+Wortmann,TP-LINK WLAN 300MBit Access Point 5GHz CPE510,CPE510,49.28,15,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG105E 5xGBit Managed Metallgehäuse,TL-SG105E,16.80,213,TP-LINK 
+Wortmann,TP-LINK Switch TL-SG108E 8xGBit Unmanaged Metallgehäuse,TL-SG108E,25.20,182,TP-LINK 
+Wortmann,TP-LINK Mobiler WLAN-Router 4G LTE M7350 ,M7350,59.25,49,TP-LINK 
+Wortmann,TP-LINK AC750 WLAN-Router Dualband,ARCHER C20,25.20,14,TP-LINK 
+Wortmann,TP-LINK WLAN AC1750MBit Repeater (1xLAN) RE450 ,RE450,41.43,100,TP-LINK 
+Wortmann,TP-LINK USB3.0 zu GBit Ethernet Adapter UE300,UE300,11.14,180,TP-LINK 
+Wortmann,TP-LINK 7 Port USB3.0 Hub aktiv UH700,UH700,27.89,79,TP-LINK 
+Wortmann,TP-LINK 4 Port USB3.0 Hub passiv UH400,UH400,9.24,183,TP-LINK 
+Wortmann,TP-LINK Switch SG2210MP 8xGBit/2xSFP Managed PoE+ (150W),SG2210MP,155.67,15,TP-LINK 
+Wortmann,TP-LINK Switch SG2008P 8xGBit Managed (4x PoE+) 62W,SG2008P,95.26,175,TP-LINK 
+Wortmann,TP-LINK WLAN AX1800 Access Point Dualband EAP620 HD,EAP620 HD,116.67,47,TP-LINK 
+Wortmann,TP-LINK WLAN AX3600 Access Point Dualband EAP660 HD V.2,EAP660 HD,225.11,115,TP-LINK 
+Wortmann,TP-LINK Switch SG3428X 24xGBit/4xSFP+ Managed,SG3428X,248.37,30,TP-LINK 
+Wortmann,TP-LINK WLAN AC1200 Access Point Dualband EAP230-Wall,EAP230-WALL,57.01,19,TP-LINK 
+Wortmann,"LG LCD 49WQ95X-W 49"" white",49WQ95X-W.AEU,1387.57,79,LG
+Wortmann,"LG LCD 32UP55NP-W 32"" white",32UP55NP-W.AEU,290.08,249,LG
+Wortmann,"LG LCD 35BN77CP-B 35"" black ***",35BN77CP-B.AEU,349.44,61,LG
+Wortmann,"LG LCD 40WP95XP-W 39,7"" white UltraWide",40WP95XP-W.AEU,1296.95,32,LG
+Wortmann,"LG LCD 35WN75CP-B 35"" black",35WN75CP-B.AEU,410.98,65,LG
+Wortmann,"LG LCD 32GQ950P-B 32"" black ***",32GQ950P-B.AEU,994.56,130,LG
+Wortmann,"LG LCD 27BQ65UB-B 27"" black ***",27BQ65UB-B.AEU,319.17,718,LG
+Wortmann,"LG LCD 27BQ75QB-B 27"" black ***",27BQ75QB-B.AEU,264.31,65,LG
+Wortmann,"LG LCD 27GR93U-B 27"" black ***",27GR93U-B.AEU,390.88,29,LG
+Wortmann,"LG LCD 49BQ95C-W 49"" white",49BQ95C-W.AEU,1050.00,38,LG
+Wortmann,"LG LCD 34BR65F-B 34"" black UltraWide",34BR65F-B.AEU,239.67,149,LG
+Wortmann,"LG LCD 34WQ500-B 34"" black ",34WQ500-B.AEU,200.48,34,LG
+Wortmann,"LG LCD  39GS95QE-B 39"" Black UltraWide",39GS95QE-B.AEU,1295.84,60,LG
+Wortmann,"LG LCD 34GS95QE-B 34"" Black",34GS95QE-B.AEU,818.24,999,LG
+Wortmann,"LG LCD  32GS85QX-B 32"" black",32GS85QX-B.AEU,408.80,66,LG
+Wortmann,"LG LCD  45GS95QX-B 45"" black",45GS95QX-B.AEU,1466.08,46,LG
+Wortmann,"LG LCD 27GS95QX-B 27"" black",27GS95QX-B.AEU,722.40,46,LG
+Wortmann,"LG LCD 27GS75QX-B 27"" black",27GS75QX-B.AEU,320.32,25,LG
+Wortmann,"LG LCD 24BA450-B 24"" black ",24BA450-B.AEUQ,105.17,208,LG
+Wortmann,"LG LCD 24BA550-B 24"" black ",24BA550-B.AEUQ,121.52,392,LG
+Wortmann,"LG LCD 24BA560-B 24"" black",24BA560-B.AEUQ,121.97,47,LG
+Wortmann,"LG LCD 27BA560-B 27"" black",27BA560-B.AEUQ,144.37,32,LG
+Wortmann,"LG LCD 27BA450-B 27"" black",27BA450-B.AEUQ,128.24,103,LG
+Wortmann,"LG LCD 27BA550-B 27"" black",27BA550-B.AEUQ,145.49,653,LG
+Wortmann,"LG LCD 32GS75QX-B 32"" black",32GS75QX-B.AEU,346.08,37,LG
+Wortmann,"LG LCD 24BA650-B 24"" black ",24BA650-B.AEU,230.72,19,LG
+Wortmann,"LG LCD 24BA850-B 24"" black ",24BA850-B.AEU,288.96,174,LG
+Wortmann,"LG LCD 27BA400-B 27"" black",27BA400-B.AEU,110.32,105,LG
+Wortmann,"LG LCD 27BA650-B 27"" black",27BA650-B.AEU,254.24,105,LG
+Wortmann,"LG LCD 27BA850-B 27"" black",27BA850-B.AEU,311.36,54,LG
+Wortmann,AVM FRITZ!Powerline 1220 Set,20002737,119.28,40,AVM
+Wortmann,AVM FRITZ!Powerline 1220 Single,20002736,78.74,366,AVM
+Wortmann,AVM FRITZ!DECT 210,20002723,49.06,"1,518",AVM
+Wortmann,AVM FRITZ!WLAN USB Stick AC 430 MU-MIMO,20002766,31.25,255,AVM
+Wortmann,AVM FRITZ!Powerline 1260 WLAN Set,20002795,161.84,156,AVM
+Wortmann,AVM FRITZ!Box 6890 LTE,20002817,397.60,43,AVM
+Wortmann,AVM FRITZ!Repeater 600,20002853,35.28,510,AVM
+Wortmann,AVM FRITZ!Fon C6 White DECT-Mobilteil,20002848,80.98,736,AVM
+Wortmann,AVM FRITZ!Repeater 2400,20002855,102.70,571,AVM
+Wortmann,AVM FRITZ!Fon M2 DECT-Mobilteil,20002511,49.06,137,AVM
+Wortmann,AVM FRITZ!Box 7530 AX,20002930,195.44,400,AVM
+Wortmann,AVM FRITZ!DECT 440,20002905,56.84,405,AVM
+Wortmann,AVM FRITZ!Box 6850 LTE,20002925,197.12,30,AVM
+Wortmann,AVM FRITZ!DECT Repeater 100,20002598,79.52,193,AVM
+Wortmann,AVM FRITZ!DECT 200,20002572,44.80,334,AVM
+Wortmann,AVM FRITZ!Box 5530,20002960,190.68,100,AVM
+Wortmann,AVM FRITZ!Fon C6 Black DECT-Mobilteil ,20002964,80.98,634,AVM
+Wortmann,AVM FRITZ!Repeater 6000 ,20002908,244.72,127,AVM
+Wortmann,AVM FRITZ!Box 6850 5G,20002914,520.80,11,AVM
+Wortmann,AVM FRITZ!Repeater 1200 AX,20002974,86.41,205,AVM
+Wortmann,AVM FRITZ!Box 4060,20002931,239.12,190,AVM
+Wortmann,AVM FRITZ!Box 6690 Cable,20002965,287.84,80,AVM
+Wortmann,AVM FRITZ!Box 7590 AX,20002998,278.88,361,AVM
+Wortmann,AVM FRITZ!DECT 302,20002961,59.36,966,AVM
+Wortmann,AVM FRITZ!Repeater 3000 AX,20002988,170.24,222,AVM
+Wortmann,AVM FRITZ!Smart Gateway ,20003012,79.52,189,AVM
+Wortmann,AVM FRITZ!Fon X6 schwarz,20002966,89.49,91,AVM
+Wortmann,AVM FRITZ!Fon X6 weiß,20002987,89.49,"2,592",AVM
+Wortmann,AVM FRITZ!Powerline 1240 AX WLAN Set,20003021,144.48,192,AVM
+Wortmann,AVM FRITZ!DECT 350,20003050,35.28,"1,340",AVM
+Wortmann,AVM FRITZ! Mesh Set 7530 AX + 1200 AX ,20003049,239.12,72,AVM
+Wortmann,AVM FRITZ!Powerline 1240 AX single,20003023,108.08,80,AVM
+Wortmann,AVM FRITZ!Box 6670 Cable,20003047,253.01,49,AVM
+Wortmann,AVM FRITZ!Box 7690 ,20003057,278.88,104,AVM
+Wortmann,AVM FRITZ!Box 4050,20003052,125.44,31,AVM
+Wortmann,AVM FRITZ!Box 6820 LTE v4,20003055,179.20,293,AVM
+Wortmann,AVM FRITZ!Box 7682,20003063,319.20,39,AVM
+Wortmann,AVM FRITZ!Box 4690,20003082,287.84,149,AVM
+Wortmann,Microsoft Surface Dock 2,1GK-00002,139.89,460,Microsoft
+Wortmann,Microsoft Surface Thunderbolt 4 Dock,T8I-00002,207.76,30,Microsoft
+Wortmann,MS Surface Pro 10 Platin Ultra7/256GB/16GBWin11 Pro [DE/AT] ,ZDV-00004,1382.08,25,Microsoft
+Wortmann,MS Surface Go 4 Platin [DE/AT] | N200/256GB/8GB/Win 11 Pro,XIG-00004,731.36,12,Microsoft
+Wortmann,MS Surface Pro 11 Copilot+ PC Platin [DE/AT] X Plus/LCD/512GB/16GB Win11 Pro,ZIL-00004,1237.60,20,Microsoft
+Wortmann,MS Surface Pro 10 mit 5G Platin [DE/AT] Ultra5/256GB/16GB Win11 Pro,EP2-14742,1601.60,42,Microsoft
+Wortmann,MS Surface Pro 10 mit 5G Platin [DE/AT] Ultra7/256GB/16GB Win11 Pro,EP2-14802,1650.88,17,Microsoft
+Wortmann,MS Surface Pro 10 mit 5G Platin [DE/AT] Ultra7/512GB/32GB Win11 Pro,EP2-14826,2101.12,20,Microsoft
+Wortmann,MS Surface Pro 10 Platin Ultra5/512GB/16GB Win11 Pro [DE/AT] ,ZDU-00004,1388.80,38,Microsoft
+Wortmann,"MS Surface Laptop 6 Black [DE/AT]/ 15""/ Ultra5/256GB/16GB/Win11 Pro",ZLG-00005,1556.80,15,Microsoft
+Wortmann,"MS Surface Laptop 7 Copilot+ PC Platin [DE/AT]/ 15""/ X Elite/512GB/16GB/Win11 Pro+++",ZHQ-00005,1318.24,18,Microsoft
+Wortmann,Surface Go Type Cover [DE/AT] Schwarz ,KCN-00027,77.17,62,Microsoft
+Wortmann,MS Surface Go 4 Platin [DE/AT] | N200/64GB/8GB/Win 11 Pro,XGT-00004,543.20,47,Microsoft
+Wortmann,Surface Pro Keyboard [DE/AT] Schwarz + Slim Pen 2 Schwarz,8X8-00145,190.40,146,Microsoft
+Wortmann,Surface Pro Keyboard [DE/AT] Platin+ Slim Pen 2 Schwarz,8X8-00168,190.40,76,Microsoft
+Wortmann,MS Surface Pro11 Copilot+ PC Platin [DE/AT] Ultra5/LCD/256GB/16GB Win11 Pro,EP2-20112,1450.40,26,Microsoft
+Wortmann,MS Surface Pro11 Copilot+ PC Platin [DE/AT] Ultra5/LCD/512GB/16GB Win11 Pro,EP2-20146,1542.24,80,Microsoft
+Wortmann,MS Surface Pro11 Copilot+ PC Platin [DE/AT] Ultra7/OLED/256GB/16GB Win11 Pro,EP2-20214,1687.84,27,Microsoft
+Wortmann,MS Surface Pro11 Copilot+ PC Platin [DE/AT] Ultra7/OLED/512GB/16GB Win11 Pro,EP2-20248,1767.36,41,Microsoft
+Wortmann,"MS Surface Laptop 7 Copilot+ PC Platin [DE/AT]/ 13,8""/ Ultra5/512GB/16GB/Win11 Pro",EP2-20959,1525.44,53,Microsoft
+Wortmann,"MS Surface Laptop 7 Copilot+ PC Platin [DE/AT]/ 15""/ Ultra5/256GB/16GB/Win11 Pro",EP2-21309,1640.80,17,Microsoft
+Wortmann,"MS Surface Laptop 7 Copilot+ PC Platin [DE/AT]/ 15""/ Ultra5/512GB/16GB/Win11 Pro",EP2-21334,1736.00,14,Microsoft
+Wortmann,MS SB Windows Server 2022 Datacenter 16Core [DE] DVD,P71-09391,4412.69,11,Microsoft
+Wortmann,MS Office 2024 Home [DE] PKC,EP2-06848,118.72,22,Microsoft
+Wortmann,MS Office 2024 Home [IT] PKC,EP2-06856,118.72,18,Microsoft
+Wortmann,MS SB Windows Server 2025 Datacenter 16Core [DE] DVD,EP2-25151,4868.53,13,Microsoft
+Wortmann,MS SB Windows Server 2025 Std. x64 16Core [UK] DVD,EP2-25187,917.17,14,Microsoft
+Wortmann,Microsoft Surface Laptop 3/4/5 Gummifuß Set Dark Blue,CIG-00005,18.93,14,Microsoft
+Wortmann,PNY USB3.1 Attaché 4   512GB black Retail,FD512ATT431KK-EF,20.72,138,PNY
+Wortmann,"PNY SSD 2.5"" 2TB CS900 SATA 3 Retail",SSD7CS900-2TB-RB,90.16,190,PNY
+Wortmann,"PNY SSD 2.5"" 1TB CS900 SATA 3 Retail",SSD7CS900-1TB-RB,45.92,246,PNY
+Wortmann,PNY USB3.1 Attaché 4   1TB black Retail,FD1TBATT431KK-EF,38.64,305,PNY
+Wortmann,PNY SSD M.2 (2280) 4TB CS3140 (PCIe 4.0/NVMe) Retail,M280CS3140-4TB-RB,291.20,10,PNY
+Wortmann,PNY SSD M.2 (2280) 250GB CS1030 (PCIe/NVMe) Retail,M280CS1030-250-RB,16.80,"1,495",PNY
+Wortmann,PNY SSD M.2 (2280) 500GB CS1030 (PCIe/NVMe) Retail,M280CS1030-500-RB,29.68,20,PNY
+Wortmann,PNY USB3.1 Attaché 4   256GB black Retail,FD256ATT431KK-EF,11.14,500,PNY
+Wortmann,"PNY SSD 2.5"" 500GB CS900 SATA 3 Retail",SSD7CS900-500-RB,24.08,445,PNY
+Wortmann,"PNY SSD 2.5"" 250GB CS900 SATA 3 Retail",SSD7CS900-250-RB,13.72,663,PNY
+Wortmann,PNY SSD M.2 (2280) 1TB CS3140 (PCIe 4.0/NVMe) Retail,M280CS3140-1TB-RB,72.80,47,PNY
+Wortmann,"PNY SSD 2.5"" 4TB CS900 SATA 3 Retail",SSD7CS900-4TB-RB,240.80,10,PNY
+Wortmann,PNY USB3.1 Attaché 4   128GB black Retail,FD128ATT431KK-EF,5.21,163,PNY
+Wortmann,PNY SSD M.2 (2280) 1TB CS2150 (PCIe 5.0/NVMe) Retail,M280CS2150-1TB-TB,104.72,39,PNY
+Wortmann,PNY USB3.1 Elite Steel 3.1 USB Stick 128GB Retail,FD128ESTEEL31G-EF,7.00,47,PNY
+Wortmann,PNY USB3.1 Elite Steel 3.1 USB Stick 256GB Retail,FD256ESTEEL31G-EF,11.20,604,PNY
+Wortmann,HP USB3.1  256GB Solid State Flash Drive x911w,HPFD911W-256,25.65,73,PNY
+Wortmann,HP USB3.1  1TB Solid State Flash Drive x911w,HPFD911W-1TB,70.00,14,PNY
+Wortmann,PNY USB3.1 Elite Steel 3.1 USB Stick 64GB Retail,FD64GESTEEL31G-EF,4.76,167,PNY
+Wortmann,PNY USB-C Card Reader / USB-A Adapter,R-TC-UA-3N1E01-RB,9.97,45,PNY
+Wortmann,PNY SSDEX USB 3.2 Gen 2/Type-C RP60 1TB ,PSD0CS3060-1TB-RB,78.29,23,PNY
+Wortmann,PNY SSDEX USB 3.2 Gen 2/Type-C RP60 2TB ,PSD0CS3060-2TB-RB,155.68,106,PNY
+Wortmann,PNY PCI Quadro Sync II für P4/5/6/RTX4/5/6/8,VCQPQUADROSYNC2-PB,845.60,17,PNY
+Wortmann,PNY Zubehör: Kabelpeitsche mDP =>DP,QSP-MINIDP/DPV3,8.85,43,PNY
+Wortmann,PNY Zubehör: ATX Bracket/Slotblech für P400/T400+++,QSP-ATXBRAP400,3.92,39,PNY
+Wortmann,PNY Zubehör: Quadro NVLink 2-Slot für A30/A40/RTXA4500/RTXA5000/RTXA6000 Retail,NVLAMP-2SLOT-PB,182.56,22,PNY
+Wortmann,PNY 8GB T1000 LP 4xmDP Smallbox (without Adapter),VCNT1000-8GB-SB,375.20,110,PNY
+Wortmann,PNY 20GB RTX 4000 Ada 4xDP Smallbox ,VCNRTX4000ADA-SB,1244.32,66,PNY
+Wortmann,PNY 4GB RTX A400 LP 4xmDP Smallbox (without Adapter),VCNRTXA400-SB,151.20,32,PNY
+Wortmann,"Toshiba HD3.5"" SAS3 18TB MG09SCA18TE /7.2k/512e ",MG09SCA18TE,304.53,94,Toshiba
+Wortmann,"Toshiba HD3.5"" SAS3 16TB MG09SCA16TE  /7.2k/512e ",MG09SCA16TE,275.41,65,Toshiba
+Wortmann,"Toshiba HD2.5"" SATA3 1TB MQ04ABF100 / 5.4k / 7mm ###",MQ04ABF100,36.40,"1,320",Toshiba
+Wortmann,"Toshiba HDex 2.5"" USB3 1TB CANVIO BASICS black",HDTB510EK3AA,48.05,857,Toshiba
+Wortmann,"Toshiba HDex 2.5"" USB3 2TB CANVIO BASICS black ",HDTB520EK3AA,65.52,"1,774",Toshiba
+Wortmann,"Toshiba HDex 2.5"" USB3 4TB CANVIO BASICS black",HDTB540EK3CA,99.12,133,Toshiba
+Wortmann,"Toshiba HD3.5"" SATA3 4TB P300 High Perform./5.4k",HDWD240UZSVA,78.29,"2,406",Toshiba
+Wortmann,"Toshiba HD3.5"" SATA3 6TB P300 High Perform./5.4k ",HDWD260UZSVA,111.89,566,Toshiba
+Wortmann,"Toshiba HD3.5"" SATA3 2TB New P300 High Perform./5.4k",HDWD220UZSVA,52.53,"1,146",Toshiba
+Wortmann,"HD3.5"" SATA3-Raid 18TB Toshiba MG09ACA18TE /7.2k/512e",MG09ACA18TE,319.20,977,Toshiba
+Wortmann,"HD3.5"" SATA3-Raid 6TB Toshiba MG08ADA600E  /7.2k/512e",MG08ADA600E,178.08,377,Toshiba
+Wortmann,"HD3.5"" SATA3-Raid 8TB Toshiba MG08ADA800E /7.2k/512e",MG08ADA800E,182.45,146,Toshiba
+Wortmann,"Toshiba HD3.5"" SATA3 2TB P300 High Perform./7.2k (NEW)",HDWD320UZSVA,53.65,"3,126",Toshiba
+Wortmann,"HD3.5"" SATA3-Raid 20TB Toshiba MG10ACA20TE /7.2k/512e",MG10ACA20TE,290.08,"3,099",Toshiba
+Wortmann,"HD3.5"" SATA3-Raid 22TB Toshiba MG10AFA22TE /7.2k/512e",MG10AFA22TE,412.05,"1,250",Toshiba
+Wortmann,"HD3.5"" SATA3-Raid 12TB Toshiba MG09ACA12TE/7.2k/512e",MG09ACA12TE,245.28,288,Toshiba
+Wortmann,"Toshiba HD3.5"" SATA3 2TB DT01ACA200 / 7.2k",DT01ACA200,45.81,"9,967",Toshiba
+Wortmann,CPU Intel XEON Gold 5222/4x3.8 GHz/105W,CD8069504193501,1162.56,11,Intel
+Wortmann,CPU Intel XEON Gold 6234/8x3.3 GHz/130W,CD8069504283304,978.88,15,Intel
+Wortmann,CPU Intel XEON Gold 6244/8x3.6 GHz/150W,CD8069504194202,1084.16,10,Intel
+Wortmann,CPU Intel XEON Gold 6248/20x2.5 GHz/150W,CD8069504194301,1034.88,8,Intel
+Wortmann,CPU Intel Xeon W-2223/4x3.6/8.25MB/FCLGA2066,CD8069504394701,332.64,27,Intel
+Wortmann,CPU Intel Xeon W-2235/6x3.8/8.25MB/FCLGA2066***,CD8069504439102,599.20,9,Intel
+Wortmann,CPU Intel Xeon W-2245/8x3.9/16.5MB/FCLGA2066***,CD8069504393801,728.00,9,Intel
+Wortmann,CPU Intel Xeon W-2255/10x3.7/19.25MB/FCLGA2066***,CD8069504393600,812.00,8,Intel
+Wortmann,CPU Intel Xeon W-2265/12x3.5/19.25MB/FCLGA2066***,CD8069504393400,1069.60,11,Intel
+Wortmann,CPU Intel XEON Silver 4215R/8x3.2 GHz/11MB/130W,CD8069504449200,667.52,9,Intel
+Wortmann,CPU Intel XEON Gold 6226R/16x2.9GHz/22MB/150W,CD8069504449000,910.56,24,Intel
+Wortmann,CPU Intel XEON Silver 4214R/12x2.4 GHz/16.5MB/100W,CD8069504343701,511.84,16,Intel
+Wortmann,CPU Intel XEON Gold 6248R/24x3.0 GHz/35.75MB/205W,CD8069504449401,1710.24,20,Intel
+Wortmann,CPU Intel XEON Silver 4309Y/8x2.8GHz/12MB/105W~~~,CD8068904658102,506.24,16,Intel
+Wortmann,CPU Intel XEON Gold 5315Y/8x3.2GHz/12MB/140W###,CD8068904665802,840.00,5,Intel
+Wortmann,CPU Intel XEON Gold 5317/12x3.0GHz/18MB/150W###,CD8068904657302,918.40,10,Intel
+Wortmann,CPU Intel XEON Gold 5318Y/24x2.1GHz/36MB/165W,CD8068904656703,1232.00,6,Intel
+Wortmann,CPU Intel XEON Gold 6334/8x3.6GHz/18MB/165W~~~,CD8068904657601,1499.68,27,Intel
+Wortmann,CPU Intel XEON Gold 6342/24x2.8GHz/36MB/230W~~~,CD8068904657701,2222.08,26,Intel
+Wortmann,CPU Intel XEON Gold 6348/28x2.6GHz/42MB/235W~~~,CD8068904572204,2013.76,11,Intel
+Wortmann,CPU Intel XEON Gold 6354/18x3.0GHz/39MB/205W,CD8068904571601,2102.24,6,Intel
+Wortmann,CPU Intel XEON Silver 4510/12x2.4GHz/30MB/150W/No VROC~~~,PK8071305554300,574.56,21,Intel
+Wortmann,CPU Intel Core i7-6700 / LGA1151 / vPro / Tray,CM8066201920103,334.88,202,Intel
+Wortmann,CPU Intel Core i7-9700 / LGA1151v2 / Tray ###,CM8068403874521,301.17,175,Intel
+Wortmann,CPU Intel Core i5-9500T / LGA1151v2 / Tray ###,CM8068403362510,223.89,21,Intel
+Wortmann,CPU Intel Core i5-9500 / LGA1151v2 / Tray ~~~,CM8068403362610,165.65,224,Intel
+Wortmann,CPU Intel Core i5-9500TE / LGA1151v2 / Tray ###,CM8068404404726,301.28,36,Intel
+Wortmann,CPU Intel Core i5-12600K / LGA1700 / Box ###,BX8071512600K,151.20,599,Intel
+Wortmann,CPU Intel Core i7-12700K / LGA1700 / Box ###,BX8071512700K,235.09,19,Intel
+Wortmann,CPU Intel Core i7-12700KF / LGA1700 / Box ###,BX8071512700KF,234.08,47,Intel
+Wortmann,CPU Intel Core i9-12900KF / LGA1700 / Box ***,BX8071512900KF,281.01,36,Intel
+Wortmann,CPU Intel Core i5-12400 / LGA1700 / Box ###,BX8071512400,129.81,727,Intel
+Wortmann,CPU Intel Core i3-12100 / LGA1700 / Box ###,BX8071512100,113.01,29,Intel
+Wortmann,CPU Intel Core i7-11700T / LGA1200 / Tray ###,CM8070804491314,334.77,127,Intel
+Wortmann,CPU Intel Core i7-12700 / LGA1700 / Tray ###,CM8071504555019,233.97,677,Intel
+Wortmann,CPU Intel Core i5-12600K / LGA1700 / Tray ###,CM8071504555227,183.57,185,Intel
+Wortmann,CPU Intel Core i5-12500 / LGA1700 / Tray ###,CM8071504647605,188.05,"1,816",Intel
+Wortmann,CPU Intel Core i5-12400 / LGA1700 / Tray ,CM8071504650608,118.61,"1,247",Intel
+Wortmann,CPU Intel Core i3-12100 / LGA1700 / Tray ###,CM8071504651012,90.61,"1,113",Intel
+Wortmann,CPU Intel Core i5-12400F / LGA1700 / Tray  ###,CM8071504650609,89.49,559,Intel
+Wortmann,CPU Intel Core i9-14900K / LGA1700 / Box ,BX8071514900K,431.09,256,Intel
+Wortmann,CPU Intel Core i9-14900KF / LGA1700 / Box ,BX8071514900KF,399.84,156,Intel
+Wortmann,CPU Intel Core i7-14700K / LGA1700 / Box ,BX8071514700K,330.40,434,Intel
+Wortmann,CPU Intel Core i7-14700KF / LGA1700 / Box ,BX8071514700KF,305.65,144,Intel
+Wortmann,CPU Intel Core i5-14600K / LGA1700 / Box ,BX8071514600K,208.21,141,Intel
+Wortmann,CPU Intel Core i5-14600KF / LGA1700 / Box ,BX8071514600KF,198.13,307,Intel
+Wortmann,CPU Intel Core i7-13700KF / LGA1700 / Tray,CM8071504820706,324.80,44,Intel
+Wortmann,CPU Intel Core i5-13500 / LGA1700 / Tray ###,CM8071505093101,222.88,10,Intel
+Wortmann,CPU Intel Core i7-14700 / LGA1700 / Tray,CM8071504820817,322.45,902,Intel
+Wortmann,CPU Intel Core i5-14500 / LGA1700 / Tray,CM8071505093104,213.81,"1,457",Intel
+Wortmann,CPU Intel Core i5-14400 / LGA1700 / Box,BX8071514400,149.52,"1,178",Intel
+Wortmann,CPU Intel Core i5-14400 / LGA1700 / Tray,CM8071504821112,135.41,28,Intel
+Wortmann,CPU Intel Core i3-14100 / LGA1700 / Box,BX8071514100,116.37,22,Intel
+Wortmann,CPU Intel Core i5-14400F / LGA1700 / Tray,CM8071504821113,122.08,112,Intel
+Wortmann,CPU Intel Core  Ultra 7 265KF / LGA1851 / Box ,BX80768265KF,323.57,12,Intel
+Wortmann,CPU Intel Core  Ultra 5 245KF / LGA1851 / Box ,BX80768245KF,283.25,12,Intel
+Wortmann,CPU Intel Core  Ultra 5 245K / LGA1851 / Box ,BX80768245K,305.65,188,Intel
+Wortmann,CPU Intel Core  Ultra 5 225 / LGA1851 / Box ,BX80768225,244.05,86,Intel
+Wortmann,CPU Intel Core  Ultra 7 265 / LGA1851 / Box ,BX80768265,335.89,20,Intel
+Wortmann,CPU Intel Core i7-6700 / LGA1151 / vPro / Tray,CM8066201920103,334.88,202,Intel

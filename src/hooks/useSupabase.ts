@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../types/database';
 
@@ -9,19 +9,64 @@ type SupplierProduct = Tables['supplier_products']['Row'];
 type ImportHistoryItem = Tables['import_history']['Row'];
 type ImportHistoryInsert = Tables['import_history']['Insert'];
 
-export function useProducts() {
+export function useProducts(dataInitialized: boolean = false) {
   const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialProducts, setInitialProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(!dataInitialized);
+  const [initialLoading, setInitialLoading] = useState(!dataInitialized);
   const [error, setError] = useState<Error | null>(null);
   const [totalProductCount, setTotalProductCount] = useState<number>(0);
+  const [hasLoadedInitial, setHasLoadedInitial] = useState<boolean>(dataInitialized);
 
+  // Load initial data when component mounts or when switching back to the tab
   useEffect(() => {
-    fetchProducts();
-  }, []);
+    // If we already have data and dataInitialized is true, don't reload
+    if (dataInitialized && products.length > 0) {
+      setLoading(false);
+      setInitialLoading(false);
+      return;
+    }
 
-  async function fetchProducts() {
+    // Otherwise, fetch initial data
+    if (!hasLoadedInitial) {
+      fetchInitialProducts();
+    }
+  }, [dataInitialized]);
+  
+  // Effect to update initial products only when background loading is FULLY complete
+  useEffect(() => {
+    if (!loading && initialProducts.length > 0 && products.length > initialProducts.length) {
+      // Only update initialProducts when background loading is completely finished
+      // This prevents partial updates from affecting the UI during loading
+      
+      // Create a map of all products by ID for efficient lookup
+      const productsMap = new Map<string, Product>();
+      
+      // First add initial products (they take precedence)
+      initialProducts.forEach(product => {
+        productsMap.set(product.id, product);
+      });
+      
+      // Then add all background loaded products
+      products.forEach(product => {
+        if (!productsMap.has(product.id)) {
+          productsMap.set(product.id, product);
+        }
+      });
+      
+      // Convert map back to array
+      const mergedProducts = Array.from(productsMap.values());
+      
+      // Only update once at the end of loading
+      console.log(`Background loading complete. Merging ${products.length - initialProducts.length} additional products into view.`);
+      setInitialProducts(mergedProducts);
+    }
+  }, [loading]); // Only trigger when loading state changes to false
+
+  // Function to fetch just the first page of products for immediate display
+  async function fetchInitialProducts() {
     try {
-      setLoading(true);
+      setInitialLoading(true);
       setError(null);
       
       // First, get the total count of products
@@ -35,18 +80,52 @@ export function useProducts() {
       setTotalProductCount(totalCount);
       console.log(`Total products in database: ${totalCount}`);
       
+      // Only fetch first 20 products for immediate display
+      const { data, error: productsError } = await supabase
+        .from('products')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .range(0, 19); // Fetch first 20 products
+      
+      if (productsError) throw productsError;
+      
+      // Set both products and initialProducts to maintain consistency
+      setProducts(data || []);
+      setInitialProducts(data || []);
+      setHasLoadedInitial(true);
+      console.log(`Fetched initial ${data?.length} products for immediate display`);
+      
+      // After loading initial data, fetch remaining data in the background
+      setInitialLoading(false);
+      fetchRemainingProducts(totalCount, data?.length || 0);
+      
+    } catch (err) {
+      console.error('Error fetching initial products:', err);
+      setError(err instanceof Error ? err : new Error('An error occurred fetching initial products'));
+      setInitialLoading(false);
+    }
+  }
+
+  // Function to fetch remaining products in the background
+  async function fetchRemainingProducts(totalCount: number, initialCount: number) {
+    try {
+      if (initialCount >= totalCount) {
+        // No more products to load
+        setLoading(false);
+        return;
+      }
+      
       // Fetch products in batches of 1000 (Supabase limit)
       const batchSize = 1000;
-      const batches = Math.ceil(totalCount / batchSize);
-      let allProducts: Product[] = [];
+      const remainingProducts = totalCount - initialCount;
+      const batches = Math.ceil(remainingProducts / batchSize);
+      let backgroundProducts = [...products]; // Start with initial products for background loading
       
-      console.log(`Fetching ${totalCount} products in ${batches} batches of ${batchSize}`);
+      console.log(`Fetching remaining ${remainingProducts} products in ${batches} batches (background)`);
       
       for (let i = 0; i < batches; i++) {
-        console.log(`Fetching batch ${i + 1} of ${batches}...`);
-        
-        const from = i * batchSize;
-        const to = from + batchSize - 1;
+        const from = initialCount + (i * batchSize);
+        const to = Math.min(from + batchSize - 1, totalCount - 1);
         
         const { data, error: batchError } = await supabase
           .from('products')
@@ -56,17 +135,96 @@ export function useProducts() {
         
         if (batchError) throw batchError;
         
-        allProducts = [...allProducts, ...(data || [])];
-        console.log(`Fetched ${allProducts.length} of ${totalCount} products...`);
+        backgroundProducts = [...backgroundProducts, ...(data || [])];
+        
+        // Log progress but don't update UI
+        console.log(`Fetched batch ${i+1}/${batches} (${data?.length || 0} products)`);
       }
       
-      console.log(`Successfully fetched all ${allProducts.length} products`);
-      setProducts(allProducts);
+      // Update products only once at the end of all batches
+      setProducts(backgroundProducts);
+      console.log(`Successfully fetched all ${backgroundProducts.length} products in background`);
+    } catch (err) {
+      console.error('Error fetching remaining products:', err);
+      setError(err instanceof Error ? err : new Error('An error occurred fetching remaining products'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // Original full fetch function - now with option to skip initial load
+  async function fetchProducts(skipInitial = false) {
+    try {
+      setLoading(true);
+      if (!skipInitial) {
+        setInitialLoading(true);
+      }
+      setError(null);
+      
+      // First, get the total count of products
+      const { count, error: countError } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true });
+      
+      if (countError) throw countError;
+      
+      const totalCount = count || 0;
+      setTotalProductCount(totalCount);
+      console.log(`Total products in database: ${totalCount}`);
+      
+      // If not skipping initial, fetch first 20 immediately
+      if (!skipInitial) {
+        const { data: initialData, error: initialError } = await supabase
+          .from('products')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .range(0, 19);
+        
+        if (initialError) throw initialError;
+        setProducts(initialData || []);
+        setInitialProducts(initialData || []);
+        setInitialLoading(false);
+        
+        // If we already have all products, we're done
+        if ((initialData?.length || 0) >= totalCount) {
+          setLoading(false);
+          return;
+        }
+      }
+      
+      // Fetch remaining products in batches
+      const batchSize = 1000;
+      const initialCount = skipInitial ? 0 : Math.min(20, totalCount);
+      const batches = Math.ceil((totalCount - initialCount) / batchSize);
+      let backgroundProducts = skipInitial ? [] : [...products];
+      
+      console.log(`Fetching ${totalCount - initialCount} products in ${batches} batches`);
+      
+      for (let i = 0; i < batches; i++) {
+        const from = initialCount + (i * batchSize);
+        const to = Math.min(from + batchSize - 1, totalCount - 1);
+        
+        console.log(`Fetching batch ${i + 1} of ${batches} (range ${from}-${to})...`);
+        
+        const { data, error: batchError } = await supabase
+          .from('products')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .range(from, to);
+        
+        if (batchError) throw batchError;
+        
+        backgroundProducts = [...backgroundProducts, ...(data || [])];
+        setProducts(backgroundProducts);
+      }
+      
+      console.log(`Successfully fetched all ${backgroundProducts.length} products`);
     } catch (err) {
       console.error('Error fetching products:', err);
       setError(err instanceof Error ? err : new Error('An error occurred fetching products'));
     } finally {
       setLoading(false);
+      setInitialLoading(false);
     }
   }
 
@@ -80,6 +238,7 @@ export function useProducts() {
 
       if (error) throw error;
       setProducts(prev => [data, ...prev]);
+      setInitialProducts(prev => [data, ...prev]);
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to add product');
@@ -97,6 +256,7 @@ export function useProducts() {
 
       if (error) throw error;
       setProducts(prev => prev.map(p => p.id === id ? data : p));
+      setInitialProducts(prev => prev.map(p => p.id === id ? data : p));
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to update product');
@@ -112,14 +272,16 @@ export function useProducts() {
 
       if (error) throw error;
       setProducts(prev => prev.filter(p => p.id !== id));
+      setInitialProducts(prev => prev.filter(p => p.id !== id));
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to delete product');
     }
   }
 
   return {
-    products,
+    products: initialProducts, // Return initialProducts instead of products
     loading,
+    initialLoading,
     error,
     totalProductCount,
     addProduct,
@@ -129,28 +291,201 @@ export function useProducts() {
   };
 }
 
-export function useSuppliers() {
+export function useSuppliers(dataInitialized: boolean = false) {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialSuppliers, setInitialSuppliers] = useState<Supplier[]>([]);
+  const [loading, setLoading] = useState(!dataInitialized);
+  const [initialLoading, setInitialLoading] = useState(!dataInitialized);
   const [error, setError] = useState<Error | null>(null);
+  const [totalSupplierCount, setTotalSupplierCount] = useState<number>(0);
+  const [hasLoadedInitial, setHasLoadedInitial] = useState<boolean>(dataInitialized);
 
   useEffect(() => {
-    fetchSuppliers();
-  }, []);
+    // If we already have data and dataInitialized is true, don't reload
+    if (dataInitialized && suppliers.length > 0) {
+      setLoading(false);
+      setInitialLoading(false);
+      return;
+    }
 
-  async function fetchSuppliers() {
+    // Otherwise, fetch initial data
+    if (!hasLoadedInitial) {
+      fetchInitialSuppliers();
+    }
+  }, [dataInitialized]);
+  
+  // Effect to update initial suppliers only when background loading is FULLY complete
+  useEffect(() => {
+    if (!loading && initialSuppliers.length > 0 && suppliers.length > initialSuppliers.length) {
+      // Only update initialSuppliers when background loading is completely finished
+      // This prevents partial updates from affecting the UI during loading
+      
+      // Create a map of all suppliers by ID for efficient lookup
+      const suppliersMap = new Map<string, Supplier>();
+      
+      // First add initial suppliers (they take precedence)
+      initialSuppliers.forEach(supplier => {
+        suppliersMap.set(supplier.id, supplier);
+      });
+      
+      // Then add all background loaded suppliers
+      suppliers.forEach(supplier => {
+        if (!suppliersMap.has(supplier.id)) {
+          suppliersMap.set(supplier.id, supplier);
+        }
+      });
+      
+      // Convert map back to array and sort by name
+      const mergedSuppliers = Array.from(suppliersMap.values())
+        .sort((a, b) => a.name.localeCompare(b.name));
+      
+      // Only update once at the end of loading
+      console.log(`Background loading complete. Merging ${suppliers.length - initialSuppliers.length} additional suppliers into view.`);
+      setInitialSuppliers(mergedSuppliers);
+    }
+  }, [loading]); // Only trigger when loading state changes to false
+
+  async function fetchInitialSuppliers() {
     try {
+      setInitialLoading(true);
+      setError(null);
+      
+      // Get total count
+      const { count, error: countError } = await supabase
+        .from('suppliers')
+        .select('*', { count: 'exact', head: true });
+      
+      if (countError) throw countError;
+      
+      const totalCount = count || 0;
+      setTotalSupplierCount(totalCount);
+      
+      // Fetch first 20 suppliers
       const { data, error } = await supabase
         .from('suppliers')
         .select('*')
-        .order('name');
+        .order('name')
+        .range(0, 19);
 
       if (error) throw error;
       setSuppliers(data || []);
+      setInitialSuppliers(data || []);
+      setHasLoadedInitial(true);
+      
+      // After loading initial data, fetch the rest in background
+      setInitialLoading(false);
+      fetchRemainingSuppliers(totalCount, data?.length || 0);
+      
+    } catch (err) {
+      setError(err instanceof Error ? err : new Error('An error occurred'));
+      setInitialLoading(false);
+    }
+  }
+
+  async function fetchRemainingSuppliers(totalCount: number, initialCount: number) {
+    try {
+      if (initialCount >= totalCount) {
+        // No more suppliers to load
+        setLoading(false);
+        return;
+      }
+      
+      // Fetch remaining suppliers in batches
+      const batchSize = 1000;
+      const batches = Math.ceil((totalCount - initialCount) / batchSize);
+      let backgroundSuppliers = [...suppliers];
+      
+      console.log(`Fetching remaining ${totalCount - initialCount} suppliers in background`);
+      
+      for (let i = 0; i < batches; i++) {
+        const from = initialCount + (i * batchSize);
+        const to = Math.min(from + batchSize - 1, totalCount - 1);
+        
+        const { data, error: batchError } = await supabase
+          .from('suppliers')
+          .select('*')
+          .order('name')
+          .range(from, to);
+        
+        if (batchError) throw batchError;
+        
+        backgroundSuppliers = [...backgroundSuppliers, ...(data || [])];
+        
+        // Log progress but don't update UI
+        console.log(`Fetched batch ${i+1}/${batches} (${data?.length || 0} suppliers)`);
+      }
+      
+      // Update suppliers only once at the end of all batches
+      setSuppliers(backgroundSuppliers);
+      console.log(`Successfully fetched all ${backgroundSuppliers.length} suppliers in background`);
+    } catch (err) {
+      console.error('Error fetching remaining suppliers:', err);
+      setError(err instanceof Error ? err : new Error('An error occurred fetching remaining suppliers'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function fetchSuppliers() {
+    try {
+      setLoading(true);
+      setInitialLoading(true);
+      setError(null);
+      
+      // Get total count
+      const { count, error: countError } = await supabase
+        .from('suppliers')
+        .select('*', { count: 'exact', head: true });
+      
+      if (countError) throw countError;
+      
+      const totalCount = count || 0;
+      setTotalSupplierCount(totalCount);
+      
+      // Fetch first 20 suppliers
+      const { data: initialData, error: initialError } = await supabase
+        .from('suppliers')
+        .select('*')
+        .order('name')
+        .range(0, 19);
+
+      if (initialError) throw initialError;
+      setSuppliers(initialData || []);
+      setInitialSuppliers(initialData || []);
+      setInitialLoading(false);
+      
+      // If already loaded all suppliers, exit
+      if ((initialData?.length || 0) >= totalCount) {
+        setLoading(false);
+        return;
+      }
+      
+      // Fetch remaining suppliers in batches
+      const batchSize = 1000;
+      const batches = Math.ceil((totalCount - 20) / batchSize);
+      let backgroundSuppliers = [...initialData || []];
+      
+      for (let i = 0; i < batches; i++) {
+        const from = 20 + (i * batchSize);
+        const to = Math.min(from + batchSize - 1, totalCount - 1);
+        
+        const { data, error: batchError } = await supabase
+          .from('suppliers')
+          .select('*')
+          .order('name')
+          .range(from, to);
+        
+        if (batchError) throw batchError;
+        
+        backgroundSuppliers = [...backgroundSuppliers, ...(data || [])];
+        setSuppliers(backgroundSuppliers);
+      }
+      
     } catch (err) {
       setError(err instanceof Error ? err : new Error('An error occurred'));
     } finally {
       setLoading(false);
+      setInitialLoading(false);
     }
   }
 
@@ -164,6 +499,7 @@ export function useSuppliers() {
 
       if (error) throw error;
       setSuppliers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
+      setInitialSuppliers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to add supplier');
@@ -180,10 +516,8 @@ export function useSuppliers() {
         .single();
 
       if (error) throw error;
-      setSuppliers(prev => 
-        prev.map(s => s.id === id ? data : s)
-           .sort((a, b) => a.name.localeCompare(b.name))
-      );
+      setSuppliers(prev => prev.map(s => s.id === id ? data : s));
+      setInitialSuppliers(prev => prev.map(s => s.id === id ? data : s));
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to update supplier');
@@ -199,15 +533,18 @@ export function useSuppliers() {
 
       if (error) throw error;
       setSuppliers(prev => prev.filter(s => s.id !== id));
+      setInitialSuppliers(prev => prev.filter(s => s.id !== id));
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to delete supplier');
     }
   }
 
   return {
-    suppliers,
+    suppliers: initialSuppliers, // Return initialSuppliers instead of suppliers
     loading,
+    initialLoading,
     error,
+    totalSupplierCount,
     addSupplier,
     updateSupplier,
     deleteSupplier,

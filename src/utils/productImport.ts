@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { fixScientificNotation } from './csvImport';
 
 export interface ProductData {
   title: string;
@@ -17,16 +18,17 @@ export interface ProductData {
 // Function to automatically map product CSV columns to system fields
 export const autoMapProductColumns = (csvHeaders: string[]): { [key: string]: string } => {
   const fieldMappings: { [key: string]: string[] } = {
-    'Title': ['title', 'product_name', 'name', 'item_name', 'product_title'],
-    'EAN': ['ean', 'barcode', 'upc', 'product_id', 'sku', 'asin'],
-    'Brand': ['brand', 'brand_name', 'manufacturer'],
-    'Sale Price': ['sale_price', 'price', 'selling_price', 'amazon_price'],
-    'Amazon Fee': ['amazon_fee', 'fee', 'fees', 'fba_fee', 'referral_fee'],
-    'Buy Box Price': ['buy_box_price', 'buybox', 'buy_box', 'winning_price'],
-    'Units Sold': ['units_sold', 'sales', 'monthly_sales', 'quantity_sold', 'sold'],
-    'Category': ['category', 'product_category', 'department', 'niche'],
-    'Rating': ['rating', 'product_rating', 'star_rating', 'stars'],
-    'Review Count': ['review_count', 'reviews', 'review', 'num_reviews', 'number_of_reviews']
+    'title': ['title', 'product_name', 'name', 'item_name', 'product_title'],
+    'ean': ['ean', 'barcode', 'upc', 'product_id', 'sku', 'asin'],
+    'brand': ['brand', 'brand_name', 'manufacturer'],
+    'sale_price': ['sale_price', 'price', 'selling_price', 'amazon_price'],
+    'amazon_fee': ['amazon_fee', 'fee', 'fees', 'fba_fee', 'referral_fee'],
+    'buy_box_price': ['buy_box_price', 'buybox', 'buy_box', 'winning_price'],
+    'units_sold': ['units_sold', 'sales', 'monthly_sales', 'quantity_sold', 'sold'],
+    'category': ['category', 'product_category', 'department', 'niche'],
+    'rating': ['rating', 'product_rating', 'star_rating', 'stars'],
+    'review_count': ['review_count', 'reviews', 'review', 'num_reviews', 'number_of_reviews'],
+    'mpn': ['mpn', 'manufacturer_part_number', 'part_number', 'model_number']
   };
 
   const mapping: { [key: string]: string } = {};
@@ -139,16 +141,16 @@ export const mapProductData = async (csvData: any[], fieldMapping: { [key: strin
   
   const mappedData = csvData.map(row => {
     const productData: ProductData = {
-      title: row[fieldMapping['Title']]?.trim() || '',
-      ean: row[fieldMapping['EAN']]?.trim() || '',
-      brand: row[fieldMapping['Brand']]?.trim() || '',
-      sale_price: parseFloat(row[fieldMapping['Sale Price']]) || 0,
-      amazon_fee: parseFloat(row[fieldMapping['Amazon Fee']]) || 0,
-      buy_box_price: parseFloat(row[fieldMapping['Buy Box Price']]) || 0,
-      units_sold: parseInt(row[fieldMapping['Units Sold']]) || 0,
-      category: row[fieldMapping['Category']]?.trim() || null,
-      rating: row[fieldMapping['Rating']] ? parseFloat(row[fieldMapping['Rating']]) : null,
-      review_count: row[fieldMapping['Review Count']] ? parseInt(row[fieldMapping['Review Count']]) : null,
+      title: row[fieldMapping['title']]?.trim() || '',
+      ean: fixScientificNotation(row[fieldMapping['ean']]),
+      brand: row[fieldMapping['brand']]?.trim() || '',
+      sale_price: parseFloat(row[fieldMapping['sale_price']]) || 0,
+      amazon_fee: parseFloat(row[fieldMapping['amazon_fee']]) || 0,
+      buy_box_price: parseFloat(row[fieldMapping['buy_box_price']]) || 0,
+      units_sold: parseInt(row[fieldMapping['units_sold']]) || 0,
+      category: row[fieldMapping['category']]?.trim() || null,
+      rating: row[fieldMapping['rating']] ? parseFloat(row[fieldMapping['rating']]) : null,
+      review_count: row[fieldMapping['review_count']] ? parseInt(row[fieldMapping['review_count']]) : null,
       custom_attributes: {}
     };
     
@@ -243,17 +245,17 @@ export const importProductData = async (mappedDataPromise: Promise<ProductData[]
         // If we have custom attributes, add them directly to the product record
         if (custom_attributes) {
           // Map known custom attributes to their respective columns
-          if (custom_attributes['Title'] !== undefined) productRecord.custom_title = custom_attributes['Title'];
-          if (custom_attributes['EAN'] !== undefined) productRecord.custom_ean = custom_attributes['EAN'];
-          if (custom_attributes['MPN'] !== undefined) {
-            productRecord.custom_mpn = custom_attributes['MPN'];
+          if (custom_attributes['title'] !== undefined) productRecord.custom_title = custom_attributes['title'];
+          if (custom_attributes['ean'] !== undefined) productRecord.custom_ean = custom_attributes['ean'];
+          if (custom_attributes['mpn'] !== undefined) {
+            productRecord.custom_mpn = custom_attributes['mpn'];
             // Also store in the regular mpn column
-            productRecord.mpn = custom_attributes['MPN'];
+            productRecord.mpn = custom_attributes['mpn'];
           }
-          if (custom_attributes['Units Sold in 30 days'] !== undefined) 
-            productRecord.custom_units_sold_in_30_days = custom_attributes['Units Sold in 30 days'];
-          if (custom_attributes['FBA Fee'] !== undefined) 
-            productRecord.custom_fba_fee = parseFloat(custom_attributes['FBA Fee']) || 0;
+          if (custom_attributes['units_sold'] !== undefined) 
+            productRecord.custom_units_sold = custom_attributes['units_sold'];
+          if (custom_attributes['fba_fee'] !== undefined) 
+            productRecord.custom_fba_fee = parseFloat(custom_attributes['fba_fee']) || 0;
         }
         
         return productRecord;

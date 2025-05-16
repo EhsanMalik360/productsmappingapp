@@ -174,6 +174,57 @@ export const autoMapColumns = (csvHeaders: string[]): { [key: string]: string } 
   return mapping;
 };
 
+// Helper function to fix scientific notation in EAN codes
+export const fixScientificNotation = (value: string | number | null | undefined): string => {
+  if (value === null || value === undefined) return '';
+  
+  const stringValue = String(value).trim();
+  
+  // Check if the value is in scientific notation (e.g., 8.40E+11)
+  const scientificNotationRegex = /^(\d+\.\d+)e\+(\d+)$/i;
+  const match = stringValue.match(scientificNotationRegex);
+  
+  if (match) {
+    // Extract base number and exponent
+    const baseNumber = parseFloat(match[1]);
+    const exponent = parseInt(match[2], 10);
+    
+    // Calculate the actual number and convert to string
+    // For example: 8.40E+11 becomes 840000000000
+    const actualNumber = baseNumber * Math.pow(10, exponent);
+    
+    // Convert to string and remove any decimal part
+    return actualNumber.toFixed(0);
+  }
+  
+  // If not in scientific notation, just return the trimmed string
+  return stringValue;
+};
+
+// Update any function that processes EAN codes
+export const mapCsvToFields = (csvData: any[], fieldMapping: { [key: string]: string }): any[] => {
+  return csvData.map(row => {
+    const mappedRow: any = {};
+    
+    // Process each field in the mapping
+    for (const [fieldName, csvColumn] of Object.entries(fieldMapping)) {
+      if (csvColumn && row[csvColumn] !== undefined) {
+        const trimmedValue = String(row[csvColumn]).trim();
+        
+        // Apply special processing for EAN fields
+        if (fieldName.toLowerCase() === 'ean') {
+          // Use the helper function to fix scientific notation
+          mappedRow.ean = fixScientificNotation(trimmedValue);
+        } else {
+          mappedRow[fieldName] = trimmedValue;
+        }
+      }
+    }
+    
+    return mappedRow;
+  });
+};
+
 export const mapCSVData = (data: CSVRow[], fieldMapping: { [key: string]: string }) => {
   // Create a reverse mapping for easier lookup
   const reverseMapping: { [key: string]: string } = {};

@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase';
+import { fixScientificNotation } from './csvImport';
 
 
 export enum MatchMethod {
@@ -751,4 +752,58 @@ export const mapSupplierDataWithMatchColumns = async (
       message: hasCurrencyWarning ? 'Non-USD currency symbols detected. Please convert all prices to USD before uploading.' : ''
     }
   };
+};
+
+// Helper function to find column names in field mappings
+export const findColumn = (
+  fieldMapping: { [key: string]: string },
+  possibleNames: string[]
+): string => {
+  // First check if any of the possible names are directly in the mapping
+  for (const name of possibleNames) {
+    if (fieldMapping[name]) {
+      return fieldMapping[name];
+    }
+  }
+  
+  // Then check if any mapping keys contain any of the possible names
+  const keys = Object.keys(fieldMapping);
+  for (const name of possibleNames) {
+    const key = keys.find(k => k.toLowerCase().includes(name.toLowerCase()));
+    if (key) {
+      return fieldMapping[key];
+    }
+  }
+  
+  // Return the first possible name as a fallback
+  return possibleNames[0] || '';
+};
+
+// Look for any place EAN is processed and update it
+
+// For example, if there's a function that processes supplier products
+export const mapSupplierProductsData = (
+  csvData: any[], 
+  fieldMapping: { [key: string]: string }, 
+  supplierId: string
+): any[] => {
+  return csvData.map(row => {
+    // Find the EAN column in the mapping
+    const eanCol = findColumn(fieldMapping, ['ean', 'barcode', 'upc', 'product_id', 'sku']);
+    
+    // Process the supplier product data
+    return {
+      supplier_id: supplierId,
+      // Use the fixScientificNotation helper function for EAN codes
+      ean: fixScientificNotation(row[eanCol]),
+      cost: parseFloat(row[fieldMapping['cost']]) || 0,
+      moq: parseInt(row[fieldMapping['moq']]) || null,
+      lead_time: row[fieldMapping['lead_time']]?.trim() || null,
+      payment_terms: row[fieldMapping['payment_terms']]?.trim() || null,
+      product_name: row[fieldMapping['product_name']]?.trim() || null,
+      mpn: row[fieldMapping['mpn']]?.trim() || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+  });
 };

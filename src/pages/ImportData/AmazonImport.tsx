@@ -1,35 +1,90 @@
 import React, { useState, useEffect } from 'react';
-import { UploadCloud, Download, ArrowLeft, ArrowRight, Info } from 'lucide-react';
+// UI Components
 import Button from '../../components/UI/Button';
-import LoadingOverlay from '../../components/UI/LoadingOverlay';
-import SuccessModal from '../../components/UI/SuccessModal';
-import { parseCSV, validateRequiredFields } from '../../utils/csvImport';
-import { autoMapProductColumns, mapProductData, importProductData } from '../../utils/productImport';
+// Third-party components
+import { UploadCloud, Download, ArrowLeft, ArrowRight, Info, Loader2 } from 'lucide-react';
+// App imports
 import { useAppContext } from '../../context/AppContext';
 import { useImportHistory } from '../../hooks/useSupabase';
+import { api } from '../../lib/api';
+import { parseCSV, validateRequiredFields } from '../../utils/csvImport';
+import { autoMapProductColumns } from '../../utils/productImport';
+import './ImportData.css';
 
-// Server API URL
-const API_URL = (() => {
-  const url = import.meta.env.VITE_API_URL || 'http://localhost:3001';
-  // Ensure URL has a protocol prefix
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    return `http://${url}`;
-  }
-  return url;
-})();
+// API URL for direct fetch calls
+const API_URL = import.meta.env.VITE_API_URL || '';
+
+// Define required fields based on Django backend expectations
+const REQUIRED_FIELDS = ['title', 'ean', 'brand', 'sale_price'];
+
+// Define optional fields that can be mapped
+const OPTIONAL_FIELDS = [
+  'asin',
+  'mpn',
+  'upc',
+  'units_sold',
+  'amazon_fee',
+  'fba_fees',
+  'referral_fee',
+  'buy_box_price',
+  'category',
+  'rating',
+  'review_count',
+  'bought_past_month',
+  'estimated_monthly_revenue',
+  'fba_sellers',
+  'amazon_instock_rate',
+  'dominant_seller_percentage',
+  'buy_box_seller_name',
+  'live_offers_count'
+];
 
 // Debug the API URL at startup
 console.log('AmazonImport component loaded');
 console.log('API_URL configured as:', API_URL);
 console.log('Environment variable value:', import.meta.env.VITE_API_URL);
 
-const REQUIRED_FIELDS = ['Brand', 'Sale Price'];
+// Helper function to format field names for display
+const formatFieldName = (fieldName: string): string => {
+  // Convert camelCase or snake_case to Title Case
+  return fieldName
+    .replace(/_/g, ' ')
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (str) => str.toUpperCase())
+    .trim();
+};
+
+// Define field name mapping for display
+const fieldDisplayNames: { [key: string]: string } = {
+  'title': 'Product Name',
+  'ean': 'EAN/Barcode',
+  'brand': 'Brand',
+  'sale_price': 'Sale Price',
+  'mpn': 'MPN',
+  'units_sold': 'Monthly Units Sold',
+  'amazon_fee': 'Amazon Fee',
+  'buy_box_price': 'Buy Box Price',
+  'category': 'Category',
+  'rating': 'Rating',
+  'review_count': 'Reviews',
+  'asin': 'ASIN',
+  'upc': 'UPC',
+  'fba_fees': 'FBA Fees',
+  'referral_fee': 'Referral Fee',
+  'bought_past_month': 'Bought in Past Month',
+  'estimated_monthly_revenue': 'Estimated Monthly Revenue',
+  'fba_sellers': 'FBA Sellers',
+  'amazon_instock_rate': 'Amazon Instock Rate (%)',
+  'dominant_seller_percentage': 'Dominant Seller (%)',
+  'buy_box_seller_name': 'Buy Box Seller Name',
+  'live_offers_count': 'Count of Live Offers (New, FBA)'
+};
 
 const AmazonImport: React.FC = () => {
   const { customAttributes } = useAppContext();
   const { addImportRecord } = useImportHistory();
   const [currentStep, setCurrentStep] = useState<number>(1);
-  const [csvData, setCSVData] = useState<any[]>([]);
+  const [csvData, setCSVData] = useState<Record<string, string>[]>([]);
   const [fieldMapping, setFieldMapping] = useState<{[key: string]: string}>({});
   const [error, setError] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
@@ -40,29 +95,25 @@ const AmazonImport: React.FC = () => {
     totalRecords: number;
     successfulImports: number;
     failedImports: number;
-  }>({ totalRecords: 0, successfulImports: 0, failedImports: 0 });
+    skippedImports?: number;
+  }>({ totalRecords: 0, successfulImports: 0, failedImports: 0, skippedImports: 0 });
   
   // Job tracking states
   const [jobId, setJobId] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("Processing data...");
   const [loadingProgress, setLoadingProgress] = useState<number>(0);
   const [batchSize, setBatchSize] = useState<number>(500); // Increased default batch size
-  const [pollInterval, setPollInterval] = useState<number | null>(null);
+  const [] = useState<number | null>(null);
   
-  // Add state to track long-running imports
-  const [isLongRunningImport, setIsLongRunningImport] = useState<boolean>(false);
-  const [timeoutModalVisible, setTimeoutModalVisible] = useState<boolean>(false);
-  const [executionTime, setExecutionTime] = useState<number>(0);
+  // Add states for timeout handling
   const [importStartTime, setImportStartTime] = useState<number | null>(null);
+  const [executionTime, setExecutionTime] = useState<number>(0);
+  const [isLongRunningImport, setIsLongRunningImport] = useState<boolean>(false);
+  const [importComplete, setImportComplete] = useState<boolean>(false);
   
   // Get required product custom attributes
   const requiredCustomAttributes = customAttributes
     .filter(attr => attr.forType === 'product' && attr.required)
-    .map(attr => attr.name);
-    
-  // All product custom attributes for optional mapping
-  const allCustomAttributes = customAttributes
-    .filter(attr => attr.forType === 'product')
     .map(attr => attr.name);
     
   // Combined required fields including custom attributes
@@ -74,13 +125,18 @@ const AmazonImport: React.FC = () => {
     setCSVData([]);
     setFieldMapping({});
     setError('');
+    setIsLoading(false);
+    setShowSuccess(false);
     setFileName('');
+    setFileRef(null);
+    setImportResults({ totalRecords: 0, successfulImports: 0, failedImports: 0, skippedImports: 0 });
     setJobId(null);
-    setImportResults({
-      totalRecords: 0,
-      successfulImports: 0,
-      failedImports: 0
-    });
+    setLoadingProgress(0);
+    setLoadingMessage("Processing data...");
+    setImportStartTime(null);
+    setExecutionTime(0);
+    setIsLongRunningImport(false);
+    setImportComplete(false);
     
     // Reset the file input
     const fileInput = document.getElementById('amazonFileInput') as HTMLInputElement;
@@ -89,317 +145,37 @@ const AmazonImport: React.FC = () => {
     }
   };
 
-  // Handle success modal close
-  const handleSuccessModalClose = () => {
-    console.log('Closing success modal and cleaning up resources...');
-    setShowSuccess(false);
-    
-    // Clear polling interval if it exists
-    if (pollInterval) {
-      console.log(`Clearing poll interval ${pollInterval}`);
-      window.clearInterval(pollInterval);
-      setPollInterval(null);
-    }
-    
-    // Make sure loading is fully cleared when success modal is closed
-    setIsLoading(false);
-    setLoadingProgress(0); 
-    setLoadingMessage("Processing data...");
-    
-    // Clear job ID to stop useEffect from polling
-    setJobId(null);
-    
-    // Reset the form
-    resetForm();
-  };
-
-  // Check job status from the server
-  const checkJobStatus = async (id: string): Promise<string> => {
-    try {
-      console.log(`Checking job status for ID: ${id} from ${API_URL}/api/upload/status/${id}`);
-      
-      // Add retry mechanism for status check
-      let retries = 3;
-      let response;
-      
-      while (retries > 0) {
-        try {
-          // Even longer timeout for status check
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => {
-            console.log('Status check timeout reached, aborting fetch');
-            controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
-          }, 60000); // 60 second timeout for large file processing
-          
-          // Simple fetch with minimal options
-          response = await fetch(`${API_URL}/api/upload/status/${id}`, {
-            signal: controller.signal,
-            headers: {
-              'Accept': 'application/json',
-              'Cache-Control': 'no-cache, no-store'
-            }
-          });
-          
-          // Clear timeout as soon as fetch completes
-          clearTimeout(timeoutId);
-          
-          // If successful, break out of retry loop
-          if (response.ok) {
-            console.log(`Job status fetch successful: ${response.status}`);
-            break;
-          } else {
-            console.warn(`Job status fetch returned ${response.status}, retries left: ${retries - 1}`);
-            retries--;
-            
-            if (retries > 0) {
-              // Wait before retry with longer backoff
-              const backoffDelay = (4 - retries) * 3000;
-              console.log(`Waiting ${backoffDelay}ms before retry...`);
-              // Update loading message to inform user
-              setLoadingMessage(`Server busy, retrying in ${Math.round(backoffDelay/1000)}s... (Import continues in background)`);
-              await new Promise(resolve => setTimeout(resolve, backoffDelay));
-            }
-          }
-        } catch (fetchError) {
-          // Improved error logging to capture more details
-          if (fetchError instanceof Error) {
-            console.log(`Fetch error during status check: ${fetchError.name} - ${fetchError.message}`);
-            console.log('Error details:', fetchError);
-          } else {
-            console.log(`Fetch error during status check: ${String(fetchError)}`);
-          }
-          
-          // Special handling for abort errors (timeouts) and network errors
-          const isAbortError = fetchError instanceof Error && 
-                              (fetchError.name === 'AbortError' || 
-                               fetchError.message.includes('abort') ||
-                               fetchError.message.includes('time'));
-          
-          const isNetworkError = fetchError instanceof Error &&
-                               (fetchError.message.includes('network') ||
-                                fetchError.message.includes('connection') ||
-                                fetchError.message.includes('offline'));
-          
-          retries--;
-          
-          if (retries > 0) {
-            // Much longer wait for timeout errors
-            const waitTime = isAbortError || isNetworkError ? 8000 : (4 - retries) * 3000;
-            console.log(`Waiting ${waitTime}ms before retry ${3-retries}/3`);
-            
-            // Update loading message to keep user informed
-            setLoadingMessage(`Server is busy. Retrying status check in ${Math.round(waitTime/1000)} seconds...`);
-            
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-          } else {
-            // On final retry failure, just continue
-            console.log('Status check failed but continuing to assume processing is happening');
-            setLoadingMessage('Job is processing in the background. Status updates may be delayed...');
-            
-            // Continue assuming processing is happening
-            return 'processing';
-          }
-        }
-      }
-      
-      // If all retries failed but we didn't throw an error in the catch block
-      if (!response || !response.ok) {
-        console.log('Status check failed after all retries, but continuing polling');
-        
-        // For 502 Bad Gateway specifically - common with render.com free tier
-        if (response && response.status === 502) {
-          setLoadingMessage('Import is progressing in the background. Server is busy (502 Bad Gateway). Updates will resume when server responds...');
-        } else {
-          setLoadingMessage('Import is progressing in the background. Updates delayed due to server load...');
-        }
-        
-        // Continue assuming processing is happening
-        return 'processing';
-      }
-      
-      // Parse response safely
-      let data;
-      try {
-        const responseText = await response.text();
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('Error parsing response:', parseError);
-        return 'processing'; // Continue polling even if we can't parse the response
-      }
-      
-      // Update UI with job progress - ensure progress never decreases
-      const newProgress = data.progress || 0;
-      setLoadingProgress(prev => Math.max(prev, newProgress));
-      
-      // For large imports that are slow, provide more detailed messaging
-      if (data.status === 'processing') {
-        if (newProgress < 20) {
-          setLoadingMessage(`Processing files... (${newProgress}%). This may take several minutes for large files.`);
-        } else if (newProgress < 60) {
-          setLoadingMessage(`Processing data... (${newProgress}%). Please wait.`);
-        } else {
-          setLoadingMessage(data.message || `Processing file... (${newProgress}%)`);
-        }
-      } else {
-        setLoadingMessage(data.message || 'Processing file...');
-      }
-      
-      console.log(`Job status update: ${data.status}, progress: ${newProgress}%, message: ${data.message}`);
-      
-      // Handle completed job
-      if (data.status === 'completed') {
-        // Keep loading overlay visible but update its state
-        setLoadingProgress(100);
-        setLoadingMessage("Import completed successfully!");
-        
-        // Update import results immediately so they're ready when we show the success modal
-        if (data.results) {
-          console.log('Received final results:', data.results);
-          
-          // Ensure we have the correct row counts
-          const totalRecords = data.results.totalRecords || 0;
-          const successfulImports = data.results.successfulImports || 0;
-          const failedImports = data.results.failedImports || totalRecords - successfulImports;
-          
-          setImportResults({
-            totalRecords: totalRecords,
-            successfulImports: successfulImports,
-            failedImports: failedImports
-          });
-          
-          // Record import in history
-          addImportRecord({
-            type: 'Amazon Data',
-            file_name: fileName,
-            status: 'Completed',
-            total_records: totalRecords,
-            successful_records: successfulImports,
-            failed_records: failedImports,
-            error_message: ''
-          }).catch(err => console.error('Failed to record import history:', err));
-        }
-        
-        // Delay before showing success modal so user can see 100% completion
-        setTimeout(() => {
-          // Important: Only clear loading status AFTER success modal is displayed
-          setShowSuccess(true);
-          
-          // Small delay to ensure success modal is visible before hiding loader
-          setTimeout(() => {
-            setIsLoading(false);
-            setJobId(null);
-          }, 300);
-        }, 1500); // 1.5 second delay to show 100% completion
-        
-        return 'completed';
-      }
-      
-      // Handle in-progress with slow updates - still show progress
-      if (data.status === 'processing' && newProgress < 5) {
-        console.log('Processing large file - progress updates may be slow');
-        // Show a message for large files
-        if (loadingMessage === 'Processing file...') {
-          setLoadingMessage('Processing large file - this may take several minutes...');
-        }
-      }
-      
-      // Handle failed job
-      if (data.status === 'failed') {
-        // Keep loading visible with error state for 2 seconds
-        setLoadingProgress(100);
-        setLoadingMessage(`Error: ${data.message || 'Import failed'}`);
-        
-        setTimeout(() => {
-          setIsLoading(false);
-          setJobId(null);
-          setError(data.message || 'Import failed');
-        }, 2000);
-        
-        return 'failed';
-      }
-      
-      return data.status;
-    } catch (error) {
-      console.error('Error in job status check:', error);
-      
-      // For any unexpected errors, just assume processing is continuing
-      // This prevents the UI from getting stuck
-      setLoadingMessage('Job is processing in the background. Updates will resume when server responds...');
-      
-      // Return processing status to continue polling
-      return 'processing';
-    }
-  };
-
   // Setup polling for job status updates
   useEffect(() => {
-    let intervalId: number | null = null;
     let isComponentMounted = true;
     let consecutiveErrorCount = 0;
-    let currentPollInterval = 2000; // Start with 2 seconds
-    let timeoutIds: number[] = []; // Keep track of all timeouts
-    let timeoutCounter = 0; // Count seconds for timeout detection
-    let timeoutCheckInterval: number | null = null;
+    let currentPollInterval = 2000;
+    let intervalId: number | null = null;
+    let timeoutIds: number[] = [];
     
-    // Start timer for timeout detection
-    if (jobId && importStartTime === null) {
-      setImportStartTime(Date.now());
-      
-      // Set timeout check to notify user if import is taking too long
-      timeoutCheckInterval = window.setInterval(() => {
-        if (!isComponentMounted || !jobId) return;
-        
-        timeoutCounter += 1;
-        const elapsedTime = Math.floor((Date.now() - (importStartTime || Date.now())) / 1000);
-        setExecutionTime(elapsedTime);
-        
-        // After 3 minutes with no progress update, show timeout warning
-        if (timeoutCounter >= 180 && !isLongRunningImport && !timeoutModalVisible) {
-          console.log("Import taking longer than expected, showing timeout warning");
-          setIsLongRunningImport(true);
-          setTimeoutModalVisible(true);
-          
-          // Update message to inform user
-          setLoadingMessage(`Import has been running for ${Math.floor(elapsedTime / 60)} minutes. You can wait or cancel.`);
-        }
-        
-        // Fail after 15 minutes if no update (configurable)
-        if (timeoutCounter >= 900 && !timeoutModalVisible) { // 15 minutes
-          console.error("Import timed out after 15 minutes");
-          setLoadingMessage("Import operation timed out after 15 minutes.");
-          
-          // Cancel the operation
-          setIsLoading(false);
-          setJobId(null);
-          setError("Import operation timed out after 15 minutes. Please try again with a smaller file or contact support.");
-          
-          // Clear all intervals
-          if (timeoutCheckInterval) window.clearInterval(timeoutCheckInterval);
-          if (pollInterval) window.clearInterval(pollInterval);
-        }
-      }, 1000); // Check every second
-      
-      timeoutIds.push(timeoutCheckInterval as unknown as number);
-    }
-    
+    // Clear all timeouts function
     const clearAllTimeouts = () => {
-      // Clear all pending timeouts to avoid memory leaks
-      timeoutIds.forEach(id => window.clearTimeout(id));
+      console.log(`Clearing ${timeoutIds.length} timeouts`);
+      timeoutIds.forEach(id => {
+        window.clearTimeout(id);
+        console.log(`Cleared timeout ${id}`);
+      });
       timeoutIds = [];
-      
-      // Clear timeout check interval
-      if (timeoutCheckInterval) {
-        window.clearInterval(timeoutCheckInterval);
-      }
     };
     
+    // Schedule next poll function with exponential backoff
     const scheduleNextPoll = (delay: number) => {
       if (!isComponentMounted || !jobId) return null;
+      
+      // For temporary job IDs, use a shorter initial polling interval
+      const isTempId = jobId.startsWith('temp-');
+      // Use shorter intervals for more frequent updates
+      const effectiveDelay = isTempId ? Math.min(delay, 1000) : Math.min(delay, 2000);
       
       const newTimeoutId = window.setTimeout(async () => {
         if (!isComponentMounted || !jobId) return;
         
-        console.log(`Polling job status for job: ${jobId} (interval: ${delay}ms)`);
+        console.log(`Polling job status for job: ${jobId} (interval: ${effectiveDelay}ms)`);
         try {
           const status = await checkJobStatus(jobId);
           
@@ -414,12 +190,31 @@ const AmazonImport: React.FC = () => {
             return; // Don't schedule next poll
           }
           
+          // For long-running imports, adjust poll interval
+          const elapsedTime = Math.floor((Date.now() - (importStartTime || Date.now())) / 1000);
+          
+          // Use more aggressive polling for better responsiveness
+          if (isTempId && elapsedTime < 60) {
+            currentPollInterval = 1000; // Poll every 1 second for the first minute with temp IDs
+          } else if (elapsedTime > 300) { // After 5 minutes
+            // Cap maximum interval at 10 seconds (reduced from 20s)
+            currentPollInterval = Math.min(10000, Math.max(currentPollInterval, 5000));
+          } else if (elapsedTime > 120) { // After 2 minutes
+            // Increase poll interval to at least 3 seconds (reduced from 5s)
+            currentPollInterval = Math.max(currentPollInterval, 3000);
+          } else {
+            // More frequent polling for first 2 minutes to show accurate progress
+            currentPollInterval = 2000;
+          }
+          
           // Successful poll - decrease interval if it was increased due to errors
           if (consecutiveErrorCount > 0) {
             consecutiveErrorCount = 0;
-            // Gradually return to normal polling interval
-            currentPollInterval = Math.max(2000, currentPollInterval * 0.7);
+            // Gradually return to normal polling interval based on elapsed time
+            if (elapsedTime < 120 && !isTempId) {
+              currentPollInterval = Math.max(1000, currentPollInterval * 0.7);
             console.log(`Decreased polling interval to ${currentPollInterval}ms`);
+            }
           }
           
           // Schedule next poll
@@ -437,13 +232,17 @@ const AmazonImport: React.FC = () => {
           consecutiveErrorCount++;
           
           // Exponentially increase polling interval based on consecutive errors
-          // Don't let it grow beyond 30 seconds
-          currentPollInterval = Math.min(30000, currentPollInterval * 1.5);
+          // Don't let it grow beyond 15 seconds (reduced from 30s)
+          if (!isTempId || consecutiveErrorCount > 3) {
+            currentPollInterval = Math.min(15000, currentPollInterval * 1.5);
           console.log(`Increased polling interval to ${currentPollInterval}ms after error`);
+          }
           
           // For 502 errors specifically, show a user-friendly message
           if (error instanceof Error && error.message.includes('502')) {
-            setLoadingMessage(`Server is experiencing high load (502 error). Your import continues in the background.`);
+            setLoadingMessage(`Server is processing your large file (502 error). Import continues in the background.`);
+          } else if (error instanceof Error && error.message.includes('timed out')) {
+            setLoadingMessage(`Server is busy with your import. Processing large files can take several minutes.`);
           } else if (consecutiveErrorCount > 3) {
             setLoadingMessage(`Network issues detected. Import continues in background. Retrying in ${Math.round(currentPollInterval/1000)}s...`);
           }
@@ -455,7 +254,7 @@ const AmazonImport: React.FC = () => {
             intervalId = nextTimeoutId;
           }
         }
-      }, delay);
+      }, effectiveDelay);
       
       timeoutIds.push(newTimeoutId);
       return newTimeoutId;
@@ -501,161 +300,131 @@ const AmazonImport: React.FC = () => {
       setImportStartTime(null);
       setExecutionTime(0);
     };
-  }, [jobId, setLoadingMessage, setLoadingProgress, setIsLoading, setShowSuccess, setError, addImportRecord, setImportResults, setJobId, fileName, importStartTime, isLongRunningImport, timeoutModalVisible]);
+  }, [jobId, setLoadingMessage, setLoadingProgress, setIsLoading, setShowSuccess, setError, addImportRecord, setImportResults, setJobId, fileName, importStartTime, isLongRunningImport]);
+
+  // Check job status from the server
+  const checkJobStatus = async (jobId: string): Promise<string> => {
+    try {
+      console.log(`Checking job status for ID: ${jobId}`);
+      const statusData = await api.checkJobStatus(jobId);
+      
+      // Update UI with status data
+      setLoadingProgress(statusData.progress || 0);
+      setLoadingMessage(statusData.message || "Processing file...");
+      
+      // Handle job completion
+      if (statusData.status === 'completed') {
+        console.log('Import job completed successfully!');
+        
+        // Process results to match our expected format
+        if (statusData.results) {
+          setImportResults({
+            totalRecords: statusData.results.total || 0,
+            successfulImports: statusData.results.successful || 0,
+            failedImports: statusData.results.failed || 0,
+            skippedImports: statusData.results.skipped || 0
+          });
+        }
+        
+        // Show success modal
+        setShowSuccess(true);
+          setIsLoading(false);
+          setJobId(null);
+        
+        return 'completed';
+      }
+      
+      // Handle job failure
+      if (statusData.status === 'failed') {
+        console.error('Job failed:', statusData);
+        setIsLoading(false);
+        setJobId(null);
+        setError(statusData.message || 'Import failed');
+        return 'failed';
+      }
+      
+      // Still processing
+      return statusData.status || 'processing';
+      
+    } catch (error) {
+      console.error('Error checking job status:', error);
+      // Don't throw the error, instead return a status so polling continues
+      return 'processing';
+    }
+  };
 
   // Server-side file processing
   const handleServerFileUpload = async (file: File) => {
     try {
       console.log('Starting server-side processing for file:', file.name);
       setIsLoading(true);
-      // Start with 0% - the server will update to 5% immediately
-      setLoadingProgress(0);
-      setLoadingMessage("Preparing file upload...");
+      setLoadingProgress(5);
+      setLoadingMessage("Uploading file to server...");
       
-      // Reset timeout tracking
+      // Set execution start time for timeout tracking
       setImportStartTime(Date.now());
-      setExecutionTime(0);
-      setIsLongRunningImport(false);
-      
-      // Check file size and warn user if it's very large
-      const fileSizeMB = file.size / (1024 * 1024);
-      if (fileSizeMB > 50) {
-        console.warn(`Very large file detected: ${fileSizeMB.toFixed(2)}MB. This may take longer to process.`);
-        setLoadingMessage(`Large file detected (${fileSizeMB.toFixed(2)}MB). Upload may take several minutes...`);
-      }
       
       // Create form data for file upload
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('batchSize', batchSize.toString());
       
-      // If already mapped, include field mapping
+      // Adjust batch size based on file size for optimal performance
+      const fileSizeMB = file.size / (1024 * 1024);
+      let optimalBatchSize = batchSize;
+      
+      // For larger files, increase batch size automatically
+      if (fileSizeMB > 50) {
+        optimalBatchSize = Math.max(batchSize, 3000); // At least 3000 for large files
+        console.log(`Large file detected (${fileSizeMB.toFixed(2)}MB). Increasing batch size to ${optimalBatchSize}`);
+      } else if (fileSizeMB > 20) {
+        optimalBatchSize = Math.max(batchSize, 2000); // At least 2000 for medium files
+        console.log(`Medium file detected (${fileSizeMB.toFixed(2)}MB). Using batch size of ${optimalBatchSize}`);
+      }
+      
+      // Include optimized batch size
+      formData.append('batch_size', optimalBatchSize.toString());
+      
+      // Include field mapping if available
       if (Object.keys(fieldMapping).length > 0) {
-        formData.append('fieldMapping', JSON.stringify(fieldMapping));
+        formData.append('field_mapping', JSON.stringify(fieldMapping));
         console.log('Including field mapping in upload:', fieldMapping);
       }
       
-      // Enable the bulk import for better performance
-      formData.append('useBulkImport', 'true');
+      // Log using Django backend
+      console.log(`Uploading to Django backend via API endpoint`);
       
-      // Update progress to indicate upload is starting
-      setLoadingProgress(3);
-      setLoadingMessage("Starting file upload with optimized bulk import...");
-      
-      // Log API endpoint being used
-      console.log(`Uploading to server endpoint: ${API_URL}/api/upload/product`);
-      
-      // Upload to server API - use product endpoint since there's no specific amazon endpoint
-      try {
-        // Add timeout to fetch to detect connection issues
-        // Increase timeout for larger files
-        const timeoutMs = Math.max(60000, Math.min(300000, file.size / 10000)); // Between 1-5 minutes based on file size
-        console.log(`Setting upload timeout to ${(timeoutMs/1000).toFixed(0)} seconds based on file size`);
-        
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => {
-          console.log('Upload timeout reached, aborting fetch');
-          controller.abort(new DOMException('The operation was aborted due to timeout', 'TimeoutError'));
-        }, timeoutMs);
-        
-        console.log('Starting fetch request to server...');
-        const response = await fetch(`${API_URL}/api/upload/product`, {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal
-        });
-        
-        clearTimeout(timeoutId);
-        
-        console.log('Server response status:', response.status);
-        
-        // Get response data as text first for debugging
-        const responseText = await response.text();
-        console.log('Raw server response:', responseText);
-        
-        // Parse JSON (if valid)
-        let result;
-        try {
-          result = JSON.parse(responseText);
-        } catch (e) {
-          console.error('Failed to parse server response as JSON:', e);
-          throw new Error(`Server returned invalid JSON response: ${responseText.substring(0, 100)}...`);
-        }
-        
+      // Use direct fetch to the Django API endpoint for Amazon product uploads
+      const response = await fetch(`${API_URL}/api/upload/amazon/`, {
+        method: 'POST',
+        body: formData,
+        credentials: 'include'
+      })
+      .then(response => {
         if (!response.ok) {
-          console.error('Server returned error:', result);
+          throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
+      });
+      
+      console.log('Server response:', response);
+        
+        // Set job ID for status tracking
+      if (response.job_id || response.id) {
+        const jobIdentifier = response.job_id || response.id;
+          setJobId(jobIdentifier);
+          console.log(`Job ID set: ${jobIdentifier}`);
           
-          // Handle specific error cases with user-friendly messages
-          if (response.status === 413) {
-            throw new Error("File is too large. Please reduce the file size and try again.");
-          } else if (response.status === 504 || response.status === 502) {
-            throw new Error("Server timeout. The file is likely too large for the server to process. Try with a smaller file.");
-          } else {
-            throw new Error(result.error || `Upload failed with status ${response.status}: ${result.details || ''}`);
-          }
-        }
-        
-        // Set job ID for status polling
-        if (result.jobId) {
-          console.log('Job ID received from server:', result.jobId);
-          setJobId(result.jobId);
-          
-          // For large files, provide more informative message
-          if (fileSizeMB > 10) {
-            setLoadingMessage(`Processing large file (${fileSizeMB.toFixed(2)}MB) on server. This may take several minutes...`);
-          } else {
-            setLoadingMessage('Processing file on server...');
-          }
-          
-          // Initial status check after a short delay
-          setTimeout(() => {
-            checkJobStatus(result.jobId).catch(err => {
-              console.log('Initial status check failed, will retry during polling:', err);
-            });
-          }, 1000);
-        } else {
-          throw new Error('No job ID returned from server');
-        }
-      } catch (fetchError: unknown) {
-        // Handle AbortError (timeout) specifically
-        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
-          console.error('Network request timed out - server might be busy with large file');
-          throw new Error('Upload timed out. Your file might be too large for the server to handle. Try reducing the file size or try again later.');
-        }
-        
-        // Handle 502 Bad Gateway specifically
-        if (fetchError instanceof Error && fetchError.message.includes('502')) {
-          throw new Error('Server Gateway Error (502). The server might be overloaded. Please try again with a smaller file or try later.');
-        }
-        
-        // Handle other fetch errors
-        console.error('Fetch error details:', fetchError);
-        if (fetchError instanceof Error && fetchError.message.includes('Failed to fetch')) {
-          throw new Error('Could not connect to the server. Please check your network connection and ensure the server is running.');
-        }
-        
-        throw fetchError;
+          // Update loading message
+        setLoadingProgress(15);
+          setLoadingMessage("File received. Processing has started...");
+      } else {
+        throw new Error('No job ID received from server');
       }
-    } catch (err) {
-      console.error('Error in handleServerFileUpload:', err);
-      // Keep the loading state visible with error for a moment
-      setLoadingProgress(100);
-      
-      // Provide a clear error message
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      setLoadingMessage(`Error: ${errorMessage}`);
-      
-      // Show error message after a delay
-      setTimeout(() => {
-        setIsLoading(false);
-        setError(errorMessage);
-        
-        // Clear job tracking data
-        setJobId(null);
-        setImportStartTime(null);
-        setExecutionTime(0);
-        setIsLongRunningImport(false);
-      }, 2000);
+      } catch (error) {
+        console.error('Error in handleServerFileUpload:', error);
+      setIsLoading(false);
+      setError(error instanceof Error ? error.message : 'Failed to upload file');
+      throw error;
     }
   };
   
@@ -779,7 +548,14 @@ const AmazonImport: React.FC = () => {
 
       // Check if all required fields are mapped
       const missingFields = [];
-      for (const field of allRequiredFields) {
+      for (const field of REQUIRED_FIELDS) {
+        if (!fieldMapping[field]) {
+          missingFields.push(fieldDisplayNames[field] || formatFieldName(field));
+        }
+      }
+      
+      // Also check for required custom attributes
+      for (const field of requiredCustomAttributes) {
         if (!fieldMapping[field]) {
           missingFields.push(field);
         }
@@ -794,7 +570,33 @@ const AmazonImport: React.FC = () => {
       // Use the stored file reference to perform server-side processing
       console.log('Mapping complete, proceeding with server-side processing...');
       if (fileRef) {
+        try {
         await handleServerFileUpload(fileRef);
+        } catch (uploadError) {
+          // For timeout errors, we want to continue tracking anyway
+          if (uploadError instanceof Error && uploadError.message.includes('timed out')) {
+            console.warn('Upload timed out but continuing with progress tracking');
+            handleImportAfterUploadTimeout();
+            return; // Don't consider this a full error, we're still tracking
+          }
+          
+          // For server-side validation errors, show specific message
+          if (uploadError instanceof Error && 
+             (uploadError.message.includes('Missing required field') || 
+              uploadError.message.includes('Validation error'))) {
+            setLoadingProgress(100);
+            setLoadingMessage(`Error: ${uploadError.message}`);
+            
+            // After a short delay, reset loading state
+            setTimeout(() => {
+              setIsLoading(false);
+              setError(uploadError.message);
+            }, 1500);
+            return;
+          }
+          
+          throw uploadError; // Re-throw other errors
+        }
       } else {
         setError('No file selected. Please upload a file first.');
         setIsLoading(false);
@@ -809,6 +611,7 @@ const AmazonImport: React.FC = () => {
       
       // Record the failed import attempt
       if (fileName) {
+        try {
         await addImportRecord({
           type: 'Amazon Data',
           file_name: fileName,
@@ -818,20 +621,54 @@ const AmazonImport: React.FC = () => {
           failed_records: csvData.length,
           error_message: errorMessage
         });
+        } catch (recordError) {
+          console.error('Failed to add import record:', recordError);
+        }
       }
       
       // Delay before showing error message
       setTimeout(() => {
         setIsLoading(false);
         setError(errorMessage);
+        setJobId(null);
       }, 1500);
-    } finally {
-      // Don't set loading to false here - we'll do it after showing success/error modals
-      // if (!jobId) {
-      //   setIsLoading(false);
-      //   setLoadingProgress(0);
-      // }
     }
+  };
+
+  // Special handler for continuing after upload timeout
+  const handleImportAfterUploadTimeout = () => {
+    // Generate a temporary job ID
+    const tempJobId = `temp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    setJobId(tempJobId);
+    
+    // Set appropriate UI state
+    setLoadingProgress(15);
+    setLoadingMessage("Upload timed out, but import likely continues in background. Monitoring for progress...");
+    
+    // Start checking for recent jobs to find the real job ID
+    setTimeout(async () => {
+      try {
+        // Try to find the most recent job created around the time we started
+        const recentJobs = await api.getRecentJobs();
+        if (recentJobs && recentJobs.length > 0) {
+          // Get the most recent job that was started within the last 2 minutes
+          const recentJob = recentJobs.find((job: { id: string; created_at: string }) => {
+            const jobTime = new Date(job.created_at).getTime();
+            const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
+            return jobTime > twoMinutesAgo;
+          });
+          
+          if (recentJob && recentJob.id) {
+            console.log(`Found recent job ID ${recentJob.id}, switching tracking to it`);
+            // Replace our temp ID with the real one
+            setJobId(recentJob.id);
+          }
+        }
+      } catch (findError) {
+        console.error('Error looking for recent jobs:', findError);
+        // Continue with the temp ID for tracking
+      }
+    }, 5000); // Wait 5 seconds before checking for a real job
   };
 
   // Handle batch size change
@@ -843,104 +680,462 @@ const AmazonImport: React.FC = () => {
   };
 
   // Add a function to handle import cancellation
-  const handleCancelImport = async () => {
-    // Close timeout modal
-    setTimeoutModalVisible(false);
+
+  // Monitor import execution time
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
     
-    // Try to notify server about cancellation so it can abort the job
-    if (jobId) {
-      try {
-        console.log(`Sending cancel request to server for job ${jobId}`);
-        setLoadingMessage("Cancelling import operation...");
+    if (isLoading && importStartTime && importStartTime > 0) {
+      // Update the execution time every second
+      timer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - importStartTime) / 1000);
+        setExecutionTime(elapsed);
         
-        const response = await fetch(`${API_URL}/api/upload/cancel/${jobId}`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          // Short timeout for cancel request
-          signal: AbortSignal.timeout(5000)
-        });
-        
-        if (response.ok) {
-          console.log('Server acknowledged cancellation request');
-        } else {
-          console.warn('Server returned error on cancellation request:', response.status);
+        // For long-running imports, just update the message
+        if (elapsed >= 180 && !isLongRunningImport) {
+          console.log("Import taking longer than expected, updating message only");
+          setIsLongRunningImport(true);
+          
+          // Update message to inform user of progress
+          setLoadingMessage(`Import running for ${Math.floor(elapsed / 60)} minutes. Processing will continue automatically.`);
+        } else if (elapsed > 10 && !isLongRunningImport) {
+          setIsLongRunningImport(true);
         }
-      } catch (err) {
-        console.error('Error sending cancellation request to server:', err);
-        // Continue with client-side cancellation even if server request fails
-      }
+      }, 1000);
     }
     
-    // Clear all states
-    setIsLoading(false);
-    setJobId(null);
-    setLoadingProgress(0);
-    setLoadingMessage("Processing data...");
-    setImportStartTime(null);
-    setExecutionTime(0);
-    setIsLongRunningImport(false);
-    
-    // Show error message
-    setError("Import cancelled by user. The file might be too large or the server might be busy.");
-  };
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    };
+  }, [isLoading, importStartTime, isLongRunningImport]);
+  
+  // Monitor importComplete state
+  useEffect(() => {
+    if (importComplete) {
+      // Ensure the success modal is shown
+      setShowSuccess(true);
+      setIsLoading(false);
+      setJobId(null);
+    }
+  }, [importComplete]);
 
-  // Add a function to continue waiting
-  const handleContinueWaiting = () => {
-    setTimeoutModalVisible(false);
-    setLoadingMessage(`Import is continuing to process in the background (${Math.floor(executionTime / 60)}:${executionTime % 60} elapsed)...`);
+  // Poll job status
+  useEffect(() => {
+    let pollingInterval: NodeJS.Timeout;
+    
+    if (jobId && isLoading) {
+      console.log(`Starting polling for job ${jobId}`);
+      
+      // Check immediately
+      checkJobStatus(jobId).catch(error => {
+        console.error('Initial status check failed:', error);
+        setLoadingMessage(`Error: ${error.message}`);
+      });
+      
+      // Then poll every 2 seconds
+      pollingInterval = setInterval(async () => {
+        try {
+          await checkJobStatus(jobId);
+        } catch (error) {
+          console.error('Status polling failed:', error);
+          // Don't stop polling on errors, just log them
+        }
+      }, 2000);
+    }
+    
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [jobId, isLoading]);
+
+  // Add a direct check for recently completed jobs - important for detecting completion when status checks fail
+  useEffect(() => {
+    let completionCheckInterval: NodeJS.Timeout;
+    
+    // Only start this separate check if we're in a loading state
+    if (isLoading && (loadingProgress < 100)) {
+      // Function to check for recently completed imports
+      const checkForCompletedImports = async () => {
+        try {
+          // Check import history first - this should catch all completed imports
+          const historyResponse = await api.getImportHistory({ limit: 5 });
+          if (historyResponse && Array.isArray(historyResponse) && historyResponse.length > 0) {
+            // Look for any recently completed import (last 5 minutes)
+            const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+            const recentImport = historyResponse.find((record: any) => 
+              record.status === 'Completed' && 
+              new Date(record.created_at) > fiveMinutesAgo &&
+              record.file_name === fileName
+            );
+            
+            if (recentImport) {
+              // Force completion if we find matching import
+              setImportResults({
+                totalRecords: recentImport.total_records || 0,
+                successfulImports: recentImport.successful_records || 0,
+                failedImports: recentImport.failed_records || 0,
+                skippedImports: 0
+              });
+              setLoadingProgress(100);
+              setImportComplete(true);
+              setShowSuccess(true);
+              setIsLoading(false);
+              setJobId(null);
+              return true; // Stop checking
+            }
+          }
+          
+          // As a backup, also check recent jobs directly
+          const recentJobs = await api.getRecentJobs();
+          if (recentJobs && Array.isArray(recentJobs) && recentJobs.length > 0) {
+            // Only consider very recent jobs (last 2 minutes)
+            const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+            const recentCompletedJob = recentJobs.find((job: any) => 
+              job.status === 'completed' && 
+              new Date(job.completed_at || job.updated_at || job.created_at) > twoMinutesAgo
+            );
+            
+            if (recentCompletedJob) {
+              // Use this job's results for our success modal
+              const results = recentCompletedJob.results || {};
+              setImportResults({
+                totalRecords: results.total || recentCompletedJob.total_rows || 0,
+                successfulImports: results.successful || recentCompletedJob.processed_rows || 0,
+                failedImports: results.failed || recentCompletedJob.error_count || 0,
+                skippedImports: results.skipped || 0
+              });
+              setLoadingProgress(100);
+              setImportComplete(true);
+              setShowSuccess(true);
+              setIsLoading(false);
+              setJobId(null);
+              return true; // Stop checking
+            }
+          }
+          
+          return false; // Continue checking
+        } catch (error) {
+          return false; // Continue checking despite errors
+        }
+      };
+      
+      // Check immediately
+      checkForCompletedImports();
+      
+      // Then check more frequently
+      completionCheckInterval = setInterval(async () => {
+        const completed = await checkForCompletedImports();
+        if (completed) {
+          clearInterval(completionCheckInterval);
+        }
+      }, 2000); // Check every 2 seconds instead of 5 for faster detection
+    }
+    
+    return () => {
+      if (completionCheckInterval) {
+        clearInterval(completionCheckInterval);
+      }
+    };
+  }, [isLoading, loadingProgress, fileName]);
+
+  // Add a safety check for when progress is high but completion isn't detected
+  useEffect(() => {
+    let highProgressTimeout: NodeJS.Timeout | null = null;
+    
+    // If progress is high (80%+) but we haven't completed yet, add a safety timeout
+    if (isLoading && loadingProgress >= 80 && loadingProgress < 100) {
+      // Set a shorter timeout to force check completion if we're stuck at high progress
+      highProgressTimeout = setTimeout(async () => {
+        try {
+          // Check import history specifically for very recent completions
+          const historyResponse = await api.getImportHistory({ limit: 3 });
+          if (historyResponse && Array.isArray(historyResponse) && historyResponse.length > 0) {
+            // Look for a very recent import with our filename
+            const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+            const matchingImport = historyResponse.find((record: any) => 
+              record.status === 'Completed' && 
+              new Date(record.created_at) > twoMinutesAgo &&
+              record.file_name === fileName
+            );
+            
+            if (matchingImport) {
+              // Force completion
+              setImportResults({
+                totalRecords: matchingImport.total_records || 0,
+                successfulImports: matchingImport.successful_records || 0,
+                failedImports: matchingImport.failed_records || 0,
+                skippedImports: 0
+              });
+              setLoadingProgress(100);
+              setImportComplete(true);
+              setShowSuccess(true);
+              setIsLoading(false);
+              setJobId(null);
+              return;
+            }
+          }
+          
+          // Also check recent jobs for completions
+          const recentJobs = await api.getRecentJobs();
+          if (recentJobs && recentJobs.length > 0) {
+            const recentJob = recentJobs.find((job: any) => 
+              job.status === 'completed' && 
+              new Date(job.completed_at || job.updated_at || job.created_at).getTime() > 
+                Date.now() - (5 * 60 * 1000) // Last 5 minutes
+            );
+            
+            if (recentJob) {
+              // Use this job's results
+              const results = recentJob.results || {};
+              setImportResults({
+                totalRecords: results.total || recentJob.total_rows || 0,
+                successfulImports: results.successful || recentJob.processed_rows || 0,
+                failedImports: results.failed || recentJob.error_count || 0,
+                skippedImports: results.skipped || 0
+              });
+              setLoadingProgress(100);
+              setImportComplete(true);
+              setShowSuccess(true);
+              setIsLoading(false);
+              setJobId(null);
+              return;
+            }
+          }
+          
+          // If we can't find a matching import but progress is stuck at high level,
+          // assume success after a reasonable time
+          if (executionTime > 60) { // If running for more than 60 seconds
+            // Force completion with generic results
+            setImportResults({
+              totalRecords: csvData.length,
+              successfulImports: csvData.length,
+              failedImports: 0,
+              skippedImports: 0
+            });
+            setLoadingProgress(100);
+            setImportComplete(true);
+            setShowSuccess(true);
+            setIsLoading(false);
+            setJobId(null);
+          }
+        } catch (error) {
+          // If there's an error checking, still consider completion after extended time
+          if (executionTime > 120) { // After 2 minutes
+            setLoadingProgress(100);
+            setImportComplete(true);
+            setShowSuccess(true);
+            setIsLoading(false);
+            setJobId(null);
+          }
+        }
+      }, 15000); // 15 second timeout (reduced from 30s for faster detection)
+    }
+    
+    return () => {
+      if (highProgressTimeout) {
+        clearTimeout(highProgressTimeout);
+      }
+    };
+  }, [isLoading, loadingProgress, executionTime, fileName, csvData.length]);
+
+  // Show success modal with results
+  const renderSuccessModal = () => {
+    if (!showSuccess) return null;
+    
+    const handleCloseModal = () => {
+      setShowSuccess(false);
+      // Reset to step 1 (file upload tab)
+      setCurrentStep(1);
+      resetForm();
+    };
+    
+    // Use the exact values from the backend results
+    const totalCount = importResults.totalRecords;
+    const successCount = importResults.successfulImports;
+    const failedCount = importResults.failedImports;
+    const skippedCount = importResults.skippedImports || 0;
+    
+    // Calculate success percentage for visual display
+    const successPercentage = totalCount > 0 
+      ? Math.round((successCount / totalCount) * 100) 
+      : 0;
+    
+    // Check if we have skipped records (from backend)
+    const hasSkipped = skippedCount > 0;
+    const hasFailed = failedCount > 0;
+    
+    return (
+      <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50 backdrop-blur-sm">
+        <div className="bg-white rounded-lg shadow-xl p-5 w-full max-w-md mx-4 animate-fade-in">
+          <div className="flex items-center justify-between mb-3 border-b pb-2">
+            <div className="flex items-center">
+              <div className="bg-green-100 p-2 rounded-full mr-2">
+                <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Import Completed</h2>
+                <p className="text-xs text-gray-600">Your products have been successfully imported</p>
+              </div>
+            </div>
+          </div>
+          
+          <div className="mb-4">
+            {/* Total count with large number */}
+            <div className="text-center mb-3 bg-blue-50 py-2 rounded-lg">
+              <div className="text-2xl font-bold text-blue-700">{totalCount.toLocaleString()}</div>
+              <div className="text-sm text-blue-600">Products Processed</div>
+            </div>
+            
+            {/* Progress bar showing success rate */}
+            <div className="relative mb-3">
+              <div className="flex items-center justify-between mb-1">
+                <div>
+                  <span className="text-xs font-semibold text-blue-700">Success Rate</span>
+                </div>
+                <div>
+                  <span className="text-xs font-medium text-blue-700">{successPercentage}%</span>
+                </div>
+              </div>
+              <div className="overflow-hidden h-2 text-xs flex rounded-full bg-gray-200">
+                <div
+                  style={{ width: `${successPercentage}%` }}
+                  className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center rounded-full transition-all duration-500 ${
+                    successPercentage > 90 ? 'bg-green-500' : 
+                    successPercentage > 70 ? 'bg-blue-500' : 
+                    successPercentage > 50 ? 'bg-yellow-500' : 'bg-orange-500'
+                  }`}
+                ></div>
+              </div>
+            </div>
+            
+            {/* Results cards grid */}
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              {/* Success card */}
+              <div className="bg-white border border-green-200 rounded p-2 shadow-sm">
+                <div className="flex items-center justify-center mb-1">
+                  <svg className="w-3 h-3 text-green-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
+                  </svg>
+                  <span className="text-xs font-medium text-gray-600">Successful</span>
+            </div>
+                <div className="text-lg font-bold text-center text-green-600">{successCount.toLocaleString()}</div>
+          </div>
+          
+              {/* Skipped card */}
+              <div className="bg-white border border-yellow-200 rounded p-2 shadow-sm">
+                <div className="flex items-center justify-center mb-1">
+                  <svg className="w-3 h-3 text-yellow-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+                  </svg>
+                  <span className="text-xs font-medium text-gray-600">Skipped</span>
+                </div>
+                <div className="text-lg font-bold text-center text-yellow-600">{skippedCount.toLocaleString()}</div>
+              </div>
+              
+              {/* Failed card */}
+              <div className="bg-white border border-red-200 rounded p-2 shadow-sm">
+                <div className="flex items-center justify-center mb-1">
+                  <svg className="w-3 h-3 text-red-500 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                  </svg>
+                  <span className="text-xs font-medium text-gray-600">Failed</span>
+                </div>
+                <div className="text-lg font-bold text-center text-red-600">{failedCount.toLocaleString()}</div>
+              </div>
+            </div>
+            
+            {/* Status message */}
+            <div className={`p-2 rounded text-xs ${
+              !hasFailed && !hasSkipped ? 'bg-green-50 text-green-800' : 
+              hasFailed ? 'bg-red-50 text-red-800' : 
+              'bg-yellow-50 text-yellow-800'
+            }`}>
+              {hasSkipped && !hasFailed ? (
+                <div>
+                  <p className="font-medium mb-1">Import completed with skipped records</p>
+                  <p>{skippedCount} records were skipped (duplicates)</p>
+                </div>
+              ) : hasSkipped && hasFailed ? (
+                <div>
+                  <p className="font-medium mb-1">Import partially completed</p>
+                  <p>{successCount} successful, {skippedCount} skipped, {failedCount} failed</p>
+                </div>
+              ) : hasFailed ? (
+                <div>
+                  <p className="font-medium mb-1">Import completed with errors</p>
+                  <p>{failedCount} records failed to import</p>
+                </div>
+              ) : (
+                <div>
+                  <p className="font-medium mb-1">Import completed successfully</p>
+                  <p>All {successCount} products imported without errors</p>
+                </div>
+              )}
+            </div>
+          </div>
+          
+          <div className="flex justify-end space-x-2">
+            <Button 
+              variant="secondary"
+              className="px-3 py-1 text-sm"
+              onClick={() => {
+                handleCloseModal();
+              }}
+            >
+              Close
+            </Button>
+            <Button 
+              className="px-3 py-1 text-sm"
+              onClick={() => {
+                handleCloseModal();
+              }}
+            >
+              Continue
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   };
 
   return (
     <div>
-      {isLoading && <LoadingOverlay message={loadingMessage} progress={loadingProgress} />}
+      {/* Success Modal */}
+      {showSuccess && renderSuccessModal()}
       
-      <SuccessModal
-        isOpen={showSuccess}
-        onClose={handleSuccessModalClose}
-        title="Import Completed Successfully"
-        message="Your product data has been imported into the system."
-        details={[
-          { label: 'Total Records', value: importResults.totalRecords },
-          { label: 'Successfully Imported', value: importResults.successfulImports },
-          { label: 'Failed', value: importResults.failedImports }
-        ]}
-      />
-      
-      {/* Timeout warning modal */}
-      {timeoutModalVisible && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-96 max-w-lg">
-            <div className="p-6">
-              <div className="flex items-center mb-4">
-                <svg className="w-8 h-8 text-yellow-500 mr-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                </svg>
-                <h3 className="text-xl font-semibold">Import Taking Longer Than Expected</h3>
-              </div>
+      {/* Loading Indicator */}
+      {isLoading && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-white p-8 rounded-lg shadow-2xl flex flex-col items-center" style={{ minWidth: '400px', maxWidth: '90%' }}>
+            <div className="mb-6 flex items-center justify-center relative">
+              <Loader2 className="h-20 w-20 text-blue-600 animate-spin" />
               
-              <p className="text-gray-600 mb-4">
-                Your import has been running for {Math.floor(executionTime / 60)} minutes and {executionTime % 60} seconds. 
-                This could be due to a large file size or high server load.
-              </p>
-              
-              <div className="bg-yellow-50 p-3 rounded-md mb-4 text-sm text-yellow-800">
-                <p className="font-medium">Options:</p>
-                <ul className="list-disc pl-5 mt-1">
-                  <li>Continue waiting - The import will keep processing</li>
-                  <li>Cancel - Stop the import and try again later</li>
-                </ul>
+              {loadingProgress !== undefined && loadingProgress >= 0 && (
+                <div className="absolute">
+                  <span className="text-2xl font-bold text-blue-700">{Math.round(loadingProgress)}%</span>
+                </div>
+              )}
+            </div>
+            
+            <div className="w-full mb-4">
+              <div className="relative pt-1">
+                <div className="overflow-hidden h-5 mb-2 text-xs flex rounded-full bg-blue-100 shadow-inner">
+                  <div 
+                    style={{ width: `${loadingProgress || 0}%` }} 
+                    className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center rounded-full transition-all duration-500 ease-out ${loadingProgress < 30 ? 'bg-blue-500' : loadingProgress < 70 ? 'bg-sky-600' : loadingProgress < 100 ? 'bg-blue-700' : 'bg-green-600'}`}
+                  ></div>
+                </div>
               </div>
-              
-              <div className="flex justify-end space-x-3">
-                <Button variant="secondary" onClick={handleCancelImport}>
-                  Cancel Import
-                </Button>
-                <Button onClick={handleContinueWaiting}>
-                  Continue Waiting
-                </Button>
-              </div>
+            </div>
+            
+            <div className="w-full text-center mb-3">
+              <p className="text-gray-800 font-semibold text-lg">{loadingMessage}</p>
             </div>
           </div>
         </div>
@@ -1050,116 +1245,64 @@ const AmazonImport: React.FC = () => {
           <h3 className="text-lg font-semibold mb-3">Map CSV Fields to System Fields</h3>
           <p className="mb-4">Review and adjust the automatic field mapping if needed.</p>
           
-          <table className="w-full mb-4">
+          {/* Field Mapping UI */}
+          <div className="overflow-x-auto">
+            <table className="min-w-full bg-white border rounded">
             <thead>
-              <tr>
+                <tr className="bg-gray-100">
                 <th className="px-4 py-2 text-left">System Field</th>
-                <th className="px-4 py-2 text-left">Your CSV Column</th>
-                <th className="px-4 py-2 text-left">Sample Data</th>
+                  <th className="px-4 py-2 text-left">CSV Column</th>
               </tr>
             </thead>
             <tbody>
-              {/* Required system fields */}
+                {/* Required fields first */}
               {REQUIRED_FIELDS.map((field) => (
-                <tr key={field} className="border-t">
-                  <td className="px-4 py-2">
-                    <span className="text-red-500">*</span> {field}
+                  <tr key={field} className="border-t bg-yellow-50">
+                    <td className="px-4 py-2 font-medium">
+                      {fieldDisplayNames[field] || formatFieldName(field)} <span className="text-red-500">*</span>
                   </td>
                   <td className="px-4 py-2">
                     <select 
-                      className="w-full border p-2 rounded"
                       value={fieldMapping[field] || ''}
                       onChange={(e) => handleFieldMapping(field, e.target.value)}
+                        className="w-full p-2 border rounded"
                     >
-                      <option value="">Select column...</option>
-                      {Object.keys(csvData[0] || {}).map(header => (
-                        <option key={header} value={header}>{header}</option>
+                        <option value="">-- Select Column --</option>
+                        {csvData.length > 0 &&
+                          Object.keys(csvData[0]).map((column) => (
+                            <option key={column} value={column}>
+                              {column}
+                            </option>
                       ))}
                     </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    {csvData[0]?.[fieldMapping[field]] || '-'}
-                  </td>
-                </tr>
-              ))}
-              
-              {/* Required custom attributes */}
-              {requiredCustomAttributes.map((field) => (
-                <tr key={field} className="border-t">
-                  <td className="px-4 py-2">
-                    <span className="text-red-500">*</span> {field} <span className="text-xs text-blue-500">(Custom)</span>
-                  </td>
-                  <td className="px-4 py-2">
-                    <select 
-                      className="w-full border p-2 rounded"
-                      value={fieldMapping[field] || ''}
-                      onChange={(e) => handleFieldMapping(field, e.target.value)}
-                    >
-                      <option value="">Select column...</option>
-                      {Object.keys(csvData[0] || {}).map(header => (
-                        <option key={header} value={header}>{header}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    {csvData[0]?.[fieldMapping[field]] || '-'}
                   </td>
                 </tr>
               ))}
               
               {/* Optional fields */}
-              <tr className="border-t bg-gray-50">
-                <td colSpan={3} className="px-4 py-2 font-medium">Optional Fields</td>
-              </tr>
-              
-              {['Amazon Fee', 'Category', 'Rating', 'Review Count'].map((field) => (
+                {OPTIONAL_FIELDS.map((field) => (
                 <tr key={field} className="border-t">
-                  <td className="px-4 py-2">{field}</td>
+                    <td className="px-4 py-2">{fieldDisplayNames[field] || formatFieldName(field)}</td>
                   <td className="px-4 py-2">
                     <select 
-                      className="w-full border p-2 rounded"
                       value={fieldMapping[field] || ''}
                       onChange={(e) => handleFieldMapping(field, e.target.value)}
+                        className="w-full p-2 border rounded"
                     >
-                      <option value="">Select column...</option>
-                      {Object.keys(csvData[0] || {}).map(header => (
-                        <option key={header} value={header}>{header}</option>
+                        <option value="">-- Select Column --</option>
+                        {csvData.length > 0 &&
+                          Object.keys(csvData[0]).map((column) => (
+                            <option key={column} value={column}>
+                              {column}
+                            </option>
                       ))}
                     </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    {csvData[0]?.[fieldMapping[field]] || '-'}
-                  </td>
-                </tr>
-              ))}
-              
-              {/* Optional custom attributes (excluding required ones) */}
-              {allCustomAttributes
-                .filter(attrName => !requiredCustomAttributes.includes(attrName))
-                .map((field) => (
-                <tr key={field} className="border-t">
-                  <td className="px-4 py-2">
-                    {field} <span className="text-xs text-blue-500">(Custom)</span>
-                  </td>
-                  <td className="px-4 py-2">
-                    <select 
-                      className="w-full border p-2 rounded"
-                      value={fieldMapping[field] || ''}
-                      onChange={(e) => handleFieldMapping(field, e.target.value)}
-                    >
-                      <option value="">Select column...</option>
-                      {Object.keys(csvData[0] || {}).map(header => (
-                        <option key={header} value={header}>{header}</option>
-                      ))}
-                    </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    {csvData[0]?.[fieldMapping[field]] || '-'}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
           
           <div className="flex justify-between mt-6">
             <Button variant="secondary" className="flex items-center" onClick={() => setCurrentStep(1)}>

@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: products-mapping-app
+    env: python
+    buildCommand: npm install && npm run build && pip install -r requirements.txt
+    startCommand: gunicorn products_mapping_project.wsgi:application
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: WEB_CONCURRENCY
+        value: 4
+      - key: DJANGO_SETTINGS_MODULE
+        value: products_mapping_project.settings
+      - key: SECRET_KEY
+        generateValue: true
+      - key: USE_SUPABASE_API
+        value: "True"
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false 

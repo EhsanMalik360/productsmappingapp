@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Eye, Trash2, AlertCircle, CheckCircle, Clock, Database } from 'lucide-react';
+import { Eye, Trash2, AlertCircle, CheckCircle, Clock, Database, RefreshCcw } from 'lucide-react';
 import Table from '../../components/UI/Table';
 import { useImportHistory } from '../../hooks/useSupabase';
-import LoadingOverlay from '../../components/UI/LoadingOverlay';
 import Button from '../../components/UI/Button';
+import Card from '../../components/UI/Card';
 
 const ImportHistory: React.FC = () => {
   const { importHistory, loading, error, deleteImportRecord, refreshHistory } = useImportHistory();
@@ -22,7 +22,32 @@ const ImportHistory: React.FC = () => {
   };
 
   if (loading || isRefreshing) {
-    return <LoadingOverlay message={isRefreshing ? "Refreshing import history..." : "Loading import history..."} />;
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">Import History</h1>
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-gray-500">
+              {isRefreshing ? "Refreshing data..." : "Loading data..."}
+            </span>
+            <div className="animate-spin h-5 w-5 text-blue-600">
+              <RefreshCcw size={20} />
+            </div>
+          </div>
+        </div>
+        
+        <Card>
+          <div className="flex items-center justify-center p-12 text-center">
+            <div className="animate-spin mr-3 h-6 w-6 text-blue-600">
+              <RefreshCcw size={24} />
+            </div>
+            <div className="text-lg font-medium">
+              {isRefreshing ? "Refreshing import history..." : "Loading import history..."}
+            </div>
+          </div>
+        </Card>
+      </div>
+    );
   }
 
   const handleDelete = async (id: string) => {
@@ -87,7 +112,16 @@ const ImportHistory: React.FC = () => {
 
   return (
     <div>
-      {isDeleting && <LoadingOverlay message="Deleting record..." />}
+      {isDeleting && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl flex items-center">
+            <div className="animate-spin mr-3 h-6 w-6 text-blue-600">
+              <RefreshCcw size={24} />
+            </div>
+            <div className="text-lg font-medium">Deleting record...</div>
+          </div>
+        </div>
+      )}
       
       <div className="flex justify-between items-center mb-4">
         <div>

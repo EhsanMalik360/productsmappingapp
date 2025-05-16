@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Amazon Product &amp; Supplier Analysis Application</title>
+    <link rel="stylesheet" crossorigin href="/assets/index-CJTfM7eV.css">
+    <style>
+      .loader {
+        border: 16px solid #f3f3f3;
+        border-radius: 50%;
+        border-top: 16px solid #3498db;
+        width: 120px;
+        height: 120px;
+        margin: 0 auto 20px auto;
+        animation: spin 2s linear infinite;
+      }
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: Arial, sans-serif;">
+        <div style="text-align: center; max-width: 500px;">
+          <div class="loader"></div>
+          <h2>Loading Application...</h2>
+          <p>Please wait while we establish the database connection and initialize components.</p>
+          <p id="loadingStatus">Initializing...</p>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Load Supabase Client directly -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+    
+    <script>
+      const statusEl = document.getElementById('loadingStatus');
+      
+      async function initializeApp() {
+        try {
+          // Step 1: Get config from Django
+          statusEl.textContent = "Fetching server configuration...";
+          const configResponse = await fetch('/api/config/');
+          if (!configResponse.ok) throw new Error(`Failed to load config: ${configResponse.status}`);
+          const config = await configResponse.json();
+          
+          // Step 2: Create Supabase client
+          statusEl.textContent = "Establishing database connection...";
+          const supabaseUrl = config.supabase.url;
+          const supabaseKey = config.supabase.anon_key;
+          if (!supabaseUrl || !supabaseKey) {
+            throw new Error("Missing Supabase credentials in server config");
+          }
+          
+          // Initialize the client globally
+          window.supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
+          
+          // Step 3: Check if we can connect to Supabase
+          statusEl.textContent = "Testing database connection...";
+          const { data, error } = await window.supabaseClient.from('products').select('count(*)', { count: 'exact' }).limit(1);
+          if (error) throw new Error(`Supabase connection error: ${error.message}`);
+          
+          // Connection successful, inject global variables and load the app
+          statusEl.textContent = "Connection established. Loading application...";
+          
+          // Create global variables for the React app
+          window.VITE_SUPABASE_URL = supabaseUrl;
+          window.VITE_SUPABASE_ANON_KEY = supabaseKey;
+          
+          // Set up globals for potential imports
+          window.__SUPABASE_CREDENTIALS__ = {
+            url: supabaseUrl,
+            key: supabaseKey
+          };
+          
+          // Monkey patch createClient globally to use our credentials
+          const originalCreateClient = supabase.createClient;
+          supabase.createClient = function(url, key, ...args) {
+            console.log("Intercepted createClient call");
+            return originalCreateClient(supabaseUrl, supabaseKey, ...args);
+          };
+          
+          // Now load the React app
+          loadApp();
+          
+        } catch (error) {
+          console.error('Initialization error:', error);
+          document.getElementById('root').innerHTML = `
+            <div style="color: red; padding: 20px; max-width: 800px; margin: 0 auto; text-align: left;">
+              <h2>Application Initialization Error</h2>
+              <p>Failed to initialize the application:</p>
+              <pre style="background: #f5f5f5; padding: 10px; overflow: auto;">${error.message}</pre>
+              <p>Please check your Supabase configuration and try again.</p>
+              <button onclick="window.location.reload()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">Retry</button>
+            </div>
+          `;
+        }
+      }
+      
+      function loadApp() {
+        // Create a script element to load the app
+        const script = document.createElement('script');
+        script.type = 'module';
+        script.crossOrigin = '';
+        script.src = '/assets/index-CLYlUwCX.js';
+        
+        // Handle potential errors in the app bundle
+        script.onerror = (error) => {
+          console.error('Error loading application bundle:', error);
+          document.getElementById('root').innerHTML = `
+            <div style="color: red; padding: 20px; max-width: 800px; margin: 0 auto; text-align: left;">
+              <h2>Application Load Error</h2>
+              <p>Failed to load the application bundle:</p>
+              <pre style="background: #f5f5f5; padding: 10px; overflow: auto;">Bundle load failed</pre>
+              <p>Please check your network connection and try again.</p>
+              <button onclick="window.location.reload()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">Retry</button>
+            </div>
+          `;
+        };
+        
+        // Append the script to load the app
+        document.body.appendChild(script);
+      }
+      
+      // Start the initialization process
+      initializeApp();
+    </script>
+  </body>
+</html>

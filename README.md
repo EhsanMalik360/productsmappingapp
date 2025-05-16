@@ -1,131 +1,150 @@
-# Product-Supplier Mapping System
+# Products Mapping Web App
 
-A system for managing product-supplier relationships for e-commerce applications.
-
-## Custom Attributes Implementation
-
-The system supports custom attributes for both products and suppliers:
-
-1. **Direct Column Mapping**: Custom attributes are stored as dedicated columns in their respective tables (products/suppliers).
-   - Column names follow the pattern `custom_attribute_name` (e.g., `custom_mpn`, `custom_ean`, etc.)
-   - This provides faster access and better type safety
-   - All attributes are stored directly in their respective tables
-
-2. **MPN Field Synchronization**: When a value is mapped to the custom MPN field, it is automatically stored in both:
-   - The `custom_mpn` column for consistent custom attribute handling
-   - The standard `mpn` column for improved compatibility with existing code
-
-### Database Schema
-
-- `products` table: Contains both standard fields and columns for custom attributes (custom_*)
-- `suppliers` table: Contains both standard fields and columns for custom attributes (custom_*)
-- `custom_attributes` table: Defines attribute metadata (name, type, etc.)
-- `custom_attribute_values` table: Deprecated - no longer used for storage
-
-### Import Process
-
-When importing product or supplier data:
-
-1. CSV data is mapped to system fields and custom attributes
-2. Custom attributes are directly stored in the corresponding columns
-3. For MPN fields, data is stored in both the custom_mpn and mpn columns
-4. The system uses an optimized matching algorithm to link supplier products to existing products
-
-The UI shows clear visual indicators for match quality and provides detailed progress tracking during import.
-
-## Key Features
-
-- Hierarchical matching (EAN → MPN → name)
-- Visual indicators for match quality
-- Batch processing with configurable sizes
-- Progress tracking with percentage display
-- Performance optimizations for large imports
-
-## Getting Started
-
-[Instructions for setting up and running the application]
+A web application for mapping supplier products to Amazon products and analyzing profit margins.
 
 ## Features
 
-- Import Amazon product data
-- Import supplier product data
-- Match suppliers to products
-- Calculate profit margins
-- Optimize pricing
-- **NEW: Large File Processing** - Handle supplier files up to several GB in size
+- Upload and process Amazon product data
+- Upload and process supplier product data
+- Automatically match supplier products to Amazon listings
+- Calculate profit margins and analyze profitability
+- Manage products and suppliers
+- Filter and search capabilities
+- Data visualization
+
+## Technical Stack
+
+- **Frontend**:
+  - React with TypeScript
+  - Vite for development and building
+  - TailwindCSS for styling
+  - Chart.js for data visualization
+
+- **Backend**:
+  - Django with Django REST Framework
+  - Supabase for database and authentication
+  - Celery for background processing
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 16+
-- npm or yarn
-- Supabase account
+- Node.js (v16+)
+- Python (v3.9+)
+- PostgreSQL (via Supabase)
 
-### Installation
+### Setup
 
-1. Clone the repository
-2. Install client dependencies: `npm install`
-3. Install server dependencies: `cd src/server && npm install`
-4. Create a `.env` file in the root directory with:
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd productsmappingwebapp
+   ```
 
-```
+2. Install frontend dependencies:
+   ```bash
+   npm install
+   ```
+
+3. Install backend dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Create a `.env` file in the root with:
+   ```
+   SUPABASE_URL=your_supabase_url
+   SUPABASE_KEY=your_supabase_key
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
-VITE_API_URL=http://localhost:3001
-```
+   ```
 
-5. Create a `.env` file in the `src/server` directory with:
+### Running the Application
 
-```
-VITE_SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_KEY=your_supabase_service_key
-SERVER_PORT=3001
-```
+#### Option 1: Run Both Services Separately
 
-### Running the application
+1. Start the Django backend:
+   ```bash
+   # On Windows
+   .\start-django.bat
+   
+   # On macOS/Linux
+   ./start-django.sh
+   ```
 
-1. Start the server:
-```
-cd src/server
-npm run dev
-```
+2. In a separate terminal, start the React frontend:
+   ```bash
+   # On Windows
+   .\start-frontend.bat
+   
+   # On macOS/Linux
+   ./start-frontend.sh
+   ```
 
-2. In a separate terminal, start the client:
-```
-npm run dev
-```
+3. Access the application at: http://localhost:3000
 
-### Database Setup
+#### Option 2: Build Frontend for Production
 
-Run the migrations in the `supabase/migrations` folder to set up your database schema.
+1. Build the React frontend:
+   ```bash
+   npm run build
+   ```
 
-## Large File Processing
+2. Start the Django server which will serve both API and frontend:
+   ```bash
+   python manage.py run_server
+   ```
 
-The application now supports processing large supplier CSV files (1GB+) through server-side streaming:
+3. Access the application at: http://localhost:8000
 
-### How it works
+## Development Notes
 
-1. When a file larger than 10MB is detected, it is automatically processed on the server
-2. Files are streamed and processed in chunks, avoiding memory issues
-3. Progress is tracked and visible in the UI
-4. A background job processes the data, allowing you to continue using the application
+- The frontend development server proxies API requests to the Django backend
+- For direct database access, set `USE_SUPABASE_API=False` before starting Django
+- File uploads are processed in the background using Celery
 
-### Server Requirements
+## Project Structure
 
-For handling large files, we recommend:
-- At least 2GB RAM for the Node.js server
-- Adequate disk space for temporary file storage
-- A stable network connection
+- `/api` - Django API and models
+- `/products_mapping_project` - Django project configuration
+- `/src` - React frontend source
+  - `/components` - React components
+  - `/pages` - Page components
+  - `/lib` - Utility functions and API client
+  - `/hooks` - React hooks
+  - `/context` - React context providers
 
-### Configuration
+## Additional Documentation
 
-You can adjust these settings in the server's environment variables:
-
-- `MAX_FILE_SIZE`: Maximum allowed file size (default: 2GB)
-- `CHUNK_SIZE`: Number of rows processed in memory at once (default: 5000)
-- `BATCH_SIZE`: Number of database operations per batch (default: determined by UI)
+- [Django Backend README](README-DJANGO.md) - Detailed information about the Django backend
+- [API Documentation](api/README.md) - API endpoints and usage
 
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Fixing Duplicate Supplier Products
+
+If you encounter issues with duplicate key violations when importing supplier data, you can use the fix-duplicates API endpoint to clean up the database.
+
+Run the following command to detect and fix duplicates:
+
+```bash
+curl -X POST http://localhost:3001/api/admin/fix-duplicates/
+```
+
+This will:
+1. Find and remove duplicate supplier_id + product_id combinations
+2. Find and remove duplicate supplier_id + ean combinations for unmatched products
+3. Return a report showing how many duplicates were found and fixed
+
+Example response:
+```json
+{
+  "status": "success",
+  "duplicates_found": 42,
+  "duplicates_merged": 42,
+  "error_count": 0,
+  "errors": []
+}
+```

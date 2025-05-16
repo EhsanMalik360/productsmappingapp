@@ -1,20 +1,16 @@
 import React, { useState, useEffect } from 'react';
-import { UploadCloud, Download, ArrowLeft, ArrowRight, Info, AlertTriangle } from 'lucide-react';
+import { UploadCloud, Download, ArrowLeft, ArrowRight, Info, AlertTriangle, Loader2 } from 'lucide-react';
 import Button from '../../components/UI/Button';
-import LoadingOverlay from '../../components/UI/LoadingOverlay';
 import SuccessModal from '../../components/UI/SuccessModal';
 import { parseCSV, validateRequiredFields } from '../../utils/csvImport';
 import { 
   autoMapSupplierColumns, 
-  mapSupplierData, 
-  importSupplierData, 
   MatchMethod,
   MatchOptions,
-  MatchColumnMapping,
-  setMatchingColumns
-} from '../../utils/supplierImport';
+  MatchColumnMapping} from '../../utils/supplierImport';
 import { useAppContext } from '../../context/AppContext';
 import { useImportHistory } from '../../hooks/useSupabase';
+import { api } from '../../lib/api';
 
 // Server API URL
 const API_URL = (() => {
@@ -34,7 +30,7 @@ console.log('Environment variable value:', import.meta.env.VITE_API_URL);
 const REQUIRED_FIELDS = ['Supplier Name', 'Cost'];
 
 const SupplierImport: React.FC = () => {
-  const { customAttributes, refreshData } = useAppContext();
+  const { customAttributes } = useAppContext();
   const { addImportRecord } = useImportHistory();
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [csvData, setCSVData] = useState<any[]>([]);
@@ -79,9 +75,15 @@ const SupplierImport: React.FC = () => {
   const [jobId, setJobId] = useState<string | null>(null);
   const [loadingMessage, setLoadingMessage] = useState<string>("Processing data...");
   const [loadingProgress, setLoadingProgress] = useState<number>(0);
-  const [batchSize, setBatchSize] = useState<number>(250); // Increased default for better performance with large files
+  const [batchSize, setBatchSize] = useState<number>(1000); // Increased default for better performance
   const [pollInterval, setPollInterval] = useState<number | null>(null);
   const [fileRef, setFileRef] = useState<File | null>(null); // Store the file reference for server upload
+  
+  // Add states for timeout handling
+  const [importStartTime, setImportStartTime] = useState<number | null>(null);
+  const [, setExecutionTime] = useState<number>(0);
+  const [isLongRunningImport, setIsLongRunningImport] = useState<boolean>(false);
+  const [importComplete, setImportComplete] = useState<boolean>(false);
 
   // Required supplier custom attributes
   const requiredCustomAttributes = customAttributes
@@ -110,6 +112,12 @@ const SupplierImport: React.FC = () => {
       failedImports: 0,
       suppliersAdded: 0
     });
+    setLoadingProgress(0);
+    setLoadingMessage("Processing data...");
+    setImportStartTime(null);
+    setExecutionTime(0);
+    setIsLongRunningImport(false);
+    setImportComplete(false);
     
     // Reset the file input
     const fileInput = document.getElementById('supplierFileInput') as HTMLInputElement;
@@ -148,142 +156,141 @@ const SupplierImport: React.FC = () => {
     resetForm();
   };
 
-  // Setup polling for job status updates
-  useEffect(() => {
-    if (jobId) {
-      console.log(`Setting up polling for job status updates: JobID ${jobId}`);
-      // Start polling for job status
-      const interval = window.setInterval(() => {
-        console.log(`Polling job status for job: ${jobId}`);
-        checkJobStatus(jobId)
-          .then(status => {
-            console.log(`Job status poll returned: ${status}`);
-            // Note: We don't clear the interval here since we handle completion
-            // in the checkJobStatus function with a setTimeout
-          })
-          .catch(error => {
-            console.error('Error during job status polling:', error);
-          });
-      }, 1500); // Poll every 1.5 seconds (increased frequency)
-      
-      setPollInterval(interval);
-      
-      // Clear interval on unmount
-      return () => {
-        console.log(`Cleaning up job status polling interval: ${interval}`);
-        window.clearInterval(interval);
-        setPollInterval(null);
-      };
-    } else if (pollInterval) {
-      // Clear interval if job completed or component unmounted
-      console.log(`Clearing existing poll interval: ${pollInterval}`);
-      window.clearInterval(pollInterval);
-      setPollInterval(null);
-    }
-  }, [jobId]);
+  // Add a function to handle import cancellation
 
-  // Function to check job status periodically
-  const checkJobStatus = async (jobId: string) => {
-    if (!jobId) return;
+  // Monitor import execution time
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
     
-    // If success modal is already showing, don't trigger multiple status checks
-    if (showSuccess) return;
-    
-    try {
-      const response = await fetch(`${API_URL}/api/upload/status/${jobId}`);
-      const data = await response.json();
-      
-      console.log('Job status response:', data);
-      
-      if (data.status === 'completed') {
-        // Clear polling interval to stop further checks
-        if (pollInterval) {
-          console.log(`Clearing poll interval ${pollInterval} because job completed`);
-          window.clearInterval(pollInterval);
-          setPollInterval(null);
-        }
+    if (isLoading && importStartTime && importStartTime > 0) {
+      // Update the execution time every second
+      timer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - importStartTime) / 1000);
+        setExecutionTime(elapsed);
         
-        setIsLoading(false);
-        
-        console.log('Job completed with results:', data.results);
-        
-        // Ensure we're getting valid results
-        if (data.results) {
-          setImportResults({
-            totalRecords: data.results.totalRecords || 0,
-            successfulImports: data.results.successfulImports || 0,
-            failedImports: data.results.failedImports || 0,
-            suppliersAdded: data.results.suppliersAdded || 0
-          });
+        // For long-running imports, just update the message but don't show timeout warning
+        if (elapsed >= 180 && !isLongRunningImport) {
+          console.log("Import taking longer than expected, updating message only");
+          setIsLongRunningImport(true);
           
-          // Set match stats if available
-          if (data.results.matchStats) {
-            console.log('Match statistics received from server:', data.results.matchStats);
-            const receivedStats = {
-              totalMatched: data.results.matchStats.totalMatched || 0,
-              byMethod: {
-                [MatchMethod.EAN]: data.results.matchStats.byMethod?.ean || 0,
-                [MatchMethod.MPN]: data.results.matchStats.byMethod?.mpn || 0,
-                [MatchMethod.NAME]: data.results.matchStats.byMethod?.name || 0
-              }
-            };
-            console.log('Processed match stats:', receivedStats);
-            setMatchStats(receivedStats);
-          } else {
-            console.warn('No match statistics found in results');
-            setMatchStats({
-              totalMatched: 0,
-              byMethod: {
-                [MatchMethod.EAN]: 0,
-                [MatchMethod.MPN]: 0,
-                [MatchMethod.NAME]: 0
-              }
-            });
-          }
-          
-          // Show success modal only once and prevent showing it again
-          if (!showSuccess) {
-            // Set to null first to prevent any possible race conditions
-            setJobId(null);
-            setShowSuccess(true);
-          }
-          
-          // Refresh data to show updated supplier products
-          if (refreshData) {
-            console.log('Refreshing data after successful import');
-            refreshData();
-          }
+          // Just update message to inform user of progress
+          setLoadingMessage(`Import running for ${Math.floor(elapsed / 60)} minutes. Processing will continue automatically.`);
         }
-      } else if (data.status === 'failed') {
-        // Clear polling interval on failure
-        if (pollInterval) {
-          window.clearInterval(pollInterval);
-          setPollInterval(null);
-        }
-        
-        setIsLoading(false);
-        setError(data.message || 'Import failed');
-      } else {
-        // Still processing, update progress
-        setLoadingProgress(data.progress || 0);
-        
-        // Check again after a delay only if not completed and polling is still active
-        if (!showSuccess && pollInterval) {
-          setTimeout(() => checkJobStatus(jobId), 2000);
-        }
-      }
-    } catch (error) {
-      console.error('Error checking job status:', error);
-      setIsLoading(false);
-      setError('Failed to check import status');
-      
-      // Clear polling interval on error
-      if (pollInterval) {
-        window.clearInterval(pollInterval);
-        setPollInterval(null);
-      }
+      }, 1000);
     }
-  };
+    
+    return () => {
+      if (timer) {
+        clearInterval(timer);
+      }
+    };
+  }, [isLoading, importStartTime, isLongRunningImport]);
+
+  // Monitor importComplete state
+  useEffect(() => {
+    if (importComplete) {
+      // Show success message and reset states
+      setShowSuccess(true);
+      setIsLoading(false);
+      setJobId(null);
+    }
+  }, [importComplete]);
+
+  // Poll job status
+  useEffect(() => {
+    let pollingInterval: NodeJS.Timeout;
+    let isComponentMounted = true;
+    
+    // Function to handle job status checks
+    const pollJobStatus = async () => {
+      if (!jobId || !isComponentMounted) return;
+      
+      try {
+        console.log(`Polling job status for ID: ${jobId}`);
+        const statusData = await api.checkJobStatus(jobId);
+        
+        if (!isComponentMounted) return;
+        
+        // Update progress and message from Django backend data
+        setLoadingProgress(statusData.progress || 0);
+        setLoadingMessage(statusData.message || "Processing file...");
+        
+        // Handle job completion
+        if (statusData.status === 'completed') {
+          console.log('Job completed successfully:', statusData);
+          
+          // Process results to match our expected format
+          if (statusData.results) {
+            setImportResults({
+              totalRecords: statusData.results.total || 0,
+              successfulImports: statusData.results.successful || 0,
+              failedImports: statusData.results.failed || 0,
+              suppliersAdded: statusData.results.suppliers_added || 0
+            });
+            
+            // Set match stats if available
+            if (statusData.results.match_stats) {
+              setMatchStats({
+                totalMatched: statusData.results.match_stats.total_matched || 0,
+                byMethod: {
+                  [MatchMethod.EAN]: statusData.results.match_stats.by_method?.ean || 0,
+                  [MatchMethod.MPN]: statusData.results.match_stats.by_method?.mpn || 0,
+                  [MatchMethod.NAME]: statusData.results.match_stats.by_method?.name || 0
+                }
+              });
+            }
+          }
+          
+          // Show success modal
+          setImportComplete(true);
+          setIsLoading(false);
+          setJobId(null);
+          clearInterval(pollingInterval);
+        }
+        
+        // Handle job failure
+        if (statusData.status === 'failed') {
+          console.error('Job failed:', statusData);
+          setIsLoading(false);
+          setJobId(null);
+          setError(statusData.message || 'Import failed');
+          clearInterval(pollingInterval);
+        }
+      } catch (error) {
+        console.error('Error checking job status:', error);
+        // Don't stop polling on error unless too many consecutive errors
+      }
+    };
+    
+    if (jobId && isLoading) {
+      // Start polling immediately
+      pollJobStatus();
+      
+      // Calculate appropriate polling interval based on file size
+      let pollDelayMs = 2000; // Default is 2 seconds
+      
+      // For large files (detectable by batch size and/or file reference size)
+      if (batchSize > 1000 && fileRef && fileRef.size > 10 * 1024 * 1024) {
+        // Large file detected, use longer polling intervals
+        pollDelayMs = 5000; // 5 seconds for large files
+        console.log(`Large file detected (${(fileRef.size / (1024 * 1024)).toFixed(2)} MB), using ${pollDelayMs}ms polling interval`);
+      } else if (batchSize > 2000 && fileRef && fileRef.size > 50 * 1024 * 1024) {
+        // Very large file, use even longer interval
+        pollDelayMs = 8000; // 8 seconds for very large files
+        console.log(`Very large file detected (${(fileRef.size / (1024 * 1024)).toFixed(2)} MB), using ${pollDelayMs}ms polling interval`);
+      }
+      
+      // Poll at the calculated interval
+      pollingInterval = setInterval(pollJobStatus, pollDelayMs);
+    }
+    
+    return () => {
+      isComponentMounted = false;
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [jobId, isLoading, batchSize, fileRef]);
 
   // Handle file upload - client side for mapping, server side for actual import
   const handleFileUpload = async (event: React.DragEvent<HTMLDivElement> | React.ChangeEvent<HTMLInputElement>) => {
@@ -394,256 +401,100 @@ const SupplierImport: React.FC = () => {
     }));
   };
 
-  // Large file handling - server-side processing
+  // Large file handling - server-side processing (updated)
   const handleLargeFileUpload = async (file: File) => {
     try {
+      console.log('Starting server-side processing for file:', file.name);
       setIsLoading(true);
-      // Start with 0% - the server will update to 5% immediately
-      setLoadingProgress(0);
-      setLoadingMessage("Preparing file upload...");
-      
-      // Log information about the file
-      console.log(`Uploading file to server: ${file.name} (${Math.round(file.size / 1024)} KB)`);
+      setLoadingProgress(5);
+      setLoadingMessage("Uploading file to server...");
       
       // Create form data for file upload
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('batchSize', batchSize.toString());
       
-      // Include field mapping if we're at that step or beyond
+      // Optimize batch size based on file size for better performance
+      const fileSizeMB = file.size / (1024 * 1024);
+      let optimalBatchSize = batchSize;
+      
+      // For larger files, increase batch size automatically if user didn't manually set it higher
+      if (fileSizeMB > 50) {
+        optimalBatchSize = Math.max(batchSize, 3000); // At least 3000 for large files
+        console.log(`Large file detected (${fileSizeMB.toFixed(2)}MB). Optimizing batch size to ${optimalBatchSize}`);
+      } else if (fileSizeMB > 20) {
+        optimalBatchSize = Math.max(batchSize, 2000); // At least 2000 for medium files
+        console.log(`Medium file detected (${fileSizeMB.toFixed(2)}MB). Using batch size of ${optimalBatchSize}`);
+      }
+      
+      // Include the optimized batch size
+      formData.append('batch_size', optimalBatchSize.toString());
+      console.log(`Using optimized batch size: ${optimalBatchSize} for file of ${fileSizeMB.toFixed(2)}MB`);
+      
+      // Include field mapping if available
       if (Object.keys(fieldMapping).length > 0) {
-        console.log('Including field mapping in request:', fieldMapping);
-        formData.append('fieldMapping', JSON.stringify(fieldMapping));
+        formData.append('field_mapping', JSON.stringify(fieldMapping));
+        console.log('Including field mapping in upload:', fieldMapping);
       }
       
-      // Include match options if we're at the final step
-      if (currentStep >= 3) {
-        console.log('Including match options in request:', matchOptions);
-        formData.append('matchOptions', JSON.stringify(matchOptions));
+      // Include match options if specified
+      if (matchOptions) {
+        formData.append('match_options', JSON.stringify(matchOptions));
+        console.log('Including match options in upload:', matchOptions);
       }
       
-      // Update progress to indicate upload is starting
-      setLoadingProgress(3);
-      setLoadingMessage("Starting file upload...");
+      // Set execution start time for timeout tracking
+      setImportStartTime(Date.now());
       
-      // Log the server endpoint being used
-      console.log(`Sending file to server endpoint: ${API_URL}/api/upload/supplier`);
+      // Use the API client for upload (this will handle authentication and CORS)
+      console.log('Sending file to Django backend endpoint...');
       
-      // Upload to server API with improved error handling
-      const response = await fetch(`${API_URL}/api/upload/supplier`, {
+      // Use the Django API endpoint
+      const result = await fetch(`${API_URL}/api/upload/supplier/`, {
         method: 'POST',
-        body: formData
+        body: formData,
+        credentials: 'include'
+      })
+      .then(response => {
+        if (!response.ok) {
+          throw new Error(`Server responded with ${response.status}: ${response.statusText}`);
+        }
+        return response.json();
       });
       
-      console.log('Server response status:', response.status);
+      console.log('Server response:', result);
       
-      // Get response data as text first for debugging
-      const responseText = await response.text();
-      console.log('Raw server response:', responseText);
-      
-      // Parse JSON (if valid)
-      let result;
-      try {
-        result = JSON.parse(responseText);
-      } catch (e) {
-        console.error('Failed to parse server response as JSON:', e);
-        throw new Error(`Server returned invalid JSON response: ${responseText.substring(0, 100)}...`);
-      }
-      
-      if (!response.ok) {
-        console.error('Server returned error:', result);
-        throw new Error(result.error || 'Upload failed with status ' + response.status);
-      }
-      
-      // Set job ID for status polling
-      if (result.jobId) {
-        console.log('Received job ID from server:', result.jobId);
-        setJobId(result.jobId);
-        setLoadingMessage('Processing file on server...');
+      // Set job ID for status tracking
+      if (result.job_id || result.id) { // Check for either job_id or id
+        const jobIdentifier = result.job_id || result.id; // Use either one that's available
+        setJobId(jobIdentifier);
+        console.log(`Job ID set: ${jobIdentifier}`);
         
-        // Initial status check
-        await checkJobStatus(result.jobId);
+        // Update loading message
+        setLoadingProgress(5);
+        setLoadingMessage("File received by server. Processing has started...");
+      } else if (result.file_path) {
+        // The server accepted the file but didn't return a job ID
+        // Generate a pseudo job ID based on the file path to track progress
+        const pseudoJobId = result.file_path.split('\\').pop() || `file-${Date.now()}`;
+        console.log(`No job ID received, but file was accepted. Using pseudo job ID: ${pseudoJobId}`);
+        setJobId(pseudoJobId);
         
-        // Don't start a new interval here - we already have useEffect handling polling
+        // Update loading message
+        setLoadingProgress(5);
+        setLoadingMessage("File received by server. Processing without job tracking...");
       } else {
-        console.error('No job ID returned from server. Server response:', result);
-        throw new Error('No job ID returned from server');
+        throw new Error('No job ID received from server');
       }
-    } catch (err) {
-      console.error('Error in handleLargeFileUpload:', err);
-      // Keep the loading state visible with error for a moment
-      setLoadingProgress(100);
-      setLoadingMessage(`Error: ${err instanceof Error ? err.message : 'Unknown error'}`);
-      
-      setTimeout(() => {
-        setIsLoading(false);
-        setError(err instanceof Error ? err.message : 'Error uploading file');
-      }, 2000);
-    }
-  };
-
-  // Handle map button click - proceed to next step or start import
-  const handleMap = async () => {
-    try {
-      setIsLoading(true);
-      setLoadingProgress(5);
-      setLoadingMessage("Validating field mappings...");
-      
-      // Check if all required fields are mapped
-      const missingFields = [];
-      for (const field of allRequiredFields) {
-        if (!fieldMapping[field]) {
-          missingFields.push(field);
-        }
-      }
-      
-      if (missingFields.length > 0) {
-        setError(`Please map the following required fields: ${missingFields.join(', ')}`);
-        setIsLoading(false);
-        return;
-      }
-      
-      // Move to matching options step if this is the first run through
-      if (currentStep === 2) {
-        setCurrentStep(3);
-        setIsLoading(false);
-        setLoadingProgress(0);
-        return;
-      }
-      
-      // If this is a large file and we're proceeding with import, upload now
-      if (fileRef) {
-        console.log('Proceeding with server-side processing for supplier file import...');
-        await handleLargeFileUpload(fileRef);
-      } else if (csvData.length > 0) {
-        // For small files already loaded, process with existing client-side method
-        setLoadingProgress(15);
-        setLoadingMessage("Processing CSV data...");
-        const mappingResult = await mapSupplierData(csvData, fieldMapping);
-        
-        // If we have currency warnings, show the error and don't proceed
-        if (mappingResult.warnings && mappingResult.warnings.currencyWarning) {
-          setError(mappingResult.warnings.message);
-          setIsLoading(false);
-          return;
-        }
-        
-        // Process with client-side function for small datasets
-        setLoadingProgress(25);
-        setLoadingMessage(`Matching products with suppliers... 0%`);
-        
-        // Create a progress update function
-        const updateProgress = (current: number, total: number) => {
-          const percentage = Math.round((current / total) * 75) + 25; // Scale from 25%-100%
-          setLoadingProgress(Math.min(percentage, 98)); // Cap at 98% until fully done
-          setLoadingMessage(`Matching products with suppliers... ${Math.round((current / total) * 100)}%`);
-        };
-        
-        // Pass progress updater to importSupplierData
-        const results = await importSupplierData(
-          Promise.resolve(mappingResult), 
-          matchOptions,
-          updateProgress,
-          batchSize,
-          Object.keys(matchColumnMapping).length > 0 ? matchColumnMapping : undefined
-        );
-        
-        // Update import results
-        setImportResults({
-          totalRecords: mappingResult.data.length,
-          successfulImports: results.processedCount,
-          failedImports: mappingResult.data.length - results.processedCount,
-          suppliersAdded: results.supplierCount
-        });
-        
-        // Store match stats
-        if (results.matchStats) {
-          setMatchStats(results.matchStats);
-        }
-        
-        setLoadingProgress(99);
-        setLoadingMessage("Recording import history...");
-        
-        // Add import record to history
-        await addImportRecord({
-          type: 'Supplier Data',
-          file_name: fileName,
-          status: 'Completed',
-          total_records: mappingResult.data.length,
-          successful_records: results.processedCount,
-          failed_records: mappingResult.data.length - results.processedCount,
-          error_message: ''
-        });
-        
-        // Set to 100% complete
-        setLoadingProgress(100);
-        setLoadingMessage("Import completed successfully!");
-        
-        // Add a delay before showing success to ensure user sees 100% state
-        setTimeout(() => {
-          // Only show success if it's not already showing (prevents double triggering)
-          if (!showSuccess) {
-            setShowSuccess(true);
-          }
-          
-          // Small delay to ensure success modal is visible before hiding loader
-          setTimeout(() => {
-            setIsLoading(false);
-          }, 300);
-        }, 1000);
-      }
-    } catch (err) {
-      console.error('Error during import process:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error during import process';
-      
-      // Keep loading visible with error state
-      setLoadingProgress(100);
-      setLoadingMessage(`Error: ${errorMessage}`);
-      
-      // Try to get server logs for more detailed error information
-      try {
-        fetchServerLogs();
-      } catch (logError) {
-        console.error('Error fetching server logs:', logError);
-      }
-      
-      // Delay before showing error message
-      setTimeout(() => {
-        setIsLoading(false);
-        setError(errorMessage);
-      }, 1500);
-    } finally {
-      // Don't set loading to false here - we'll do it after showing success/error modals
-      // if (!jobId) {
-      //   setIsLoading(false);
-      //   setLoadingProgress(0);
-      // }
-    }
-  };
-
-  // Helper function to fetch server logs for debugging
-  const fetchServerLogs = async () => {
-    try {
-      console.log('Fetching server logs to help diagnose the issue...');
-      const response = await fetch(`${API_URL}/api/logs`);
-      
-      if (!response.ok) {
-        console.error('Failed to fetch server logs:', response.status);
-        return;
-      }
-      
-      const logData = await response.json();
-      console.log('==== SERVER LOGS ====');
-      if (logData.logs && Array.isArray(logData.logs)) {
-        // Display last 20 log lines
-        const recentLogs = logData.logs.slice(-20);
-        recentLogs.forEach((log: string) => console.log(log));
-      } else {
-        console.log('No logs available or unexpected format');
-      }
-      console.log('==== END SERVER LOGS ====');
     } catch (error) {
-      console.error('Error fetching server logs:', error);
+      console.error('Error in handleLargeFileUpload:', error);
+      
+      // Check for connection timeout
+      if (error instanceof Error && error.message.includes('timed out')) {
+        console.warn('Network request timed out - server might be busy with large file');
+        throw new Error('Upload timed out. Your file might be too large for the server to handle. Try reducing the file size or try again later.');
+      }
+      
+      throw error;
     }
   };
 
@@ -733,8 +584,22 @@ const SupplierImport: React.FC = () => {
     try {
       setIsLoading(true);
       setError('');
-      setLoadingMessage(`Importing supplier data...`);
+      setLoadingMessage(`Preparing to import supplier data...`);
       setLoadingProgress(5);
+      
+      // Check if all required fields are mapped
+      const missingFields = [];
+      for (const field of allRequiredFields) {
+        if (!fieldMapping[field]) {
+          missingFields.push(field);
+        }
+      }
+      
+      if (missingFields.length > 0) {
+        setError(`Please map the following required fields: ${missingFields.join(', ')}`);
+        setIsLoading(false);
+        return;
+      }
       
       // Clear empty values from matchColumnMapping
       const cleanedMatchColumnMapping: MatchColumnMapping = {};
@@ -748,62 +613,98 @@ const SupplierImport: React.FC = () => {
         cleanedMatchColumnMapping.name = matchColumnMapping.name;
       }
       
-      // Include match column mapping in the uploaded data
-      const data = {
-        fieldMapping: JSON.stringify(fieldMapping),
-        matchOptions: JSON.stringify(matchOptions),
-        batchSize: batchSize.toString(),
-        matchColumnMapping: Object.keys(cleanedMatchColumnMapping).length > 0 
-          ? JSON.stringify(cleanedMatchColumnMapping) 
-          : undefined
-      };
+      // Prepare options for the API call
+      
+      // Reset timeout tracking
+      setImportStartTime(Date.now());
+      setExecutionTime(0);
+      setIsLongRunningImport(false);
       
       if (fileRef) {
-        // Create form data to send the file
-        const formData = new FormData();
-        formData.append('file', fileRef);
-        
-        // Add other data
-        Object.entries(data).forEach(([key, value]) => {
-          if (value !== undefined) {
-            formData.append(key, value);
+        try {
+          console.log('Starting optimized server-side processing for supplier import...');
+          
+          // Check file size and warn user if it's very large
+          const fileSizeMB = fileRef.size / (1024 * 1024);
+          if (fileSizeMB > 50) {
+            console.warn(`Very large file detected: ${fileSizeMB.toFixed(2)}MB. This may take longer to process.`);
+            setLoadingMessage(`Large file detected (${fileSizeMB.toFixed(2)}MB). Upload may take several minutes...`);
           }
-        });
-        
-        // Send to server
-        const response = await fetch(`${API_URL}/api/upload/supplier`, {
-          method: 'POST',
-          body: formData
-        });
-        
-        if (!response.ok) {
-          const errorBody = await response.json();
-          throw new Error(errorBody.error || 'Failed to upload file');
-        }
-        
-        const result = await response.json();
-        
-        if (result.jobId) {
-          setJobId(result.jobId);
-          // Setup polling interval to check job status
-          const interval = window.setInterval(() => checkJobStatus(result.jobId), 2000);
-          setPollInterval(interval);
-        } else {
-          throw new Error('No job ID returned from server');
+          
+          // Use our enhanced file upload handler
+          await handleLargeFileUpload(fileRef);
+        } catch (uploadError) {
+          console.error('Upload error:', uploadError);
+          
+          // Record the failed import attempt
+          if (fileName) {
+            await addImportRecord({
+              type: 'Supplier Data',
+              file_name: fileName,
+              status: 'Failed',
+              total_records: csvData.length,
+              successful_records: 0,
+              failed_records: csvData.length,
+              error_message: uploadError instanceof Error ? uploadError.message : 'Unknown error'
+            });
+          }
+          
+          // Show error message after a delay to ensure it's seen
+          setTimeout(() => {
+            setIsLoading(false);
+            setError(uploadError instanceof Error ? uploadError.message : 'Unknown upload error');
+          }, 1500);
         }
       } else {
         throw new Error('No file reference available for upload');
       }
     } catch (error) {
       console.error('Import error:', error);
-      setError(`Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Keep loading visible with error state
+      setLoadingProgress(100);
+      setLoadingMessage(`Error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      
+      // Delay before showing error message
+      setTimeout(() => {
       setIsLoading(false);
+        setError(`Import failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }, 1500);
     }
   };
 
   return (
     <div className="container mx-auto p-4">
-      {isLoading && <LoadingOverlay message={loadingMessage} progress={loadingProgress} />}
+      {isLoading && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 backdrop-blur-sm">
+          <div className="bg-white p-8 rounded-lg shadow-2xl flex flex-col items-center" style={{ minWidth: '400px', maxWidth: '90%' }}>
+            <div className="mb-6 flex items-center justify-center relative">
+              <Loader2 className="h-20 w-20 text-blue-600 animate-spin" />
+              
+              {loadingProgress !== undefined && loadingProgress >= 0 && (
+                <div className="absolute">
+                  <span className="text-2xl font-bold text-blue-700">{Math.round(loadingProgress)}%</span>
+                </div>
+              )}
+            </div>
+            
+            <div className="w-full mb-4">
+              <div className="relative pt-1">
+                <div className="overflow-hidden h-5 mb-2 text-xs flex rounded-full bg-blue-100 shadow-inner">
+                  <div 
+                    style={{ width: `${loadingProgress || 0}%` }} 
+                    className={`shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center rounded-full transition-all duration-500 ease-out ${loadingProgress < 30 ? 'bg-blue-500' : loadingProgress < 70 ? 'bg-sky-600' : loadingProgress < 100 ? 'bg-blue-700' : 'bg-green-600'}`}
+                  ></div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="w-full text-center mb-3">
+              <p className="text-gray-800 font-semibold text-lg">{loadingMessage}</p>
+            </div>
+          </div>
+        </div>
+      )}
       
       <SuccessModal
         isOpen={showSuccess}
@@ -884,6 +785,44 @@ const SupplierImport: React.FC = () => {
             </Button>
           </div>
           
+          {/* Performance settings for large files */}
+          <div className="mt-6 border rounded-md p-4">
+            <h4 className="font-medium mb-3">Performance Settings</h4>
+            
+            <div className="flex items-center mb-3">
+              <input
+                type="checkbox"
+                id="useBulkImport"
+                checked={true}
+                readOnly
+                className="mr-2 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor="useBulkImport" className="text-sm font-medium">
+                Use optimized bulk import (5-10x faster)
+              </label>
+              <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">New</span>
+            </div>
+
+            <div className="flex items-center">
+              <label htmlFor="batchSize" className="mr-2 text-sm">Batch Size:</label>
+              <input 
+                type="number" 
+                id="batchSize"
+                className="w-24 border p-2 rounded"
+                min="1000"
+                max="10000"
+                value={batchSize}
+                onChange={handleBatchSizeChange}
+              />
+              <span className="ml-2 text-sm text-gray-500">
+                Adjust for better performance with bulk import. Higher values can increase throughput.
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              Files are processed using PostgreSQL's COPY command for optimal performance and memory efficiency.
+            </p>
+          </div>
+          
           <div className="mt-4 bg-blue-50 p-3 rounded-md border border-blue-100 flex items-start">
             <Info size={18} className="text-blue-600 mr-2 mt-0.5 flex-shrink-0" />
             <div className="text-sm text-blue-800">
@@ -961,7 +900,7 @@ const SupplierImport: React.FC = () => {
                 <td colSpan={3} className="px-4 py-2 font-medium">Optional Fields</td>
               </tr>
               
-              {['MOQ', 'Lead Time', 'Payment Terms'].map((field) => (
+              {['Brand', 'Product Name', 'EAN', 'MPN', 'Supplier Stock'].map((field) => (
                 <tr key={field} className="border-t">
                   <td className="px-4 py-2">{field}</td>
                   <td className="px-4 py-2">
@@ -1275,8 +1214,8 @@ const SupplierImport: React.FC = () => {
                 type="number" 
                 id="batchSize"
                 className="w-24 border p-2 rounded"
-                min="50"
-                max="1000"
+                min="500"
+                max="10000"
                 value={batchSize}
                 onChange={handleBatchSizeChange}
               />
@@ -1288,17 +1227,17 @@ const SupplierImport: React.FC = () => {
             <div className="grid grid-cols-3 gap-4 mb-4 text-sm">
               <div className="bg-blue-50 p-2 rounded">
                 <div className="font-semibold">Small Files (&lt;5,000 rows)</div>
-                <div>Batch Size: 100-200</div>
+                <div>Batch Size: 500-1,000</div>
                 <div className="text-xs text-gray-600">Fast processing, low memory</div>
               </div>
               <div className="bg-blue-50 p-2 rounded">
                 <div className="font-semibold">Medium Files (5,000-30,000 rows)</div>
-                <div>Batch Size: 200-400</div>
+                <div>Batch Size: 1,000-2,000</div>
                 <div className="text-xs text-gray-600">Balanced performance</div>
               </div>
               <div className="bg-orange-50 p-2 rounded border border-orange-200">
                 <div className="font-semibold">Large Files (&gt;30,000 rows)</div>
-                <div>Batch Size: 300-800</div>
+                <div>Batch Size: 2,000-5,000</div>
                 <div className="text-xs text-orange-600">More memory needed</div>
               </div>
             </div>
