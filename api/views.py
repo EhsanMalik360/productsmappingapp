@@ -534,16 +534,16 @@ def upload_amazon_data(request):
         print(f"Field mapping: {field_mapping}")
         
         # Create an import job record
-        import_job = ProductImportJob(
+        import_job = ImportJob.objects.create(
+            user=request.user if request.user.is_authenticated else None,
             file_name=original_name,
             file_path=file_path,
-            field_mapping=json.dumps(field_mapping),
+            field_mapping=field_mapping,
             status='pending',
-            import_type='amazon',
+            type='product',
             total_rows=0,
             processed_rows=0
         )
-        import_job.save()
         print(f"Created import job with ID: {import_job.id}")
         
         # Start processing in the background

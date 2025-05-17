@@ -2,7 +2,7 @@ import os
 import time
 import json
 from django.core.management.base import BaseCommand
-from api.models import ProductImportJob
+from api.models import ImportJob
 from api.tasks import process_product_file
 
 class Command(BaseCommand):
@@ -17,7 +17,7 @@ class Command(BaseCommand):
         
         try:
             # Get the job
-            job = ProductImportJob.objects.get(id=job_id)
+            job = ImportJob.objects.get(id=job_id)
             
             # Update status
             job.status = 'processing'
@@ -28,15 +28,15 @@ class Command(BaseCommand):
             process_product_file(job)
             
             self.stdout.write(self.style.SUCCESS(f'Successfully processed import job {job_id}'))
-        except ProductImportJob.DoesNotExist:
+        except ImportJob.DoesNotExist:
             self.stdout.write(self.style.ERROR(f'Import job with ID {job_id} does not exist'))
         except Exception as e:
             self.stdout.write(self.style.ERROR(f'Error processing import job {job_id}: {str(e)}'))
             # Update job status to failed
             try:
-                job = ProductImportJob.objects.get(id=job_id)
+                job = ImportJob.objects.get(id=job_id)
                 job.status = 'failed'
-                job.error_message = str(e)
+                job.status_message = str(e)
                 job.save()
             except Exception:
                 pass 
