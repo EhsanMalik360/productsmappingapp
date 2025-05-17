@@ -282,11 +282,14 @@ def supplier_product_detail(request, pk):
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 # File Upload and Import
-@api_view(['GET', 'POST', 'OPTIONS'])  # Allow more HTTP methods
+@api_view(['GET', 'POST', 'OPTIONS'])
 @parser_classes([MultiPartParser, FormParser])
-@permission_classes([AllowAny])  # Only for development
-@csrf_exempt  # Exempt this view from CSRF protection
+@permission_classes([AllowAny])
+@csrf_exempt
 def upload_supplier_data(request):
+    """
+    Endpoint to handle supplier data uploads with improved memory management
+    """
     # Handle OPTIONS requests (preflight)
     if request.method == 'OPTIONS':
         response = HttpResponse()
@@ -306,7 +309,6 @@ def upload_supplier_data(request):
     print(f"Processing supplier file upload at {request.path}")
     print(f"Content Type: {request.content_type}")
     print(f"Files: {list(request.FILES.keys())}")
-    print(f"Form data: {dict(request.data)}")
     print("=" * 40)
     
     try:
@@ -335,9 +337,9 @@ def upload_supplier_data(request):
         unique_filename = f"{str(uuid.uuid4())}_{uploaded_file.name}"
         file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
         
-        # Save file to disk
+        # Save file to disk in chunks to reduce memory usage
         with open(file_path, 'wb+') as destination:
-            for chunk in uploaded_file.chunks():
+            for chunk in uploaded_file.chunks(chunk_size=1024*1024):  # 1MB chunks
                 destination.write(chunk)
         
         print(f"File saved to {file_path}")
@@ -364,20 +366,10 @@ def upload_supplier_data(request):
                 print(f"Using field mapping: {field_mapping}")
             else:
                 print(f"Unexpected field_mapping format: {type(mapping_data)}")
-                
-        
-        # Get batch size and limit it for safety
-        batch_size = 100
-        if request.data.get('batch_size'):
-            try:
-                batch_size = int(request.data.get('batch_size'))
-                batch_size = min(max(10, batch_size), 1000)  # Limit between 10-1000
-            except (TypeError, ValueError):
-                print("Invalid batch_size, using default")
         
         # Get match options
         match_options = {}
-        if request.data.get('match_options'):
+        if 'match_options' in request.data:
             try:
                 match_options_data = request.data.get('match_options')
                 if isinstance(match_options_data, str):
@@ -386,8 +378,6 @@ def upload_supplier_data(request):
                     match_options = match_options_data
             except (json.JSONDecodeError, TypeError):
                 print(f"Error parsing match_options: {request.data.get('match_options')}")
-                
-        print(f"Match options: {match_options}")
         
         # Create job object
         job = ImportJob.objects.create(
@@ -399,89 +389,39 @@ def upload_supplier_data(request):
             status='pending',
             field_mapping=field_mapping,
             match_options=match_options,
-            batch_size=batch_size
+            batch_size=500  # Use a larger batch size for efficiency
         )
         
         print(f"Created import job with ID: {job.id}")
         
-        # For small files, process directly in the request to provide faster feedback
-        if file_size < 10 * 1024 * 1024:  # Less than 10MB
-            job.status = 'processing'
-            job.save()
-            
-            try:
-                print("Fast-path: Processing file directly (< 10MB)")
-                
-                # Process the file directly (not using Celery)
-                process_supplier_file(job)
-                
-                # Return the completed job
-                serializer = ImportJobSerializer(job)
-                serialized_data = serializer.data
-                
-                # Ensure job_id is present for frontend compatibility
-                serialized_data['job_id'] = str(job.id)
-                
-                print(f"Small file processing complete. Job status: {job.status}")
-                
-                return Response(serialized_data, status=status.HTTP_201_CREATED)
-            except Exception as e:
-                import traceback
-                print(f"Error during processing but continuing: {str(e)}")
-                print(traceback.format_exc())
-                
-                # Update job status
-                job.status = 'failed'
-                job.status_message = str(e)
-                job.save()
-                
-                # Return error but with job ID for tracking
-                return Response({
-                    'id': str(job.id),
-                    'job_id': str(job.id),
-                    'status': 'failed',
-                    'error': str(e)
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # Start background processing for all files
+        # Start processing in the background using threading
+        from django.core.management import call_command
+        import threading
+        thread = threading.Thread(
+            target=lambda: call_command('process_supplier_job', job_id=str(job.id))
+        )
+        thread.daemon = True
+        thread.start()
         
-        # For larger files, queue for background processing
-        print(f"Processing large file in background")
-        
-        # Create a job response with both id and job_id fields for frontend compatibility
-        response_data = {
-            'id': str(job.id),
+        # Return success response immediately with job ID
+        return JsonResponse({
+            'success': True,
+            'message': 'File upload started processing in the background',
             'job_id': str(job.id),
+            'id': str(job.id),
             'file_name': uploaded_file.name,
             'file_size': file_size,
-            'file_path': file_path,
             'type': 'supplier',
-            'status': 'pending', 
-            'message': 'File received. Processing started.'
-        }
-        
-        # Start processing in background
-        try:
-            # Start processing without waiting for it to complete
-            job.status = 'processing'
-            job.save()
-            
-            # Start the background processing (no celery in this version)
-            # Process synchronously for now
-            process_file_upload(job.id)
-            
-            print(f"Processing started for job {job.id}")
-        except Exception as e:
-            print(f"Error queueing processing job: {str(e)}")
-            # Continue anyway as we've already saved the job
-        
-        return Response(response_data, status=status.HTTP_201_CREATED)
+            'status': 'pending'
+        }, status=201)
         
     except Exception as e:
         import traceback
         print(f"Exception in file upload: {str(e)}")
         print(traceback.format_exc())
         return Response({
-            'error': f'Server error: {str(e)}',
-            'detail': traceback.format_exc()
+            'error': f'Server error: {str(e)}'
         }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET', 'POST', 'OPTIONS'])  # Allow more HTTP methods

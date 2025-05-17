@@ -4,17 +4,17 @@ services:
     env: python
     plan: standard
     buildCommand: npm install && npm run build && pip install -r requirements.txt
-    startCommand: gunicorn products_mapping_project.wsgi:application --timeout 300 --workers 2
+    startCommand: gunicorn products_mapping_project.wsgi:application --timeout 300 --workers 1 --threads 4 --max-requests 1000 --max-requests-jitter 50
     scaling:
       minInstances: 1
       maxInstances: 3
-      targetMemoryPercent: 80
-      targetCPUPercent: 80
+      targetMemoryPercent: 90
+      targetCPUPercent: 90
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: WEB_CONCURRENCY
-        value: 2
+        value: 1
       - key: DJANGO_SETTINGS_MODULE
         value: products_mapping_project.settings
       - key: SECRET_KEY
