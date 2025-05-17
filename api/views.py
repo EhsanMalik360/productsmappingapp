@@ -16,11 +16,12 @@ import json
 import pandas as pd
 from datetime import datetime
 from decimal import Decimal
-from .models import Product, Supplier, SupplierProduct, ImportJob, ImportHistory
+from .models import Product, Supplier, SupplierProduct, ImportJob, ImportHistory, ProfitFormula
 from .serializers import (
     ProductSerializer, ProductDetailSerializer,
     SupplierSerializer, SupplierDetailSerializer,
-    SupplierProductSerializer, ImportJobSerializer, ImportHistorySerializer
+    SupplierProductSerializer, ImportJobSerializer, ImportHistorySerializer,
+    ProfitFormulaSerializer
 )
 from .tasks import process_file_upload, process_supplier_file, process_product_file
 from .utils import (
@@ -808,4 +809,112 @@ def fix_duplicates(request):
         return Response({
             'status': 'error',
             'message': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# Profit Formula API Endpoints
+@api_view(['GET', 'POST'])
+def profit_formulas(request):
+    """
+    GET: List all profit formulas
+    POST: Create a new profit formula
+    """
+    supabase = get_supabase_client()
+    
+    if request.method == 'GET':
+        # Get formulas from Supabase
+        # Users can see their own formulas or default formulas (handled by RLS)
+        result = supabase.table('profit_formulas').select('*').order_by('is_default', {'ascending': False}).order_by('created_at', {'ascending': False}).execute()
+        
+        if not result.data:
+            return Response([])
+        
+        return Response(result.data)
+    
+    elif request.method == 'POST':
+        try:
+            # Prepare data for insertion
+            formula_data = {
+                'name': request.data.get('name', 'Custom Formula'),
+                'formula_items': request.data.get('formula_items', []),
+                'is_default': request.data.get('is_default', False),
+            }
+            
+            # If user is authenticated, add user_id
+            if request.user.is_authenticated:
+                formula_data['user_id'] = str(request.user.id)
+                
+                # If setting as default, unset other defaults for this user
+                if formula_data['is_default']:
+                    supabase.table('profit_formulas').update({'is_default': False}).eq('user_id', str(request.user.id)).execute()
+            
+            # Insert the new formula
+            result = supabase.table('profit_formulas').insert(formula_data).execute()
+            
+            if result.data:
+                return Response(result.data[0], status=status.HTTP_201_CREATED)
+            else:
+                return Response({'error': 'Failed to create formula'}, status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET', 'PUT', 'DELETE'])
+def profit_formula_detail(request, pk):
+    """
+    GET: Retrieve a profit formula
+    PUT: Update a profit formula
+    DELETE: Delete a profit formula
+    """
+    supabase = get_supabase_client()
+    
+    try:
+        # Get the formula by ID
+        result = supabase.table('profit_formulas').select('*').eq('id', str(pk)).execute()
+        
+        if not result.data:
+            return Response({'error': 'Formula not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+        formula = result.data[0]
+        
+        # For PUT and DELETE, check if user owns the formula
+        if request.method in ['PUT', 'DELETE']:
+            if request.user.is_authenticated and formula.get('user_id') != str(request.user.id):
+                return Response({'error': 'You do not have permission to modify this formula'}, 
+                               status=status.HTTP_403_FORBIDDEN)
+        
+        if request.method == 'GET':
+            return Response(formula)
+        
+        elif request.method == 'PUT':
+            # Prepare update data
+            update_data = {}
+            
+            if 'name' in request.data:
+                update_data['name'] = request.data['name']
+                
+            if 'formula_items' in request.data:
+                update_data['formula_items'] = request.data['formula_items']
+                
+            if 'is_default' in request.data:
+                update_data['is_default'] = request.data['is_default']
+                
+                # If setting as default, unset other defaults for this user
+                if update_data['is_default'] and request.user.is_authenticated:
+                    supabase.table('profit_formulas').update({'is_default': False}).eq('user_id', str(request.user.id)).neq('id', str(pk)).execute()
+            
+            # Update the formula
+            if update_data:
+                result = supabase.table('profit_formulas').update(update_data).eq('id', str(pk)).execute()
+                
+                if result.data:
+                    return Response(result.data[0])
+                    
+            return Response(formula)  # Return original if no updates
+        
+        elif request.method == 'DELETE':
+            # Delete the formula
+            supabase.table('profit_formulas').delete().eq('id', str(pk)).execute()
+            return Response(status=status.HTTP_204_NO_CONTENT)
+            
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 

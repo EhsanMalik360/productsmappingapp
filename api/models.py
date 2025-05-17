@@ -171,3 +171,25 @@ class ImportHistory(models.Model):
 
     def __str__(self):
         return f"{self.type} import: {self.file_name} ({self.status})" 
+
+class ProfitFormula(models.Model):
+    """
+    Stores profit calculation formulas for the profit analysis module
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=255, default="Custom Formula")
+    formula_items = models.JSONField()
+    is_default = models.BooleanField(default=False)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'profit_formulas'
+        indexes = [
+            models.Index(fields=['user']),
+            models.Index(fields=['is_default']),
+        ]
+    
+    def __str__(self):
+        return f"{self.name} {'(Default)' if self.is_default else ''}" 
