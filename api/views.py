@@ -516,6 +516,13 @@ def upload_amazon_data(request):
             if key.startswith('field_'):
                 field_name = key.replace('field_', '')
                 field_mapping[field_name] = value
+            elif key == 'mapping':
+                # Handle the JSON mapping string that's coming from the client
+                try:
+                    field_mapping = json.loads(value)
+                except json.JSONDecodeError:
+                    print(f"Failed to parse mapping JSON: {value}")
+                    pass
         
         # Create a unique filename
         import uuid
@@ -537,12 +544,13 @@ def upload_amazon_data(request):
         import_job = ImportJob.objects.create(
             user=request.user if request.user.is_authenticated else None,
             file_name=original_name,
+            file_size=uploaded_file.size,  # Add file size which is required
             file_path=file_path,
             field_mapping=field_mapping,
             status='pending',
             type='product',
             total_rows=0,
-            processed_rows=0
+            progress=0
         )
         print(f"Created import job with ID: {import_job.id}")
         
