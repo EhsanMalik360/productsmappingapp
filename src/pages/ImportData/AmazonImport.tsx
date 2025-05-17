@@ -15,7 +15,7 @@ import './ImportData.css';
 const API_URL = import.meta.env.VITE_API_URL || '';
 
 // Define required fields based on Django backend expectations
-const REQUIRED_FIELDS = ['title', 'ean', 'brand', 'sale_price'];
+const REQUIRED_FIELDS = ['title', 'ean', 'brand', 'buy_box_price'];
 
 // Define optional fields that can be mapped
 const OPTIONAL_FIELDS = [
@@ -25,7 +25,6 @@ const OPTIONAL_FIELDS = [
   'units_sold',
   'fba_fees',
   'referral_fee',
-  'buy_box_price',
   'rating',
   'review_count',
   'bought_past_month',

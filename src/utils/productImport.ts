@@ -5,10 +5,10 @@ export interface ProductData {
   title: string;
   ean: string;
   brand: string;
-  sale_price: number;
-  amazon_fee: number;
   buy_box_price: number;
-  units_sold: number;
+  sale_price?: number;
+  amazon_fee?: number;
+  units_sold?: number;
   category?: string | null;
   rating?: number | null;
   review_count?: number | null;
@@ -197,7 +197,7 @@ export const autoMapProductColumns = (csvHeaders: string[]): { [key: string]: st
   console.log('Final automated column mapping result:', mapping);
   
   // Check for unmapped required fields
-  const requiredFields = ['title', 'ean', 'brand', 'sale_price'];
+  const requiredFields = ['title', 'ean', 'brand', 'buy_box_price'];
   const unmappedRequired = requiredFields.filter(field => !mapping[field]);
   if (unmappedRequired.length > 0) {
     console.warn('Warning: Some required fields could not be auto-mapped:', unmappedRequired);
@@ -218,8 +218,8 @@ export const validateProductData = async (data: any): Promise<boolean> => {
     if (!data.brand || typeof data.brand !== 'string') {
       throw new Error('Product brand is required');
     }
-    if (typeof data.sale_price !== 'number' || data.sale_price < 0) {
-      throw new Error('Sale price must be a positive number');
+    if (typeof data.buy_box_price !== 'number' || data.buy_box_price < 0) {
+      throw new Error('Buy Box Price must be a positive number');
     }
     
     // Check for required custom attributes if specified
@@ -271,15 +271,34 @@ export const mapProductData = async (csvData: any[], fieldMapping: { [key: strin
       title: row[fieldMapping['title']]?.trim() || '',
       ean: fixScientificNotation(row[fieldMapping['ean']]),
       brand: row[fieldMapping['brand']]?.trim() || '',
-      sale_price: parseFloat(row[fieldMapping['sale_price']]) || 0,
-      amazon_fee: parseFloat(row[fieldMapping['amazon_fee']]) || 0,
       buy_box_price: parseFloat(row[fieldMapping['buy_box_price']]) || 0,
-      units_sold: parseInt(row[fieldMapping['units_sold']]) || 0,
-      category: row[fieldMapping['category']]?.trim() || null,
-      rating: row[fieldMapping['rating']] ? parseFloat(row[fieldMapping['rating']]) : null,
-      review_count: row[fieldMapping['review_count']] ? parseInt(row[fieldMapping['review_count']]) : null,
       custom_attributes: {}
     };
+    
+    // Add optional fields if they exist in the mapping
+    if (fieldMapping['sale_price']) {
+      productData.sale_price = parseFloat(row[fieldMapping['sale_price']]) || 0;
+    }
+    
+    if (fieldMapping['amazon_fee']) {
+      productData.amazon_fee = parseFloat(row[fieldMapping['amazon_fee']]) || 0;
+    }
+    
+    if (fieldMapping['units_sold']) {
+      productData.units_sold = parseInt(row[fieldMapping['units_sold']]) || 0;
+    }
+    
+    if (fieldMapping['category']) {
+      productData.category = row[fieldMapping['category']]?.trim() || null;
+    }
+    
+    if (fieldMapping['rating']) {
+      productData.rating = row[fieldMapping['rating']] ? parseFloat(row[fieldMapping['rating']]) : null;
+    }
+    
+    if (fieldMapping['review_count']) {
+      productData.review_count = row[fieldMapping['review_count']] ? parseInt(row[fieldMapping['review_count']]) : null;
+    }
     
     // Map any custom attributes found in the CSV
     if (customAttributes) {
