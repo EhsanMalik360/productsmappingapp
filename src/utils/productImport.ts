@@ -28,7 +28,19 @@ export const autoMapProductColumns = (csvHeaders: string[]): { [key: string]: st
     'category': ['category', 'product_category', 'department', 'niche'],
     'rating': ['rating', 'product_rating', 'star_rating', 'stars'],
     'review_count': ['review_count', 'reviews', 'review', 'num_reviews', 'number_of_reviews'],
-    'mpn': ['mpn', 'manufacturer_part_number', 'part_number', 'model_number']
+    'mpn': ['mpn', 'manufacturer_part_number', 'part_number', 'model_number'],
+    // Added missing optional fields
+    'asin': ['asin', 'amazon_id', 'amazon_identifier'],
+    'upc': ['upc', 'universal_product_code'],
+    'fba_fees': ['fba_fees', 'fba_fee', 'fulfillment_fee', 'fulfillment_by_amazon_fee'],
+    'referral_fee': ['referral_fee', 'amazon_referral', 'referral'],
+    'bought_past_month': ['bought_past_month', 'bought_last_month', 'purchases_past_month', 'monthly_purchases'],
+    'estimated_monthly_revenue': ['estimated_monthly_revenue', 'monthly_revenue', 'est_revenue', 'revenue_monthly'],
+    'fba_sellers': ['fba_sellers', 'fba_seller_count', 'seller_count', 'num_sellers'],
+    'amazon_instock_rate': ['amazon_instock_rate', 'instock_rate', 'in_stock_rate', 'stock_rate'],
+    'dominant_seller_percentage': ['dominant_seller_percentage', 'dominant_seller', 'main_seller_percentage'],
+    'buy_box_seller_name': ['buy_box_seller_name', 'buy_box_seller', 'seller_name', 'winning_seller'],
+    'live_offers_count': ['live_offers_count', 'live_offers', 'offer_count', 'offers', 'active_offers']
   };
 
   const mapping: { [key: string]: string } = {};
@@ -66,6 +78,10 @@ export const autoMapProductColumns = (csvHeaders: string[]): { [key: string]: st
       }
     }
   });
+
+  // Log the mapping results for debugging
+  console.log('CSV Headers:', csvHeaders);
+  console.log('Automated column mapping result:', mapping);
 
   return mapping;
 };
