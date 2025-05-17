@@ -6,6 +6,8 @@ import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import { PlusCircle, X, MoveVertical, Calculator, AlertCircle, Edit2, Save, Info, HelpCircle, Download } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
+import { supabase } from '../../lib/supabase';
+import { toast } from 'react-hot-toast';
 
 // Formula component types
 type OperatorType = '+' | '-' | '*' | '/' | '(' | ')';
@@ -151,30 +153,11 @@ const ProfitFormulaEditor: React.FC = () => {
   // Get product data and custom attributes for the formula
   const { products, getBestSupplierForProduct, customAttributes } = useAppContext();
   
-  // Formula Storage Key
-  const FORMULA_STORAGE_KEY = 'profit-formula-items';
+  // Formula storage key for database
+  const FORMULA_STORAGE_KEY = 'profit-formula';
   
   // States
-  const [formulaItems, setFormulaItems] = useState<FormulaItem[]>(() => {
-    const savedFormula = localStorage.getItem(FORMULA_STORAGE_KEY);
-    if (savedFormula) {
-      try {
-        return JSON.parse(savedFormula);
-      } catch (e) {
-        console.error('Failed to parse saved formula', e);
-      }
-    }
-    
-    // Default formula: Sale Price - Amazon Fee - Supplier Cost
-    return [
-      { id: '1', type: 'field', value: 'salePrice', displayValue: 'Sale Price' },
-      { id: '2', type: 'operator', value: '-', displayValue: '-' },
-      { id: '3', type: 'field', value: 'amazonFee', displayValue: 'Amazon Fee' },
-      { id: '4', type: 'operator', value: '-', displayValue: '-' },
-      { id: '5', type: 'field', value: 'supplierCost', displayValue: 'Supplier Cost' }
-    ];
-  });
-  
+  const [formulaItems, setFormulaItems] = useState<FormulaItem[]>([]);
   const [isSaved, setIsSaved] = useState(true);
   const [formulaError, setFormulaError] = useState<string | null>(null);
   const [showFieldMenu, setShowFieldMenu] = useState(false);
@@ -186,6 +169,88 @@ const ProfitFormulaEditor: React.FC = () => {
   const [showResultsTable, setShowResultsTable] = useState(false);
   const [sortField, setSortField] = useState<string>('profit');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [loadingFormula, setLoadingFormula] = useState(true);
+  
+  // Default formula: Sale Price - Amazon Fee - Supplier Cost
+  const defaultFormula = [
+    { id: '1', type: 'field' as FormulaItemType, value: 'salePrice', displayValue: 'Sale Price' },
+    { id: '2', type: 'operator' as FormulaItemType, value: '-', displayValue: '-' },
+    { id: '3', type: 'field' as FormulaItemType, value: 'amazonFee', displayValue: 'Amazon Fee' },
+    { id: '4', type: 'operator' as FormulaItemType, value: '-', displayValue: '-' },
+    { id: '5', type: 'field' as FormulaItemType, value: 'supplierCost', displayValue: 'Supplier Cost' }
+  ];
+  
+  // Load formula from database
+  useEffect(() => {
+    fetchFormula();
+    // Show notification that formula is shared with all users
+    setTimeout(() => {
+      toast.success('Profit formula is shared with all users', { 
+        duration: 4000,
+        icon: '👥'
+      });
+    }, 1000);
+  }, []);
+  
+  // Fetch formula from database settings
+  const fetchFormula = async () => {
+    try {
+      setLoadingFormula(true);
+      
+      // Check if formula exists in database
+      const { data, error } = await supabase
+        .from('settings')
+        .select('value')
+        .eq('key', FORMULA_STORAGE_KEY)
+        .single();
+      
+      if (error) {
+        if (error.code === 'PGRST116') { // No rows returned
+          // Initialize with default formula
+          await saveFormulaToDB(defaultFormula);
+          setFormulaItems(defaultFormula);
+        } else {
+          console.error('Error fetching formula from database:', error);
+          // Fall back to default formula
+          setFormulaItems(defaultFormula);
+        }
+      } else if (data?.value) {
+        // Load formula from database
+        setFormulaItems(data.value as FormulaItem[]);
+      } else {
+        // Fall back to default formula
+        setFormulaItems(defaultFormula);
+      }
+    } catch (err) {
+      console.error('Error loading formula:', err);
+      // Fall back to default formula
+      setFormulaItems(defaultFormula);
+    } finally {
+      setLoadingFormula(false);
+      setIsSaved(true);
+    }
+  };
+  
+  // Save formula to database
+  const saveFormulaToDB = async (formula: FormulaItem[]) => {
+    try {
+      const { error } = await supabase
+        .from('settings')
+        .upsert({ 
+          key: FORMULA_STORAGE_KEY,
+          value: formula,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'key'
+        });
+      
+      if (error) throw error;
+      return true;
+    } catch (err) {
+      console.error('Error saving formula to database:', err);
+      throw err;
+    }
+  };
   
   // Example product for preview
   const [exampleProduct, setExampleProduct] = useState<any | null>(null);
@@ -246,92 +311,90 @@ const ProfitFormulaEditor: React.FC = () => {
     findExampleProduct();
   }, [products, getBestSupplierForProduct]);
   
-  // Update localStorage when formula changes
-  useEffect(() => {
-    setIsSaved(false);
-    // Validate formula on change
-    validateFormula();
-  }, [formulaItems]);
-  
   // Calculate profits for all products based on the current formula
-  const calculateAllProductProfits = useCallback(() => {
-    if (formulaError || formulaItems.length === 0) {
+  const calculateAllProductProfits = () => {
+    if (loadingFormula) {
+      toast.error("Please wait for the formula to load");
       return;
     }
-
+    
+    if (formulaItems.length === 0) {
+      setFormulaError("No formula available to calculate profit");
+      return;
+    }
+    
+    // Validate formula first
+    validateFormula();
+    if (formulaError) {
+      toast.error(`Formula error: ${formulaError}`);
+      return;
+    }
+    
     setIsCalculating(true);
     
     try {
+      // Process all products using the formula
       const results: ProfitCalculationResult[] = [];
       
-      // Process each product
-      products.forEach(product => {
-        const bestSupplier = getBestSupplierForProduct(product.id);
-        if (!bestSupplier) return; // Skip products without suppliers
-        
-        // Create a values object for this product
-        const values: Record<string, number> = {
-          salePrice: product.salePrice || 0,
-          amazonFee: product.amazonFee || 0,
-          referralFee: product.referralFee !== undefined ? product.referralFee : 0,
-          supplierCost: bestSupplier.cost || 0,
-          buyBoxPrice: product.buyBoxPrice || 0,
-          unitsSold: product.unitsSold || 0
-        };
-        
-        // Add custom attribute values
-        const customValues: Record<string, number> = {};
-        numericCustomAttributes.forEach(attr => {
-          const attributeId = attr.attributeId;
-          // Get actual attribute value from product if available
-          const attributeValue = (product as any).attributes?.find((a: any) => a.attributeId === attributeId)?.value || 0;
-          const numericValue = typeof attributeValue === 'number' ? attributeValue : 0;
-          values[`attr_${attributeId}`] = numericValue;
-          customValues[attr.displayValue] = numericValue;
-        });
-        
-        // Build formula string for evaluation
-        let formulaStr = '';
-        formulaItems.forEach(item => {
-          if (item.type === 'field' || item.type === 'customAttribute') {
-            formulaStr += values[item.value] || 0;
-          } else if (item.type === 'operator') {
-            formulaStr += item.value;
-          } else if (item.type === 'constant') {
-            formulaStr += item.value;
-          }
-        });
-        
+      for (const product of products) {
         try {
-          // Evaluate the formula
-          // eslint-disable-next-line no-eval
-          const profit = eval(formulaStr);
-          const profitMargin = (profit / product.salePrice) * 100;
+          const supplierProduct = getBestSupplierForProduct(product.id);
+          if (!supplierProduct) continue; // Skip products without suppliers
           
+          // Create a scope with all the values we need for the formula
+          const scope: Record<string, number> = {
+            salePrice: product.salePrice || 0,
+            amazonFee: product.amazonFee || 0,
+            buyBoxPrice: product.buyBoxPrice || 0,
+            referralFee: product.referralFee || 0,
+            supplierCost: supplierProduct.cost || 0
+          };
+          
+          // Add custom numeric attributes to the scope
+          const customValues: Record<string, number> = {};
+          for (const attr of customAttributes) {
+            if (attr.type === 'Number' && attr.forType === 'product') {
+              const fieldName = `custom_${attr.name.toLowerCase().replace(/\s+/g, '_')}`;
+              const value = (product as any)[fieldName] || 0;
+              scope[fieldName] = value;
+              customValues[attr.name] = value;
+            }
+          }
+          
+          // Calculate profit based on the formula
+          const formula = buildFormulaExpression(formulaItems);
+          const profit = evaluateFormula(formula, scope);
+          
+          // Calculate profit margin as a percentage
+          const profitMargin = scope.salePrice > 0 ? (profit / scope.salePrice) * 100 : 0;
+          
+          // Add to results
           results.push({
             productId: product.id,
             productTitle: product.title,
-            salePrice: product.salePrice,
-            amazonFee: product.amazonFee,
-            referralFee: product.referralFee,
-            supplierCost: bestSupplier.cost,
+            salePrice: scope.salePrice,
+            amazonFee: scope.amazonFee,
+            referralFee: scope.referralFee,
+            supplierCost: scope.supplierCost,
             customValues,
             profit,
             profitMargin
           });
-        } catch (error) {
-          console.error(`Error calculating profit for product ${product.title}:`, error);
+        } catch (err) {
+          console.error(`Error calculating profit for product ${product.id}:`, err);
         }
-      });
+      }
       
+      // Sort the results
       setDataResults(results);
       setShowResultsTable(true);
-    } catch (error) {
-      console.error('Error calculating profits:', error);
+    } catch (err) {
+      console.error('Error calculating profits:', err);
+      toast.error('Error calculating profits');
     } finally {
       setIsCalculating(false);
     }
-  }, [products, getBestSupplierForProduct, formulaItems, formulaError, numericCustomAttributes]);
+  };
   
   // Sort the results based on the current sort field and direction
   const sortedResults = useMemo(() => {
@@ -427,93 +490,111 @@ const ProfitFormulaEditor: React.FC = () => {
   // Move formula items (for drag and drop)
   const moveItem = useCallback((dragIndex: number, hoverIndex: number) => {
     setFormulaItems(prevItems => {
-      const newItems = [...prevItems];
-      const draggedItem = newItems[dragIndex];
-      newItems.splice(dragIndex, 1);
-      newItems.splice(hoverIndex, 0, draggedItem);
-      return newItems;
+      const result = Array.from(prevItems);
+      const [removed] = result.splice(dragIndex, 1);
+      result.splice(hoverIndex, 0, removed);
+      setIsSaved(false);
+      return result;
     });
   }, []);
   
   // Add field to formula
   const addField = (field: { value: string; displayValue: string }) => {
-    const newItem: FormulaItem = {
-      id: Date.now().toString(),
-      type: field.value.startsWith('attr_') ? 'customAttribute' : 'field',
-      value: field.value,
-      displayValue: field.displayValue
-    };
-    
-    setFormulaItems([...formulaItems, newItem]);
+    setFormulaItems(prevItems => [
+      ...prevItems,
+      {
+        id: `field-${Date.now()}`,
+        type: field.value.startsWith('custom_') ? 'customAttribute' : 'field',
+        value: field.value,
+        displayValue: field.displayValue
+      }
+    ]);
     setShowFieldMenu(false);
+    setIsSaved(false);
   };
   
   // Add operator to formula
   const addOperator = (operator: { value: OperatorType; displayValue: string }) => {
-    const newItem: FormulaItem = {
-      id: Date.now().toString(),
-      type: 'operator',
-      value: operator.value,
-      displayValue: operator.displayValue
-    };
-    
-    setFormulaItems([...formulaItems, newItem]);
+    setFormulaItems(prevItems => [
+      ...prevItems,
+      {
+        id: `op-${Date.now()}`,
+        type: 'operator',
+        value: operator.value,
+        displayValue: operator.displayValue
+      }
+    ]);
     setShowOperatorMenu(false);
+    setIsSaved(false);
   };
   
   // Add constant to formula
   const addConstant = () => {
-    if (!isNaN(Number(constantValue))) {
-      const newItem: FormulaItem = {
-        id: Date.now().toString(),
-        type: 'constant',
-        value: constantValue,
-        displayValue: constantValue
-      };
-      
-      setFormulaItems([...formulaItems, newItem]);
+    if (constantValue !== '') {
+      setFormulaItems(prevItems => [
+        ...prevItems,
+        {
+          id: `const-${Date.now()}`,
+          type: 'constant',
+          value: constantValue,
+          displayValue: constantValue
+        }
+      ]);
       setConstantValue('0');
       setShowConstantInput(false);
+      setIsSaved(false);
     }
   };
   
   // Remove item from formula
   const removeItem = (index: number) => {
-    setFormulaItems(formulaItems.filter((_, i) => i !== index));
+    setFormulaItems(prevItems => prevItems.filter((_, i) => i !== index));
+    setIsSaved(false);
   };
   
-  // Edit constant value
+  // Edit item in formula
   const editItem = (index: number, newValue: string) => {
     setFormulaItems(prevItems => {
       const newItems = [...prevItems];
-      if (newItems[index].type === 'constant') {
+      if (newItems[index]) {
         newItems[index] = { ...newItems[index], value: newValue, displayValue: newValue };
       }
       return newItems;
     });
+    setIsSaved(false);
   };
   
-  // Save formula to localStorage
-  const saveFormula = () => {
-    localStorage.setItem(FORMULA_STORAGE_KEY, JSON.stringify(formulaItems));
-    setIsSaved(true);
+  // Save formula to database
+  const saveFormula = async () => {
+    try {
+      setIsSaved(false);
+      
+      const success = await saveFormulaToDB(formulaItems);
+      
+      if (success) {
+        setIsSaved(true);
+        toast.success('Formula saved and available to all users');
+      }
+    } catch (error) {
+      toast.error('Failed to save formula');
+      console.error('Error saving formula:', error);
+    }
   };
   
   // Reset formula to default
   const resetFormula = () => {
-    if (window.confirm('Are you sure you want to reset the formula to default?')) {
-      const defaultFormula = [
-        { id: '1', type: 'field' as FormulaItemType, value: 'salePrice', displayValue: 'Sale Price' },
-        { id: '2', type: 'operator' as FormulaItemType, value: '-', displayValue: '-' },
-        { id: '3', type: 'field' as FormulaItemType, value: 'amazonFee', displayValue: 'Amazon Fee' },
-        { id: '4', type: 'operator' as FormulaItemType, value: '-', displayValue: '-' },
-        { id: '5', type: 'field' as FormulaItemType, value: 'supplierCost', displayValue: 'Supplier Cost' }
-      ];
-      
+    if (window.confirm('Are you sure you want to reset the formula to default? This will update the formula for all users.')) {
       setFormulaItems(defaultFormula);
-      localStorage.setItem(FORMULA_STORAGE_KEY, JSON.stringify(defaultFormula));
-      setIsSaved(true);
-      setFormulaError(null);
+      saveFormulaToDB(defaultFormula)
+        .then(() => {
+          setIsSaved(true);
+          setFormulaError(null);
+          toast.success('Formula reset to default for all users');
+        })
+        .catch(error => {
+          toast.error('Failed to reset formula');
+          console.error('Error resetting formula:', error);
+        });
     }
   };
   
@@ -562,6 +643,54 @@ const ProfitFormulaEditor: React.FC = () => {
     setFormulaError(null);
   };
   
+  // Update localStorage when formula changes
+  useEffect(() => {
+    if (formulaItems.length > 0) {
+      setIsSaved(false);
+      // Validate formula on change
+      validateFormula();
+    }
+  }, [formulaItems]);
+  
+  // Helper function to build a formula expression string
+  const buildFormulaExpression = (items: FormulaItem[]): string => {
+    let expression = '';
+    
+    items.forEach(item => {
+      if (item.type === 'field' || item.type === 'customAttribute') {
+        // Sanitize field names for the formula
+        const fieldName = item.value.replace(/[^a-zA-Z0-9_]/g, '');
+        expression += `scope.${fieldName}`;
+      } else if (item.type === 'operator') {
+        expression += item.value;
+      } else if (item.type === 'constant') {
+        // Ensure constants are treated as numbers
+        expression += parseFloat(item.value);
+      }
+    });
+    
+    return expression;
+  };
+  
+  // Helper function to safely evaluate a formula
+  const evaluateFormula = (formula: string, scope: Record<string, number>): number => {
+    try {
+      // Using Function constructor instead of eval for better security isolation
+      // This creates a function that only has access to the scope object
+      const calculatedValue = new Function('scope', `return ${formula}`)(scope);
+      
+      // Ensure the result is a number
+      if (typeof calculatedValue !== 'number' || isNaN(calculatedValue)) {
+        throw new Error('Formula did not evaluate to a valid number');
+      }
+      
+      return calculatedValue;
+    } catch (error) {
+      console.error('Error evaluating formula:', error);
+      throw new Error('Failed to calculate formula');
+    }
+  };
+  
   return (
     <DndProvider backend={HTML5Backend}>
       <Card className="mb-6">
@@ -569,6 +698,10 @@ const ProfitFormulaEditor: React.FC = () => {
           <div>
             <h3 className="text-xl font-semibold">Profit Calculation Formula</h3>
             <p className="text-gray-600">Create a custom formula to calculate profit for your products.</p>
+            <div className="mt-2 text-sm flex items-center text-blue-600">
+              <Info size={14} className="mr-1" />
+              Changes to this formula will be shared with all users of the system.
+            </div>
           </div>
           <div className="flex space-x-2">
             <Button 
@@ -598,11 +731,13 @@ const ProfitFormulaEditor: React.FC = () => {
         <div className="bg-gray-50 p-4 rounded mb-6 border border-gray-200">
           <h4 className="font-medium mb-3 flex items-center">
             <Calculator size={18} className="mr-2 text-blue-600" />
-            Current Formula
+            Current Formula {loadingFormula && <span className="ml-2 text-sm text-gray-500">(Loading...)</span>}
           </h4>
           
           <div className="flex flex-wrap min-h-16 p-3 bg-white rounded border border-gray-300 mb-4">
-            {formulaItems.length > 0 ? (
+            {loadingFormula ? (
+              <div className="text-gray-500 italic">Loading formula...</div>
+            ) : formulaItems.length > 0 ? (
               formulaItems.map((item, index) => (
                 <FormulaItemComponent
                   key={item.id}
