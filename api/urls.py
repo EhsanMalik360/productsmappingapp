@@ -36,10 +36,6 @@ urlpatterns = [
     # Profit analysis
     path('profit-analysis/', views.profit_analysis, name='profit_analysis'),
     
-    # Profit formulas
-    path('profit-formulas/', views.profit_formulas, name='profit_formulas'),
-    path('profit-formulas/<uuid:pk>/', views.profit_formula_detail, name='profit_formula_detail'),
-    
     # Import endpoints with explicit debug path
     path('upload-debug/amazon/', csrf_exempt(views.upload_amazon_data), name='debug_amazon_upload'),
     path('upload-debug/supplier/', csrf_exempt(views.upload_supplier_data), name='debug_supplier_upload'),

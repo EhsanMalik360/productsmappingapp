@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from .models import (
     Product, Supplier, SupplierProduct,
-    ImportJob, ImportHistory, ProfitFormula
+    ImportJob, ImportHistory
 )
 
 
@@ -40,9 +40,18 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         return obj.supplier_products.count()
     
     def get_suppliers(self, obj):
-        from .serializers import SupplierProductSerializer
-        suppliers = obj.supplier_products.all().select_related('supplier')[:5]
-        return SupplierProductSerializer(suppliers, many=True).data
+        supplier_products = obj.supplier_products.all().select_related('supplier')[:5]
+        return [
+            {
+                'id': sp.supplier.id,
+                'name': sp.supplier.name,
+                'cost': float(sp.cost),
+                'moq': sp.moq,
+                'lead_time': sp.lead_time,
+                'match_method': sp.match_method,
+            }
+            for sp in supplier_products
+        ]
 
 
 class SupplierProductSerializer(serializers.ModelSerializer):
@@ -57,7 +66,7 @@ class SupplierProductSerializer(serializers.ModelSerializer):
         return obj.supplier.name if obj.supplier else None
     
     def get_product_title(self, obj):
-        return obj.product.title if obj.product else obj.product_name
+        return obj.product.title if obj.product else None
 
 
 class ImportJobSerializer(serializers.ModelSerializer):
@@ -69,11 +78,4 @@ class ImportJobSerializer(serializers.ModelSerializer):
 class ImportHistorySerializer(serializers.ModelSerializer):
     class Meta:
         model = ImportHistory
-        fields = '__all__'
-
-
-class ProfitFormulaSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = ProfitFormula
-        fields = ['id', 'name', 'formula_items', 'is_default', 'user', 'created_at', 'updated_at']
-        read_only_fields = ['id', 'created_at', 'updated_at'] 
+        fields = '__all__' 
