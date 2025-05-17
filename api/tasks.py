@@ -849,15 +849,11 @@ def process_supplier_file_with_orm(job, df, field_mapping):
         
         print(f"🚀 Starting batch processing of {total_rows} rows...")
         
-        # DEBUG: Check Supabase connection by testing a simple query
+        # Verify Supabase connection
         try:
-            # Correct syntax for PostgREST API: use .select() with count parameter
-            test_result = supabase.table('supplier_products').select('id', count='exact').limit(1).execute()
-            print(f"🔍 DEBUG: Supabase connection test: {test_result}")
-            print(f"🔍 DEBUG: Connection established, table accessible")
+            supabase.table('supplier_products').select('id', count='exact').limit(1).execute()
         except Exception as conn_error:
-            print(f"⚠️ DEBUG: Supabase connection test failed: {str(conn_error)}")
-            print(f"⚠️ DEBUG: Error type: {type(conn_error)}")
+            print(f"⚠️ Error connecting to Supabase: {str(conn_error)}")
         
         # PERFORMANCE OPTIMIZATION: Increase reporting interval for large datasets
         progress_step = max(1, min(total_rows // 40, 500))  # Less frequent updates for large files
@@ -930,15 +926,11 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                 
                 # Skip duplicates within the same batch - using composite keys
                 composite_key = None
-                skip_reason = None
                 
                 # First check if we have at least one identifier
                 has_identifier = product_id or ean or mpn
                 
                 if not has_identifier:
-                    # Log missing identifiers but still process the record with a generated ID
-                    if index % 50 == 0:  # Avoid too many log messages
-                        print(f"⚠️ DEBUG: Row {index} has no product_id, EAN, or MPN identifiers. Using name as fallback.")
                     # Use product name as a fallback identifier if available
                     if product_name:
                         composite_key = f"{supplier['id']}_{product_name}"
@@ -946,14 +938,12 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                 elif product_id:
                     composite_key = f"{supplier['id']}_{product_id}"
                     if composite_key in seen_product_ids:
-                        skip_reason = f"duplicate product_id: {product_id}"
                         deduped_count += 1
                         continue
                     seen_product_ids.add(composite_key)
                 elif ean:
                     composite_key = f"{supplier['id']}_{ean}"
                     if composite_key in seen_eans:
-                        skip_reason = f"duplicate EAN: {ean}"
                         deduped_count += 1
                         continue
                     seen_eans.add(composite_key)
@@ -961,14 +951,9 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                     # Add MPN as another identifier option
                     composite_key = f"{supplier['id']}_{mpn}"
                     if composite_key in seen_product_ids:
-                        skip_reason = f"duplicate MPN: {mpn}"
                         deduped_count += 1
                         continue
                     seen_product_ids.add(composite_key)
-                
-                # Log skipped records
-                if skip_reason and (index < 5 or index % 50 == 0):  # Log first few and occasional samples
-                    print(f"⚠️ DEBUG: Skipping row {index} due to {skip_reason}")
                 
                 # Extract remaining data fields
                 brand = None
@@ -1019,85 +1004,38 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                 supplier_product_data = sanitize_json_object(supplier_product_data)
                 supplier_product_batch.append(supplier_product_data)
                 
-                # Log more frequent progress to diagnose batch filling issue
-                # Increase frequency for better visibility when debugging
-                if index < 10 or index % 20 == 0 or index == total_rows - 1:
-                    print(f"🔍 DEBUG: Added record {index} to batch. Current batch size: {len(supplier_product_batch)}")
-                    if index < 5:  # Log some sample data for first few records
-                        print(f"🔍 DEBUG: Record sample - EAN: {ean}, Name: {product_name[:30]}...")
+                # Log occasional progress for monitoring
+                if index % 100 == 0:
+                    print(f"📊 Processing record {index}/{total_rows}, batch size: {len(supplier_product_batch)}")
                 
                 # OPTIMIZATION: Process in larger batches for better performance
-                # Debug the batch processing condition
                 is_last_row = (index == total_rows - 1)
                 is_batch_full = (len(supplier_product_batch) >= batch_size)
                 
-                if is_last_row:
-                    print(f"🔍 DEBUG: Processing final row {index}, batch size: {len(supplier_product_batch)}")
-                
                 if is_batch_full or is_last_row:
-                    print(f"🔍 DEBUG: Batch threshold reached. Batch full: {is_batch_full}, Last row: {is_last_row}")
                     if supplier_product_batch:
-                        # DEBUG: Print sample of the batch data to verify structure
-                        print(f"🔍 DEBUG: Batch contains {len(supplier_product_batch)} records")
-                        if supplier_product_batch:
-                            sample = supplier_product_batch[0]
-                            print(f"🔍 DEBUG: Sample record: supplier_id={sample['supplier_id']}, ean={sample['ean']}, product_name={sample['product_name']}")
+                        # Log batch processing
+                        print(f"📤 Processing batch of {len(supplier_product_batch)} records")
                         
                         try:
                             # Use batch upsert operation instead of individual RPC calls
                             print(f"📤 Sending batch of {len(supplier_product_batch)} records to Supabase")
                             
-                            # First attempt - try without specifying the conflict field
+                            # Attempt upsert operation
                             try:
-                                # Log the exact API call we're about to make
-                                print(f"🔍 DEBUG: Attempting upsert with table('supplier_products').upsert() method")
-                                print(f"🔍 DEBUG: Batch contains {len(supplier_product_batch)} items")
-                                
-                                # Dump critical info about the batch
-                                print(f"🔍 DEBUG: First 3 EANs in batch: {[item.get('ean', 'None') for item in supplier_product_batch[:3]]}")
-                                print(f"🔍 DEBUG: First 3 MPNs in batch: {[item.get('mpn', 'None') for item in supplier_product_batch[:3]]}")
-                                
-                                # Check if all required fields are present in the first item
-                                if supplier_product_batch:
-                                    sample = supplier_product_batch[0]
-                                    print(f"🔍 DEBUG: Sample batch item keys: {list(sample.keys())}")
-                                    # Check if any values are None that shouldn't be
-                                    print(f"🔍 DEBUG: supplier_id: {sample.get('supplier_id', 'MISSING')}")
-                                    print(f"🔍 DEBUG: Full sample item: {sample}")
-                                    
-                                # Attempt with just the primary key (id) as the conflict target
-                                # Explicitly specify the onConflict parameter 
-                                print(f"🔍 DEBUG: Executing upsert operation now...")
-                                # Try without the on_conflict parameter to see if that's causing issues
+                                # Attempt database upsert
                                 result = supabase.table('supplier_products').upsert(
                                     supplier_product_batch
                                 ).execute()
                                 
-                                # Log the complete response for debugging
-                                print(f"🔍 DEBUG: Upsert API response: {result}")
-                                print(f"🔍 DEBUG: Response data type: {type(result)}")
-                                print(f"🔍 DEBUG: Response has data attribute: {'data' in dir(result)}")
-                                if hasattr(result, 'data'):
-                                    print(f"🔍 DEBUG: Response data: {result.data}")
-                                    print(f"🔍 DEBUG: Response data type: {type(result.data)}")
-                                
-                                # Only count records that were actually inserted/updated
+                                # Count successful records
                                 if result.data:
                                     successful_count += len(result.data)
                                     print(f"✅ Bulk upsert complete: {len(result.data)} records processed")
                                 else:
                                     print(f"⚠️ Bulk upsert returned no data, possible issue with insertion")
-                                    print(f"Response: {result}")
-                                    print(f"⚠️ DEBUG: Full response attributes: {dir(result)}")
-                                    if hasattr(result, 'error'):
-                                        print(f"⚠️ DEBUG: Error details: {result.error}")
                                     raise Exception("Supabase upsert operation returned no data")
                             except Exception as pk_error:
-                                print(f"⚠️ DEBUG: Exception type: {type(pk_error)}")
-                                print(f"⚠️ DEBUG: Exception details: {str(pk_error)}")
-                                print(f"⚠️ DEBUG: Full traceback:")
-                                import traceback
-                                traceback.print_exc()
                                 print(f"⚠️ Primary key upsert failed: {str(pk_error)}")
                                 
                                 print(f"🔄 Using optimized bulk insert strategy instead")
@@ -1287,42 +1225,21 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                 error_count += 1
                 continue
         
-        # Check if we have any remaining items in batch that weren't processed
+        # Process any remaining items in the batch
         if supplier_product_batch:
-            print(f"🔍 DEBUG: Found {len(supplier_product_batch)} unprocessed items in batch at end of processing")
-            print(f"🔍 DEBUG: Forcing final batch processing")
-            print(f"🔍 DEBUG: Total rows processed: {total_rows}, rows in final batch: {len(supplier_product_batch)}")
-            print(f"🔍 DEBUG: Expected to process approximately {total_rows} records, but only {successful_count} successful so far")
+            print(f"📤 Processing final batch of {len(supplier_product_batch)} records")
             
             try:
-                # Log the batch details explicitly
-                print(f"🔍 DEBUG: Final batch contains {len(supplier_product_batch)} items")
-                
-                # Check if all required fields are present in the first item
-                if supplier_product_batch:
-                    sample = supplier_product_batch[0]
-                    print(f"🔍 DEBUG: Sample batch item keys: {list(sample.keys())}")
-                    # Check if any values are None that shouldn't be
-                    print(f"🔍 DEBUG: supplier_id: {sample.get('supplier_id', 'MISSING')}")
-                
-                # Use the upsert method for final batch for consistency
-                print(f"🔍 DEBUG: Attempting final batch upsert")
-                # Also dump the first few items for debugging
-                if supplier_product_batch:
-                    print(f"🔍 DEBUG: First 3 EANs in final batch: {[item.get('ean', 'None') for item in supplier_product_batch[:3]]}")
-                
+                # Use upsert for final batch
                 result = supabase.table('supplier_products').upsert(
                     supplier_product_batch
                 ).execute()
-                
-                print(f"🔍 DEBUG: Final insert result: {result}")
                 
                 if hasattr(result, 'data') and result.data:
                     successful_count += len(result.data)
                     print(f"✅ Final batch insertion completed: {len(result.data)} records processed")
             except Exception as e:
-                print(f"⚠️ DEBUG: Final batch insertion failed: {str(e)}")
-                print(f"⚠️ DEBUG: Error type: {type(e)}")
+                print(f"⚠️ Final batch insertion failed: {str(e)}")
                 error_count += len(supplier_product_batch)
                 
         # Update job with results
@@ -1353,32 +1270,22 @@ def process_supplier_file_with_orm(job, df, field_mapping):
             created_by=job.user
         )
         
-        # DEBUG: Verify data was actually stored by querying the database
+        # Verify data was actually stored
         try:
-            # Query Supabase to confirm records were inserted - using correct PostgREST syntax
+            # Query for actual record count
             supplier_id = supplier['id']
             verify_result = supabase.table('supplier_products').select('id', count='exact').eq('supplier_id', supplier_id).execute()
             
-            # The count should be available in the response
+            # Get the count from the response
             actual_count = verify_result.count if hasattr(verify_result, 'count') else 0
             
-            print(f"🔍 DEBUG: VERIFICATION - Records found in database for supplier {supplier_id}: {actual_count}")
-            print(f"🔍 DEBUG: VERIFICATION - Expected successful records: {successful_count}")
-            print(f"🔍 DEBUG: VERIFICATION - Response details: {verify_result}")
+            # Log final verification
+            print(f"✓ Database verification: {actual_count} records found for supplier {supplier['name']}")
             
             if actual_count == 0 and successful_count > 0:
-                print(f"⚠️ DEBUG: CRITICAL ERROR - Records were reported as successful but not found in database!")
-            elif actual_count > 0 and successful_count == 0:
-                print(f"⚠️ DEBUG: UNUSUAL CONDITION - Records found in database but none reported as successful!")
-                # Try to fetch a sample record to confirm
-                try:
-                    sample = supabase.table('supplier_products').select('*').eq('supplier_id', supplier_id).limit(1).execute()
-                    print(f"🔍 DEBUG: Sample record: {sample.data[0] if sample.data else 'None'}")
-                except Exception as sample_error:
-                    print(f"⚠️ DEBUG: Failed to fetch sample record: {str(sample_error)}")
+                print(f"⚠️ WARNING: Records were reported as successful but not found in database!")
         except Exception as verify_error:
-            print(f"⚠️ DEBUG: Verification failed: {str(verify_error)}")
-            print(f"⚠️ DEBUG: Verification error type: {type(verify_error)}")
+            print(f"⚠️ Database verification failed: {str(verify_error)}")
         
         print(f"=== SUPPLIER IMPORT COMPLETED ===")
         print(f"📊 Total: {total_rows}, Successful: {successful_count}, Failed: {error_count}")
