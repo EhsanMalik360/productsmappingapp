@@ -409,7 +409,7 @@ def upload_supplier_data(request):
         return JsonResponse({
             'success': True,
             'message': 'File upload started processing in the background',
-            'job_id': str(job.id),
+                    'job_id': str(job.id),
             'id': str(job.id),
             'file_name': uploaded_file.name,
             'file_size': file_size,
@@ -439,11 +439,11 @@ def upload_amazon_data(request):
     try:
         # Log the upload request
         print('=' * 40)
-        print(f"Processing file upload at {request.path}")
-        print(f"Content Type: {request.content_type}")
-        print(f"Files: {list(request.FILES.keys())}")
+    print(f"Processing file upload at {request.path}")
+    print(f"Content Type: {request.content_type}")
+    print(f"Files: {list(request.FILES.keys())}")
         print('=' * 40)
-        
+    
         # Check if a file was uploaded
         if 'file' not in request.FILES:
             return JsonResponse({'error': 'No file uploaded'}, status=400)
@@ -520,10 +520,10 @@ def upload_amazon_data(request):
             'job_id': str(import_job.id)
         })
         
-    except Exception as e:
-        import traceback
+            except Exception as e:
+                import traceback
         print(f"Error processing file: {str(e)}")
-        print(traceback.format_exc())
+                print(traceback.format_exc())
         return JsonResponse({'error': str(e)}, status=500)
 
 @api_view(['GET'])
@@ -809,7 +809,7 @@ def fix_duplicates(request):
         return Response({
             'status': 'error',
             'message': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
 
 # Profit Formula API Endpoints
 @api_view(['GET', 'POST'])
