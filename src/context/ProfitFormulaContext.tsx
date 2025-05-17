@@ -20,7 +20,7 @@ export const FORMULA_STORAGE_KEY = 'profit-formula';
 export const DEFAULT_FORMULA: FormulaItem[] = [
   { id: '1', type: 'field', value: 'salePrice', displayValue: 'Sale Price' },
   { id: '2', type: 'operator', value: '-', displayValue: '-' },
-  { id: '3', type: 'field', value: 'amazonFee', displayValue: 'Amazon Fee' },
+  { id: '3', type: 'field', value: 'amazonFee', displayValue: 'FBA Fee' },
   { id: '4', type: 'operator', value: '-', displayValue: '-' },
   { id: '5', type: 'field', value: 'supplierCost', displayValue: 'Supplier Cost' }
 ];
