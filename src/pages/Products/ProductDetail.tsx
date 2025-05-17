@@ -82,7 +82,8 @@ const ProductDetail: React.FC = () => {
     amazonFee: 0,
     unitsSold: 0,
     referralFee: 0,
-    category: '',
+    rating: 0,
+    reviewCount: 0,
     created_at: new Date().toISOString()
   };
 
@@ -108,7 +109,6 @@ const ProductDetail: React.FC = () => {
         buyBoxPrice: safeProduct.buyBoxPrice,
         amazonFee: safeProduct.amazonFee,
         unitsSold: safeProduct.unitsSold,
-        category: safeProduct.category || '',
         referralFee: safeProduct.referralFee || 0
       });
     }
@@ -117,7 +117,7 @@ const ProductDetail: React.FC = () => {
   // Initialize custom calculator values when product is loaded
   useEffect(() => {
     if (safeProduct) {
-      setCustomSalePrice(safeProduct.salePrice);
+      setCustomSalePrice(safeProduct.buyBoxPrice);
       setCustomAmazonFee(safeProduct.amazonFee);
       setCustomReferralFee(safeProduct.referralFee || 0);
       
@@ -147,11 +147,11 @@ const ProductDetail: React.FC = () => {
 
     // Use the formula context to evaluate profit
     const values: Record<string, number> = {
-      salePrice: customSalePrice,
+      salePrice: customSalePrice, // Keep for backwards compatibility 
       amazonFee: customAmazonFee,
       referralFee: customReferralFee,
       supplierCost: customSupplierCost,
-      buyBoxPrice: safeProduct?.buyBoxPrice || 0,
+      buyBoxPrice: customSalePrice, // Use the same value for buyBoxPrice
       unitsSold: safeProduct?.unitsSold || 0
     };
     
@@ -200,7 +200,7 @@ const ProductDetail: React.FC = () => {
   // Add a reset function for the calculator
   const resetCalculator = () => {
     if (safeProduct) {
-      setCustomSalePrice(safeProduct.salePrice);
+      setCustomSalePrice(safeProduct.buyBoxPrice);
       setCustomAmazonFee(safeProduct.amazonFee);
       setCustomReferralFee(safeProduct.referralFee || 0);
       
@@ -277,7 +277,6 @@ const ProductDetail: React.FC = () => {
         buyBoxPrice: safeProduct.buyBoxPrice,
         amazonFee: safeProduct.amazonFee,
         unitsSold: safeProduct.unitsSold,
-        category: safeProduct.category || '',
         referralFee: safeProduct.referralFee || 0
       });
     }
@@ -384,7 +383,7 @@ const ProductDetail: React.FC = () => {
   };
   
   // Calculate profit values using the shared formula
-  const revenue = safeProduct.salePrice;
+  const revenue = safeProduct.buyBoxPrice;
   const amazonFee = safeProduct.amazonFee;
   const referralFee = safeProduct.referralFee || 0; 
   const buyBoxPrice = safeProduct.buyBoxPrice;
@@ -616,23 +615,11 @@ const ProductDetail: React.FC = () => {
                       <div className="text-base font-semibold">${safeProduct?.referralFee !== undefined ? safeProduct.referralFee.toFixed(2) : '0.00'}</div>
                     )}
                   </div>
-                  <div className="bg-gray-50 p-2 rounded">
-                    <div className="text-xs text-gray-500">Category</div>
-                    {isEditing ? (
-                      <input
-                        type="text"
-                        value={editedProduct?.category || ''}
-                        onChange={(e) => handleEditChange('category', e.target.value)}
-                        className="border p-1 rounded text-sm w-full"
-                      />
-                    ) : (
-                      <div className="text-base font-semibold truncate">{safeProduct?.category || 'N/A'}</div>
-                    )}
-                  </div>
+
                   <div className="bg-gray-50 p-2 rounded">
                     <div className="text-xs text-gray-500">Rating</div>
                     <div className="text-base font-semibold">
-                      {safeProduct?.rating?.toFixed(1) || 'N/A'} 
+                      {safeProduct?.rating ? safeProduct.rating.toFixed(1) : 'N/A'} 
                       {safeProduct?.reviewCount ? <span className="text-xs text-gray-500 ml-1">({safeProduct.reviewCount})</span> : ''}
                     </div>
                   </div>
@@ -890,6 +877,11 @@ const ProductDetail: React.FC = () => {
                       switch (item.value) {
                         case 'salePrice':
                           value = revenue;
+                          // Update display to show Buy Box Price instead of Sale Price
+                          item = {
+                            ...item,
+                            displayValue: 'Buy Box Price'
+                          };
                           break;
                         case 'amazonFee':
                           value = amazonFee;
@@ -998,7 +990,7 @@ const ProductDetail: React.FC = () => {
                 <div className="bg-white p-1.5 rounded mb-1.5 border border-gray-100">
                   <div className="grid grid-cols-4 gap-1.5">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Sale Price ($)</label>
+                      <label className="block text-xs text-gray-500 mb-0.5">Buy Box Price ($)</label>
                       <input 
                         type="number" 
                         value={customSalePrice || ''}
@@ -1006,7 +998,7 @@ const ProductDetail: React.FC = () => {
                         onKeyDown={handleKeyDown}
                         step="0.01" 
                         min="0"
-                        placeholder="Sale Price"
+                        placeholder="Buy Box Price"
                         className="border p-1 rounded w-full text-xs" 
                       />
                     </div>
@@ -1168,10 +1160,7 @@ const ProductDetail: React.FC = () => {
                         <td className="px-2 py-1.5 font-medium">Units Sold</td>
                         <td className="px-2 py-1.5">{safeProduct.unitsSold}</td>
                       </tr>
-                      <tr className="border-b border-gray-200">
-                        <td className="px-2 py-1.5 font-medium">Category</td>
-                        <td className="px-2 py-1.5">{safeProduct.category || 'N/A'}</td>
-                      </tr>
+
                       
                       {/* Custom attributes */}
                       {hasCustomFields && mappingAttributes.map(attr => {
