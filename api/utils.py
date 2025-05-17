@@ -7,12 +7,14 @@ def get_supabase_client():
     """
     Creates and returns a Supabase client using settings from Django settings
     """
-    url = settings.SUPABASE_URL
-    key = settings.SUPABASE_KEY
+    url = os.environ.get('SUPABASE_URL')
+    key = os.environ.get('SUPABASE_KEY')
     
     if not url or not key:
-        raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables or settings")
+        raise ValueError("Supabase URL and key must be set as environment variables")
     
+    # Remove any proxy settings that might be causing issues
+    # Initialize with just the required parameters
     return create_client(url, key)
 
 
