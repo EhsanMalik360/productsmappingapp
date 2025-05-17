@@ -53,6 +53,20 @@ def fix_scientific_notation(value):
             base_number = float(match.group(1))
             exponent = int(match.group(2))
             
+            # Safety check - for extremely large exponents, don't try to calculate
+            if abs(exponent) > 100:
+                print(f"Exponent too large ({exponent}), treating as string: {string_value}")
+                # Format as a standardized but string-based representation
+                if exponent > 0:
+                    # For positive exponents, return base * 10^exp
+                    digits_before_decimal = 1  # Always at least 1 digit before decimal in scientific notation
+                    # Move the decimal point right by exponent
+                    base_str = str(base_number).replace('.', '')
+                    return base_str + '0' * (exponent - (len(base_str) - digits_before_decimal))
+                else:
+                    # For negative exponents, just return a small value like 0
+                    return "0"
+            
             # Calculate the actual number and convert to string
             # For example: 8.40E+11 becomes 840000000000
             actual_number = base_number * (10 ** exponent)
@@ -64,7 +78,8 @@ def fix_scientific_notation(value):
                 return str(actual_number)
         except (ValueError, OverflowError) as e:
             print(f"Error processing scientific notation {string_value}: {str(e)}")
-            return string_value
+            # Just return the base number as a string
+            return str(base_number).replace('.', '') + '0' * abs(exponent)
     
     # Also check for scientific notation without decimal point (e.g., 5E9)
     simple_scientific_regex = r'^(\d+)[eE][\+\-]?(\d+)$'
@@ -76,6 +91,18 @@ def fix_scientific_notation(value):
             base_number = int(match.group(1))
             exponent = int(match.group(2))
             
+            # Safety check - for extremely large exponents, don't try to calculate
+            if abs(exponent) > 100:
+                print(f"Exponent too large ({exponent}), treating as string: {string_value}")
+                # Format as a standardized but string-based representation
+                if exponent > 0:
+                    # For positive exponents, return base * 10^exp
+                    base_str = str(base_number)
+                    return base_str + '0' * exponent
+                else:
+                    # For negative exponents, just return a small value like 0
+                    return "0"
+            
             # Calculate the actual number and convert to string
             actual_number = base_number * (10 ** exponent)
             
@@ -83,7 +110,8 @@ def fix_scientific_notation(value):
             return str(actual_number)
         except (ValueError, OverflowError) as e:
             print(f"Error processing scientific notation {string_value}: {str(e)}")
-            return string_value
+            # Just return the base number padded with zeros
+            return str(base_number) + '0' * abs(exponent)
     
     # Try to see if it's a float that Python automatically converted to scientific notation
     try:
