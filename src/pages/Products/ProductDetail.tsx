@@ -924,9 +924,7 @@ const ProductDetail: React.FC = () => {
                     return (
                       <tr key={item.id}>
                         <td className="font-medium py-0.5">
-                          {item.displayValue || item.value}
-                          {item.type === 'field' && item.value === 'supplierCost' && 
-                            ` (${bestSupplier?.suppliers?.name || 'N/A'})`}:
+                          {item.displayValue || item.value}:
                         </td>
                         <td className="text-right">
                           {prefix}{prefix === '-' ? '' : (index > 0 && ['*', '/'].includes(formulaItems[index-1]?.value as string) ? '' : '$')}
@@ -1145,7 +1143,7 @@ const ProductDetail: React.FC = () => {
                       </tr>
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">Buy Box Price</td>
-                        <td className="px-2 py-1.5">${safeProduct.salePrice.toFixed(2)}</td>
+                        <td className="px-2 py-1.5">${safeProduct.buyBoxPrice.toFixed(2)}</td>
                       </tr>
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">FBA Fee</td>
@@ -1154,10 +1152,6 @@ const ProductDetail: React.FC = () => {
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">Referral Fee</td>
                         <td className="px-2 py-1.5">${safeProduct.referralFee !== undefined ? safeProduct.referralFee.toFixed(2) : '0.00'}</td>
-                      </tr>
-                      <tr className="border-b border-gray-200">
-                        <td className="px-2 py-1.5 font-medium">Buy Box Price</td>
-                        <td className="px-2 py-1.5">${safeProduct.buyBoxPrice.toFixed(2)}</td>
                       </tr>
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">Units Sold</td>
