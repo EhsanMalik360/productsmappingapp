@@ -23,18 +23,15 @@ const OPTIONAL_FIELDS = [
   'mpn',
   'upc',
   'units_sold',
-  'amazon_fee',
   'fba_fees',
   'referral_fee',
   'buy_box_price',
-  'category',
   'rating',
   'review_count',
   'bought_past_month',
   'estimated_monthly_revenue',
   'fba_sellers',
   'amazon_instock_rate',
-  'dominant_seller_percentage',
   'buy_box_seller_name',
   'live_offers_count'
 ];
