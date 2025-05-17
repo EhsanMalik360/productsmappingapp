@@ -685,6 +685,8 @@ def process_supplier_file_with_orm(job, df, field_mapping):
         # Initialize counters
         successful_count = 0
         error_count = 0
+        skipped_count = 0  # Track skipped records
+        deduped_count = 0  # Track deduplicated records
         match_stats = {
             "total_matched": 0,
             "by_method": {
@@ -928,16 +930,45 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                 
                 # Skip duplicates within the same batch - using composite keys
                 composite_key = None
-                if product_id:
+                skip_reason = None
+                
+                # First check if we have at least one identifier
+                has_identifier = product_id or ean or mpn
+                
+                if not has_identifier:
+                    # Log missing identifiers but still process the record with a generated ID
+                    if index % 50 == 0:  # Avoid too many log messages
+                        print(f"⚠️ DEBUG: Row {index} has no product_id, EAN, or MPN identifiers. Using name as fallback.")
+                    # Use product name as a fallback identifier if available
+                    if product_name:
+                        composite_key = f"{supplier['id']}_{product_name}"
+                        seen_eans.add(composite_key)  # Use seen_eans set for these as well
+                elif product_id:
                     composite_key = f"{supplier['id']}_{product_id}"
                     if composite_key in seen_product_ids:
+                        skip_reason = f"duplicate product_id: {product_id}"
+                        deduped_count += 1
                         continue
                     seen_product_ids.add(composite_key)
                 elif ean:
                     composite_key = f"{supplier['id']}_{ean}"
                     if composite_key in seen_eans:
+                        skip_reason = f"duplicate EAN: {ean}"
+                        deduped_count += 1
                         continue
                     seen_eans.add(composite_key)
+                elif mpn:
+                    # Add MPN as another identifier option
+                    composite_key = f"{supplier['id']}_{mpn}"
+                    if composite_key in seen_product_ids:
+                        skip_reason = f"duplicate MPN: {mpn}"
+                        deduped_count += 1
+                        continue
+                    seen_product_ids.add(composite_key)
+                
+                # Log skipped records
+                if skip_reason and (index < 5 or index % 50 == 0):  # Log first few and occasional samples
+                    print(f"⚠️ DEBUG: Skipping row {index} due to {skip_reason}")
                 
                 # Extract remaining data fields
                 brand = None
@@ -988,9 +1019,12 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                 supplier_product_data = sanitize_json_object(supplier_product_data)
                 supplier_product_batch.append(supplier_product_data)
                 
-                # Log occasional progress with current batch size
-                if index % 50 == 0:
+                # Log more frequent progress to diagnose batch filling issue
+                # Increase frequency for better visibility when debugging
+                if index < 10 or index % 20 == 0 or index == total_rows - 1:
                     print(f"🔍 DEBUG: Added record {index} to batch. Current batch size: {len(supplier_product_batch)}")
+                    if index < 5:  # Log some sample data for first few records
+                        print(f"🔍 DEBUG: Record sample - EAN: {ean}, Name: {product_name[:30]}...")
                 
                 # OPTIMIZATION: Process in larger batches for better performance
                 # Debug the batch processing condition
@@ -1257,6 +1291,8 @@ def process_supplier_file_with_orm(job, df, field_mapping):
         if supplier_product_batch:
             print(f"🔍 DEBUG: Found {len(supplier_product_batch)} unprocessed items in batch at end of processing")
             print(f"🔍 DEBUG: Forcing final batch processing")
+            print(f"🔍 DEBUG: Total rows processed: {total_rows}, rows in final batch: {len(supplier_product_batch)}")
+            print(f"🔍 DEBUG: Expected to process approximately {total_rows} records, but only {successful_count} successful so far")
             
             try:
                 # Log the batch details explicitly
@@ -1297,6 +1333,8 @@ def process_supplier_file_with_orm(job, df, field_mapping):
             'total': total_rows,
             'successful': successful_count,
             'failed': error_count,
+            'skipped': skipped_count,
+            'deduped': deduped_count,
             'suppliers_added': suppliers_added,
             'match_stats': match_stats
         }
@@ -1344,6 +1382,7 @@ def process_supplier_file_with_orm(job, df, field_mapping):
         
         print(f"=== SUPPLIER IMPORT COMPLETED ===")
         print(f"📊 Total: {total_rows}, Successful: {successful_count}, Failed: {error_count}")
+        print(f"📊 Skipped: {skipped_count}, Duplicates: {deduped_count}")
         print(f"🔍 Match Stats: {match_stats}")
         
     except Exception as e:

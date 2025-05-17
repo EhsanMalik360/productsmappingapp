@@ -12,20 +12,7 @@ def get_supabase_client():
     
     if not url or not key:
         raise ValueError("Supabase URL and key must be set as environment variables")
-    
-    # Add debug info about the Supabase connection details
-    print(f"🔍 DEBUG: Initializing Supabase client with URL: {url[:20]}...{url[-8:] if len(url) > 28 else ''}")
-    print(f"🔍 DEBUG: Using API key starting with: {key[:6]}...")
-    
-    # Remove any proxy settings that might be causing issues
-    # Initialize with just the required parameters
-    client = create_client(url, key)
-    
-    # Log the created client details to verify
-    print(f"🔍 DEBUG: Supabase client initialized with type: {type(client)}")
-    print(f"🔍 DEBUG: Client methods available: {[m for m in dir(client) if not m.startswith('_') and m in ['table', 'from_', 'rpc']]}")
-    
-    return client
+def get_supabase_client():
 
 
 def fix_scientific_notation(value):
