@@ -6,19 +6,8 @@ import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import { PlusCircle, X, MoveVertical, Calculator, AlertCircle, Edit2, Save, Info, HelpCircle, Download } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
-import { supabase } from '../../lib/supabase';
+import { useProfitFormula, FormulaItem, FormulaItemType, OperatorType } from '../../context/ProfitFormulaContext';
 import { toast } from 'react-hot-toast';
-
-// Formula component types
-type OperatorType = '+' | '-' | '*' | '/' | '(' | ')';
-type FormulaItemType = 'field' | 'customAttribute' | 'operator' | 'constant';
-
-interface FormulaItem {
-  id: string;
-  type: FormulaItemType;
-  value: string;
-  displayValue?: string;
-}
 
 // Result type for database calculations
 interface ProfitCalculationResult {
@@ -33,7 +22,7 @@ interface ProfitCalculationResult {
   profitMargin: number;
 }
 
-// Draggable formula item component
+// FormulaItemComponent for drag and drop
 const FormulaItemComponent: React.FC<{
   item: FormulaItem;
   index: number;
@@ -153,12 +142,18 @@ const ProfitFormulaEditor: React.FC = () => {
   // Get product data and custom attributes for the formula
   const { products, getBestSupplierForProduct, customAttributes } = useAppContext();
   
-  // Formula storage key for database
-  const FORMULA_STORAGE_KEY = 'profit-formula';
+  // Use the shared profit formula context
+  const { 
+    formulaItems, 
+    setFormulaItems, 
+    isSaved, 
+    saveFormula, 
+    resetFormula, 
+    evaluateFormula,
+    isLoading
+  } = useProfitFormula();
   
   // States
-  const [formulaItems, setFormulaItems] = useState<FormulaItem[]>([]);
-  const [isSaved, setIsSaved] = useState(true);
   const [formulaError, setFormulaError] = useState<string | null>(null);
   const [showFieldMenu, setShowFieldMenu] = useState(false);
   const [showOperatorMenu, setShowOperatorMenu] = useState(false);
@@ -169,101 +164,6 @@ const ProfitFormulaEditor: React.FC = () => {
   const [showResultsTable, setShowResultsTable] = useState(false);
   const [sortField, setSortField] = useState<string>('profit');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  
-  // Default formula: Sale Price - Amazon Fee - Supplier Cost
-  const defaultFormula = [
-    { id: '1', type: 'field' as FormulaItemType, value: 'salePrice', displayValue: 'Sale Price' },
-    { id: '2', type: 'operator' as FormulaItemType, value: '-', displayValue: '-' },
-    { id: '3', type: 'field' as FormulaItemType, value: 'amazonFee', displayValue: 'Amazon Fee' },
-    { id: '4', type: 'operator' as FormulaItemType, value: '-', displayValue: '-' },
-    { id: '5', type: 'field' as FormulaItemType, value: 'supplierCost', displayValue: 'Supplier Cost' }
-  ];
-  
-  // Load formula from database
-  useEffect(() => {
-    fetchFormula();
-  }, []);
-  
-  // Fetch formula from database settings
-  const fetchFormula = async () => {
-    try {
-      // Check if formula exists in database
-      const { data, error } = await supabase
-        .from('settings')
-        .select('*')
-        .eq('key', FORMULA_STORAGE_KEY);
-      
-      if (error) {
-        console.error('Error fetching formula from database:', error);
-        // Fall back to default formula
-        setFormulaItems(defaultFormula);
-        return;
-      }
-      
-      // If we got data but it's empty or not an array
-      if (!data || !Array.isArray(data) || data.length === 0) {
-        // Initialize with default formula
-        await saveFormulaToDB(defaultFormula);
-        setFormulaItems(defaultFormula);
-      } else {
-        // Load formula from database (first matching record)
-        setFormulaItems(data[0].value as FormulaItem[]);
-      }
-    } catch (err) {
-      console.error('Error loading formula:', err);
-      // Fall back to default formula
-      setFormulaItems(defaultFormula);
-    } finally {
-      setIsSaved(true);
-    }
-  };
-  
-  // Save formula to database
-  const saveFormulaToDB = async (formula: FormulaItem[]) => {
-    try {
-      // First check if the record exists
-      const { data, error: fetchError } = await supabase
-        .from('settings')
-        .select('*')
-        .eq('key', FORMULA_STORAGE_KEY);
-      
-      if (fetchError) {
-        throw fetchError;
-      }
-      
-      let error;
-      
-      if (data && data.length > 0) {
-        // Update existing record
-        const { error: updateError } = await supabase
-          .from('settings')
-          .update({ 
-            value: formula,
-            updated_at: new Date().toISOString()
-          })
-          .eq('key', FORMULA_STORAGE_KEY);
-          
-        error = updateError;
-      } else {
-        // Insert new record
-        const { error: insertError } = await supabase
-          .from('settings')
-          .insert({ 
-            key: FORMULA_STORAGE_KEY,
-            value: formula,
-            updated_at: new Date().toISOString()
-          });
-          
-        error = insertError;
-      }
-      
-      if (error) throw error;
-      return true;
-    } catch (err) {
-      console.error('Error saving formula to database:', err);
-      throw err;
-    }
-  };
   
   // Example product for preview
   const [exampleProduct, setExampleProduct] = useState<any | null>(null);
@@ -362,16 +262,15 @@ const ProfitFormulaEditor: React.FC = () => {
           const customValues: Record<string, number> = {};
           for (const attr of customAttributes) {
             if (attr.type === 'Number' && attr.forType === 'product') {
-              const fieldName = `custom_${attr.name.toLowerCase().replace(/\s+/g, '_')}`;
-              const value = (product as any)[fieldName] || 0;
+              const fieldName = `attr_${attr.id}`;
+              const value = (product as any)[`custom_${attr.name.toLowerCase().replace(/\s+/g, '_')}`] || 0;
               scope[fieldName] = value;
               customValues[attr.name] = value;
             }
           }
           
           // Calculate profit based on the formula
-          const formula = buildFormulaExpression(formulaItems);
-          const profit = evaluateFormula(formula, scope);
+          const profit = evaluateFormula(scope);
           
           // Calculate profit margin as a percentage
           const profitMargin = scope.salePrice > 0 ? (profit / scope.salePrice) * 100 : 0;
@@ -403,6 +302,13 @@ const ProfitFormulaEditor: React.FC = () => {
       setIsCalculating(false);
     }
   };
+  
+  // Update formula validation when the formula changes
+  useEffect(() => {
+    if (formulaItems.length > 0) {
+      validateFormula();
+    }
+  }, [formulaItems]);
   
   // Sort the results based on the current sort field and direction
   const sortedResults = useMemo(() => {
@@ -501,7 +407,6 @@ const ProfitFormulaEditor: React.FC = () => {
       const result = Array.from(prevItems);
       const [removed] = result.splice(dragIndex, 1);
       result.splice(hoverIndex, 0, removed);
-      setIsSaved(false);
       return result;
     });
   }, []);
@@ -518,7 +423,6 @@ const ProfitFormulaEditor: React.FC = () => {
       }
     ]);
     setShowFieldMenu(false);
-    setIsSaved(false);
   };
   
   // Add operator to formula
@@ -533,7 +437,6 @@ const ProfitFormulaEditor: React.FC = () => {
       }
     ]);
     setShowOperatorMenu(false);
-    setIsSaved(false);
   };
   
   // Add constant to formula
@@ -550,14 +453,12 @@ const ProfitFormulaEditor: React.FC = () => {
       ]);
       setConstantValue('0');
       setShowConstantInput(false);
-      setIsSaved(false);
     }
   };
   
   // Remove item from formula
   const removeItem = (index: number) => {
     setFormulaItems(prevItems => prevItems.filter((_, i) => i !== index));
-    setIsSaved(false);
   };
   
   // Edit item in formula
@@ -569,41 +470,6 @@ const ProfitFormulaEditor: React.FC = () => {
       }
       return newItems;
     });
-    setIsSaved(false);
-  };
-  
-  // Save formula to database
-  const saveFormula = async () => {
-    try {
-      setIsSaved(false);
-      
-      const success = await saveFormulaToDB(formulaItems);
-      
-      if (success) {
-        setIsSaved(true);
-        toast.success('Formula saved');
-      }
-    } catch (error) {
-      toast.error('Failed to save formula');
-      console.error('Error saving formula:', error);
-    }
-  };
-  
-  // Reset formula to default
-  const resetFormula = () => {
-    if (window.confirm('Are you sure you want to reset the formula to default?')) {
-      setFormulaItems(defaultFormula);
-      saveFormulaToDB(defaultFormula)
-        .then(() => {
-          setIsSaved(true);
-          setFormulaError(null);
-          toast.success('Formula reset to default');
-        })
-        .catch(error => {
-          toast.error('Failed to reset formula');
-          console.error('Error resetting formula:', error);
-        });
-    }
   };
   
   // Validate formula syntax
@@ -651,54 +517,6 @@ const ProfitFormulaEditor: React.FC = () => {
     setFormulaError(null);
   };
   
-  // Update localStorage when formula changes
-  useEffect(() => {
-    if (formulaItems.length > 0) {
-      setIsSaved(false);
-      // Validate formula on change
-      validateFormula();
-    }
-  }, [formulaItems]);
-  
-  // Helper function to build a formula expression string
-  const buildFormulaExpression = (items: FormulaItem[]): string => {
-    let expression = '';
-    
-    items.forEach(item => {
-      if (item.type === 'field' || item.type === 'customAttribute') {
-        // Sanitize field names for the formula
-        const fieldName = item.value.replace(/[^a-zA-Z0-9_]/g, '');
-        expression += `scope.${fieldName}`;
-      } else if (item.type === 'operator') {
-        expression += item.value;
-      } else if (item.type === 'constant') {
-        // Ensure constants are treated as numbers
-        expression += parseFloat(item.value);
-      }
-    });
-    
-    return expression;
-  };
-  
-  // Helper function to safely evaluate a formula
-  const evaluateFormula = (formula: string, scope: Record<string, number>): number => {
-    try {
-      // Using Function constructor instead of eval for better security isolation
-      // This creates a function that only has access to the scope object
-      const calculatedValue = new Function('scope', `return ${formula}`)(scope);
-      
-      // Ensure the result is a number
-      if (typeof calculatedValue !== 'number' || isNaN(calculatedValue)) {
-        throw new Error('Formula did not evaluate to a valid number');
-      }
-      
-      return calculatedValue;
-    } catch (error) {
-      console.error('Error evaluating formula:', error);
-      throw new Error('Failed to calculate formula');
-    }
-  };
-  
   return (
     <DndProvider backend={HTML5Backend}>
       <Card className="mb-6">
@@ -735,11 +553,13 @@ const ProfitFormulaEditor: React.FC = () => {
         <div className="bg-gray-50 p-4 rounded mb-6 border border-gray-200">
           <h4 className="font-medium mb-3 flex items-center">
             <Calculator size={18} className="mr-2 text-blue-600" />
-            Current Formula
+            Current Formula {isLoading && <span className="ml-2 text-sm text-gray-500">(Loading...)</span>}
           </h4>
           
           <div className="flex flex-wrap min-h-16 p-3 bg-white rounded border border-gray-300 mb-4">
-            {formulaItems.length > 0 ? (
+            {isLoading ? (
+              <div className="text-gray-500 italic">Loading formula...</div>
+            ) : formulaItems.length > 0 ? (
               formulaItems.map((item, index) => (
                 <FormulaItemComponent
                   key={item.id}
