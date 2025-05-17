@@ -223,15 +223,43 @@ const ProfitFormulaEditor: React.FC = () => {
   // Save formula to database
   const saveFormulaToDB = async (formula: FormulaItem[]) => {
     try {
-      const { error } = await supabase
+      // First check if the record exists
+      const { data: existingRecord, error: fetchError } = await supabase
         .from('settings')
-        .upsert({ 
-          key: FORMULA_STORAGE_KEY,
-          value: formula,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'key'
-        });
+        .select('*')
+        .eq('key', FORMULA_STORAGE_KEY)
+        .single();
+      
+      let error;
+      
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        // Error other than "not found"
+        throw fetchError;
+      }
+      
+      if (existingRecord) {
+        // Update existing record
+        const { error: updateError } = await supabase
+          .from('settings')
+          .update({ 
+            value: formula,
+            updated_at: new Date().toISOString()
+          })
+          .eq('key', FORMULA_STORAGE_KEY);
+          
+        error = updateError;
+      } else {
+        // Insert new record
+        const { error: insertError } = await supabase
+          .from('settings')
+          .insert({ 
+            key: FORMULA_STORAGE_KEY,
+            value: formula,
+            updated_at: new Date().toISOString()
+          });
+          
+        error = insertError;
+      }
       
       if (error) throw error;
       return true;
