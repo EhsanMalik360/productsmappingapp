@@ -29,10 +29,37 @@ export interface SupplierData {
 
 // Helper function to normalize column names for comparison
 const normalizeColumnName = (name: string): string => {
-  return name.toLowerCase()
-    .replace(/[^a-z0-9]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '');
+  // First, convert to lowercase
+  const lowercased = name.toLowerCase();
+  
+  // Remove common prefixes that might cause confusion
+  const withoutPrefixes = lowercased
+    .replace(/^supplier\s+/, '')
+    .replace(/^product\s+/, '');
+  
+  // Handle special cases
+  if (lowercased.includes('brand') || lowercased.includes('make') || lowercased.includes('manufacturer')) {
+    if (!lowercased.includes('name') && !lowercased.includes('number')) {
+      return 'brand';
+    }
+  }
+  if (lowercased.includes('supplier') && lowercased.includes('stock')) {
+    return 'supplier_stock';
+  }
+  if (lowercased.includes('stock') && lowercased.includes('level')) {
+    return 'supplier_stock';
+  }
+  if (lowercased.includes('inventory') && !lowercased.includes('date')) {
+    return 'supplier_stock';
+  }
+  
+  // Replace non-alphanumeric with underscore but keep spaces
+  return withoutPrefixes
+    .replace(/[^a-z0-9\s]/g, '_') // Replace non-alphanumeric (except spaces) with underscores
+    .replace(/\s+/g, '_')        // Replace spaces with underscores
+    .replace(/_+/g, '_')         // Replace multiple underscores with single
+    .replace(/^_|_$/g, '')       // Remove leading/trailing underscores
+    .trim();
 };
 
 // Function to process cost values with currency symbols
@@ -70,14 +97,16 @@ export const processCostValue = (value: string): { cost: number; currencyWarning
 // Function to automatically map supplier CSV columns to system fields
 export const autoMapSupplierColumns = async (csvHeaders: string[]): Promise<{ [key: string]: string }> => {
   const fieldMappings: { [key: string]: string[] } = {
-    'Supplier Name': ['supplier_name', 'supplier', 'vendor_name', 'vendor', 'company_name', 'company'],
-    'EAN': ['ean', 'barcode', 'upc', 'product_id', 'sku', 'asin', 'gtin'],
-    'MPN': ['mpn', 'manufacturer_part_number', 'part_number', 'part_no', 'manufacturer_number'],
-    'Product Name': ['product_name', 'title', 'item_name', 'product_title', 'product', 'item'],
-    'Cost': ['cost', 'unit_cost', 'price', 'supplier_cost', 'wholesale_price'],
-    'MOQ': ['moq', 'minimum_order_quantity', 'min_order', 'minimum_qty'],
-    'Lead Time': ['lead_time', 'leadtime', 'delivery_time', 'processing_time'],
-    'Payment Terms': ['payment_terms', 'terms', 'payment', 'payment_conditions']
+    'Supplier Name': ['supplier_name', 'supplier', 'vendor_name', 'vendor', 'company_name', 'company', 'seller', 'supplier_company'],
+    'EAN': ['ean', 'barcode', 'upc', 'product_id', 'sku', 'asin', 'gtin', 'ean_code', 'barcode_number', 'scan_code'],
+    'MPN': ['mpn', 'manufacturer_part_number', 'part_number', 'part_no', 'manufacturer_number', 'mfr_part_no', 'supplier_part_number'],
+    'Product Name': ['product_name', 'title', 'item_name', 'product_title', 'product', 'item', 'description', 'item_title', 'product_description'],
+    'Cost': ['cost', 'unit_cost', 'price', 'supplier_cost', 'wholesale_price', 'wholesale_cost', 'net_price', 'cost_price', 'purchase_price'],
+    'MOQ': ['moq', 'minimum_order_quantity', 'min_order', 'minimum_qty', 'min_quantity', 'minimum', 'min_order_qty', 'minimum_purchase'],
+    'Lead Time': ['lead_time', 'leadtime', 'delivery_time', 'processing_time', 'delivery_days', 'lead_days', 'shipping_time', 'despatch_time'],
+    'Payment Terms': ['payment_terms', 'terms', 'payment', 'payment_conditions', 'credit_terms', 'payment_days', 'payment_period', 'payment_method'],
+    'Brand': ['brand', 'make', 'manufacturer', 'brand_name', 'manufacturer_name', 'producer', 'make_name'],
+    'Supplier Stock': ['supplier_stock', 'stock', 'inventory', 'stock_level', 'quantity', 'qty', 'stock_qty', 'available_stock', 'on_hand', 'availability', 'in_stock']
   };
 
   // Get custom attributes from database
@@ -98,39 +127,105 @@ export const autoMapSupplierColumns = async (csvHeaders: string[]): Promise<{ [k
 
   const mapping: { [key: string]: string } = {};
   const usedColumns = new Set<string>();
+  
+  // Debug information about headers
+  console.log('Original CSV Headers:', csvHeaders);
+  const normalizedHeaders = csvHeaders.map(h => ({ 
+    original: h, 
+    normalized: normalizeColumnName(h) 
+  }));
+  console.log('Normalized CSV Headers:', normalizedHeaders);
 
-  // First pass: exact matches
+  // First pass: exact matches with normalized column names
   csvHeaders.forEach(header => {
     const normalizedHeader = normalizeColumnName(header);
     for (const [systemField, possibleMatches] of Object.entries(fieldMappings)) {
       if (possibleMatches.includes(normalizedHeader) && !usedColumns.has(header)) {
         mapping[systemField] = header;
         usedColumns.add(header);
+        console.log(`Exact match found: "${header}" → "${systemField}"`);
         break;
       }
     }
   });
 
-  // Second pass: partial matches for unmapped fields
+  // Second pass: check if the column name contains keywords
   csvHeaders.forEach(header => {
     if (usedColumns.has(header)) return;
 
+    const originalLower = header.toLowerCase();
     const normalizedHeader = normalizeColumnName(header);
+    
     for (const [systemField, possibleMatches] of Object.entries(fieldMappings)) {
       if (!mapping[systemField]) {
         // Check if any of the possible matches are contained within the header
-        const matchFound = possibleMatches.some(match => 
-          normalizedHeader.includes(match) || match.includes(normalizedHeader)
-        );
+        // Prioritize exact word matches over partial matches
+        let matchStrength = 0;
+        let bestMatch = '';
         
-        if (matchFound) {
+        for (const match of possibleMatches) {
+          // Check for exact word match (surrounded by spaces, start or end of string)
+          const wordRegex = new RegExp(`(^|\\s)${match}(\\s|$)`, 'i');
+          if (originalLower.match(wordRegex)) {
+            if (match.length > matchStrength) {
+              matchStrength = match.length;
+              bestMatch = match;
+            }
+          }
+          // Check for included match (less priority)
+          else if (originalLower.includes(match) || normalizedHeader.includes(match)) {
+            if (match.length > matchStrength && match.length >= 3) { // Minimum 3 chars for partial matches
+              matchStrength = match.length * 0.8; // Lower priority for partial matches
+              bestMatch = match;
+            }
+          }
+          // Check if the match includes the header (lowest priority)
+          else if (match.includes(normalizedHeader) && normalizedHeader.length >= 3) {
+            if (normalizedHeader.length > matchStrength) {
+              matchStrength = normalizedHeader.length * 0.6; // Even lower priority
+              bestMatch = match;
+            }
+          }
+        }
+        
+        if (matchStrength > 0) {
           mapping[systemField] = header;
           usedColumns.add(header);
+          console.log(`Partial match found: "${header}" → "${systemField}" (matched: "${bestMatch}", strength: ${matchStrength})`);
           break;
         }
       }
     }
   });
+
+  // Special case for column names with very specific patterns
+  csvHeaders.forEach(header => {
+    if (usedColumns.has(header)) return;
+    
+    const lowerHeader = header.toLowerCase();
+    
+    // Special handling for Brand field
+    if ((lowerHeader.includes('brand') || lowerHeader.includes('make') || lowerHeader.includes('manufacturer')) && !lowerHeader.includes('name')) {
+      mapping['Brand'] = header;
+      usedColumns.add(header);
+    }
+    
+    // Special handling for Supplier Stock field
+    else if (lowerHeader.includes('stock') || lowerHeader.includes('qty') || lowerHeader.includes('quantity') || lowerHeader.includes('available')) {
+      mapping['Supplier Stock'] = header;
+      usedColumns.add(header);
+    }
+  });
+
+  // Log the mapping results for debugging
+  console.log('Final automated column mapping result:', mapping);
+  
+  // Check for unmapped required fields
+  const requiredFields = ['Supplier Name', 'Cost'];
+  const unmappedRequired = requiredFields.filter(field => !mapping[field]);
+  if (unmappedRequired.length > 0) {
+    console.warn('Warning: Some required fields could not be auto-mapped:', unmappedRequired);
+  }
 
   return mapping;
 };
