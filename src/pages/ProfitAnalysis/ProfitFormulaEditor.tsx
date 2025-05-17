@@ -169,7 +169,6 @@ const ProfitFormulaEditor: React.FC = () => {
   const [showResultsTable, setShowResultsTable] = useState(false);
   const [sortField, setSortField] = useState<string>('profit');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
-  const [loadingFormula, setLoadingFormula] = useState(true);
   
   // Default formula: Sale Price - Amazon Fee - Supplier Cost
   const defaultFormula = [
@@ -183,20 +182,11 @@ const ProfitFormulaEditor: React.FC = () => {
   // Load formula from database
   useEffect(() => {
     fetchFormula();
-    // Show notification that formula is shared with all users
-    setTimeout(() => {
-      toast.success('Profit formula is shared with all users', { 
-        duration: 4000,
-        icon: '👥'
-      });
-    }, 1000);
   }, []);
   
   // Fetch formula from database settings
   const fetchFormula = async () => {
     try {
-      setLoadingFormula(true);
-      
       // Check if formula exists in database
       const { data, error } = await supabase
         .from('settings')
@@ -226,7 +216,6 @@ const ProfitFormulaEditor: React.FC = () => {
       // Fall back to default formula
       setFormulaItems(defaultFormula);
     } finally {
-      setLoadingFormula(false);
       setIsSaved(true);
     }
   };
@@ -313,11 +302,6 @@ const ProfitFormulaEditor: React.FC = () => {
   
   // Calculate profits for all products based on the current formula
   const calculateAllProductProfits = () => {
-    if (loadingFormula) {
-      toast.error("Please wait for the formula to load");
-      return;
-    }
-    
     if (formulaItems.length === 0) {
       setFormulaError("No formula available to calculate profit");
       return;
@@ -573,7 +557,7 @@ const ProfitFormulaEditor: React.FC = () => {
       
       if (success) {
         setIsSaved(true);
-        toast.success('Formula saved and available to all users');
+        toast.success('Formula saved');
       }
     } catch (error) {
       toast.error('Failed to save formula');
@@ -583,13 +567,13 @@ const ProfitFormulaEditor: React.FC = () => {
   
   // Reset formula to default
   const resetFormula = () => {
-    if (window.confirm('Are you sure you want to reset the formula to default? This will update the formula for all users.')) {
+    if (window.confirm('Are you sure you want to reset the formula to default?')) {
       setFormulaItems(defaultFormula);
       saveFormulaToDB(defaultFormula)
         .then(() => {
           setIsSaved(true);
           setFormulaError(null);
-          toast.success('Formula reset to default for all users');
+          toast.success('Formula reset to default');
         })
         .catch(error => {
           toast.error('Failed to reset formula');
@@ -698,10 +682,6 @@ const ProfitFormulaEditor: React.FC = () => {
           <div>
             <h3 className="text-xl font-semibold">Profit Calculation Formula</h3>
             <p className="text-gray-600">Create a custom formula to calculate profit for your products.</p>
-            <div className="mt-2 text-sm flex items-center text-blue-600">
-              <Info size={14} className="mr-1" />
-              Changes to this formula will be shared with all users of the system.
-            </div>
           </div>
           <div className="flex space-x-2">
             <Button 
@@ -731,13 +711,11 @@ const ProfitFormulaEditor: React.FC = () => {
         <div className="bg-gray-50 p-4 rounded mb-6 border border-gray-200">
           <h4 className="font-medium mb-3 flex items-center">
             <Calculator size={18} className="mr-2 text-blue-600" />
-            Current Formula {loadingFormula && <span className="ml-2 text-sm text-gray-500">(Loading...)</span>}
+            Current Formula
           </h4>
           
           <div className="flex flex-wrap min-h-16 p-3 bg-white rounded border border-gray-300 mb-4">
-            {loadingFormula ? (
-              <div className="text-gray-500 italic">Loading formula...</div>
-            ) : formulaItems.length > 0 ? (
+            {formulaItems.length > 0 ? (
               formulaItems.map((item, index) => (
                 <FormulaItemComponent
                   key={item.id}
