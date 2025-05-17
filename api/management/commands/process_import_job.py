@@ -23,6 +23,21 @@ class Command(BaseCommand):
             job.status = 'processing'
             job.save()
             
+            # Check field mapping
+            try:
+                if isinstance(job.field_mapping, dict) and 'mapping' in job.field_mapping:
+                    mapping_str = job.field_mapping['mapping']
+                    if isinstance(mapping_str, str):
+                        try:
+                            # Parse the JSON string in the mapping field
+                            job.field_mapping = json.loads(mapping_str)
+                            job.save()
+                            self.stdout.write(f"Fixed nested field mapping: {job.field_mapping}")
+                        except json.JSONDecodeError:
+                            self.stdout.write(self.style.WARNING(f"Could not parse mapping JSON: {mapping_str}"))
+            except Exception as e:
+                self.stdout.write(self.style.WARNING(f"Error checking field mapping: {str(e)}"))
+            
             # Process the file
             self.stdout.write(f'Starting processing for file: {job.file_name}')
             process_product_file(job)

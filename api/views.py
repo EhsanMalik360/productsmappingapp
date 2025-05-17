@@ -512,6 +512,11 @@ def upload_amazon_data(request):
         
         # Get field mapping from request
         field_mapping = {}
+        
+        # Debug what's coming in the request
+        print(f"Request POST items: {dict(request.POST.items())}")
+        
+        # Handle field_ prefixed items
         for key, value in request.POST.items():
             if key.startswith('field_'):
                 field_name = key.replace('field_', '')
@@ -519,7 +524,11 @@ def upload_amazon_data(request):
             elif key == 'mapping':
                 # Handle the JSON mapping string that's coming from the client
                 try:
-                    field_mapping = json.loads(value)
+                    # Parse the JSON string
+                    mapping_dict = json.loads(value)
+                    # Replace field_mapping with this parsed value
+                    field_mapping = mapping_dict
+                    print(f"Successfully parsed mapping: {field_mapping}")
                 except json.JSONDecodeError:
                     print(f"Failed to parse mapping JSON: {value}")
                     pass
