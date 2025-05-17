@@ -992,9 +992,14 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                                     supplier_product_batch
                                 ).execute()
                                 
-                                # Update success counter
-                                successful_count += len(supplier_product_batch)
-                                print(f"✅ Bulk upsert complete: {len(supplier_product_batch)} records processed")
+                                # Only count records that were actually inserted/updated
+                                if result.data:
+                                    successful_count += len(result.data)
+                                    print(f"✅ Bulk upsert complete: {len(result.data)} records processed")
+                                else:
+                                    print(f"⚠️ Bulk upsert returned no data, possible issue with insertion")
+                                    print(f"Response: {result}")
+                                    raise Exception("Supabase upsert operation returned no data")
                             except Exception as pk_error:
                                 print(f"⚠️ Primary key upsert failed: {str(pk_error)}")
                                 
@@ -1060,9 +1065,13 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                                                     records_to_update
                                                 ).execute()
                                                 
-                                                # Count successful updates
-                                                inserted_count += len(records_to_update)
-                                                print(f"    ✓ Updated {len(records_to_update)} existing records")
+                                                # Only count successful updates confirmed by response data
+                                                if update_result.data:
+                                                    inserted_count += len(update_result.data)
+                                                    print(f"    ✓ Updated {len(update_result.data)} existing records")
+                                                else:
+                                                    print(f"    ⚠️ Update returned no data, possible issue with operation")
+                                                    print(f"    Response details: {update_result}")
                                             except Exception as update_error:
                                                 print(f"    ⚠️ Bulk update failed: {str(update_error)}")
                                                 # Fall back to individual updates
@@ -1088,6 +1097,9 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                                                 if insert_result.data:
                                                     inserted_count += len(insert_result.data)
                                                     print(f"    ✓ Inserted {len(insert_result.data)} new records")
+                                                else:
+                                                    print(f"    ⚠️ Insert returned no data, possible issue with operation")
+                                                    print(f"    Response details: {insert_result}")
                                             except Exception as insert_error:
                                                 print(f"    ⚠️ Bulk insert failed: {str(insert_error)}")
                                                 # Fall back to individual inserts
@@ -1118,7 +1130,9 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                                                     'p_match_method': product['match_method'],
                                                     'p_brand': product['brand']
                                                 }).execute()
-                                                inserted_count += 1
+                                                # Only increment if successful
+                                                if result.data:
+                                                    inserted_count += 1
                                             except:
                                                 failed_count += 1
                             
@@ -1149,7 +1163,12 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                                         'p_match_method': product['match_method'],
                                         'p_brand': product['brand']
                                     }).execute()
-                                    fallback_success += 1
+                                    # Only count successful operations with actual data returned
+                                    if result.data:
+                                        fallback_success += 1
+                                    else:
+                                        print(f"  ⚠️ RPC call didn't return data: {result}")
+                                        fallback_error += 1
                                 except Exception as item_error:
                                     fallback_error += 1
                             
