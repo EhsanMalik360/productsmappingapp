@@ -6,7 +6,7 @@ import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import { PlusCircle, X, MoveVertical, Calculator, AlertCircle, Edit2, Save, Info, HelpCircle, Download } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
-import { useProfitFormula, FormulaItem, FormulaItemType, OperatorType } from '../../context/ProfitFormulaContext';
+import { useProfitFormula, FormulaItem, OperatorType } from '../../context/ProfitFormulaContext';
 import { toast } from 'react-hot-toast';
 
 // Result type for database calculations
@@ -175,7 +175,7 @@ const ProfitFormulaEditor: React.FC = () => {
   // Available fields
   const standardFields = [
     { value: 'salePrice', displayValue: 'Sale Price' },
-    { value: 'amazonFee', displayValue: 'Amazon Fee' },
+    { value: 'amazonFee', displayValue: 'FBA Fee' },
     { value: 'referralFee', displayValue: 'Referral Fee' },
     { value: 'supplierCost', displayValue: 'Supplier Cost' },
     { value: 'buyBoxPrice', displayValue: 'Buy Box Price' },
@@ -364,7 +364,7 @@ const ProfitFormulaEditor: React.FC = () => {
     const headers = [
       'Product Title',
       'Sale Price',
-      'Amazon Fee',
+      'FBA Fee',
       'Referral Fee',
       'Supplier Cost',
       ...Object.keys(dataResults[0].customValues),
@@ -704,7 +704,7 @@ const ProfitFormulaEditor: React.FC = () => {
             <Info size={16} className="mr-1 mt-0.5 flex-shrink-0" />
             <div>
               <p className="mb-1">Create your formula by adding fields, operators, and constants. Drag items to rearrange them.</p>
-              <p>Example: (Sale Price - Amazon Fee - Supplier Cost) * 0.9</p>
+              <p>Example: (Sale Price - FBA Fee - Supplier Cost) * 0.9</p>
             </div>
           </div>
         </div>
@@ -853,7 +853,7 @@ const ProfitFormulaEditor: React.FC = () => {
                       className={`px-4 py-2 text-left text-sm font-medium text-gray-500 cursor-pointer ${sortField === 'amazonFee' ? 'bg-gray-100' : ''}`}
                       onClick={() => handleSort('amazonFee')}
                     >
-                      Amazon Fee
+                      FBA Fee
                       {sortField === 'amazonFee' && (
                         <span className="ml-1">
                           {sortDirection === 'asc' ? '↑' : '↓'}
