@@ -849,8 +849,10 @@ def process_supplier_file_with_orm(job, df, field_mapping):
         
         # DEBUG: Check Supabase connection by testing a simple query
         try:
-            test_result = supabase.from_('supplier_products').select('count(*)', count='exact').limit(1).execute()
+            # Correct syntax for PostgREST API: use .select() with count parameter
+            test_result = supabase.table('supplier_products').select('id', count='exact').limit(1).execute()
             print(f"🔍 DEBUG: Supabase connection test: {test_result}")
+            print(f"🔍 DEBUG: Connection established, table accessible")
         except Exception as conn_error:
             print(f"⚠️ DEBUG: Supabase connection test failed: {str(conn_error)}")
             print(f"⚠️ DEBUG: Error type: {type(conn_error)}")
@@ -986,6 +988,10 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                 supplier_product_data = sanitize_json_object(supplier_product_data)
                 supplier_product_batch.append(supplier_product_data)
                 
+                # Log occasional progress with current batch size
+                if index % 50 == 0:
+                    print(f"🔍 DEBUG: Added record {index} to batch. Current batch size: {len(supplier_product_batch)}")
+                
                 # OPTIMIZATION: Process in larger batches for better performance
                 if len(supplier_product_batch) >= batch_size or index == total_rows - 1:
                     if supplier_product_batch:
@@ -1003,10 +1009,20 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                             try:
                                 # Log the exact API call we're about to make
                                 print(f"🔍 DEBUG: Attempting upsert with table('supplier_products').upsert() method")
+                                print(f"🔍 DEBUG: Batch contains {len(supplier_product_batch)} items")
                                 
+                                # Check if all required fields are present in the first item
+                                if supplier_product_batch:
+                                    sample = supplier_product_batch[0]
+                                    print(f"🔍 DEBUG: Sample batch item keys: {list(sample.keys())}")
+                                    # Check if any values are None that shouldn't be
+                                    print(f"🔍 DEBUG: supplier_id: {sample.get('supplier_id', 'MISSING')}")
+                                    
                                 # Attempt with just the primary key (id) as the conflict target
+                                # Explicitly specify the onConflict parameter 
                                 result = supabase.table('supplier_products').upsert(
-                                    supplier_product_batch
+                                    supplier_product_batch, 
+                                    on_conflict='id'
                                 ).execute()
                                 
                                 # Log the complete response for debugging
@@ -1251,20 +1267,30 @@ def process_supplier_file_with_orm(job, df, field_mapping):
         
         # DEBUG: Verify data was actually stored by querying the database
         try:
-            # Query Supabase to confirm records were inserted
+            # Query Supabase to confirm records were inserted - using correct PostgREST syntax
             supplier_id = supplier['id']
-            verify_result = supabase.table('supplier_products').select('count(*)', count='exact').eq('supplier_id', supplier_id).execute()
+            verify_result = supabase.table('supplier_products').select('id', count='exact').eq('supplier_id', supplier_id).execute()
+            
+            # The count should be available in the response
             actual_count = verify_result.count if hasattr(verify_result, 'count') else 0
             
             print(f"🔍 DEBUG: VERIFICATION - Records found in database for supplier {supplier_id}: {actual_count}")
             print(f"🔍 DEBUG: VERIFICATION - Expected successful records: {successful_count}")
+            print(f"🔍 DEBUG: VERIFICATION - Response details: {verify_result}")
             
             if actual_count == 0 and successful_count > 0:
                 print(f"⚠️ DEBUG: CRITICAL ERROR - Records were reported as successful but not found in database!")
             elif actual_count > 0 and successful_count == 0:
                 print(f"⚠️ DEBUG: UNUSUAL CONDITION - Records found in database but none reported as successful!")
+                # Try to fetch a sample record to confirm
+                try:
+                    sample = supabase.table('supplier_products').select('*').eq('supplier_id', supplier_id).limit(1).execute()
+                    print(f"🔍 DEBUG: Sample record: {sample.data[0] if sample.data else 'None'}")
+                except Exception as sample_error:
+                    print(f"⚠️ DEBUG: Failed to fetch sample record: {str(sample_error)}")
         except Exception as verify_error:
             print(f"⚠️ DEBUG: Verification failed: {str(verify_error)}")
+            print(f"⚠️ DEBUG: Verification error type: {type(verify_error)}")
         
         print(f"=== SUPPLIER IMPORT COMPLETED ===")
         print(f"📊 Total: {total_rows}, Successful: {successful_count}, Failed: {error_count}")
