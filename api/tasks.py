@@ -993,7 +993,15 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                     print(f"🔍 DEBUG: Added record {index} to batch. Current batch size: {len(supplier_product_batch)}")
                 
                 # OPTIMIZATION: Process in larger batches for better performance
-                if len(supplier_product_batch) >= batch_size or index == total_rows - 1:
+                # Debug the batch processing condition
+                is_last_row = (index == total_rows - 1)
+                is_batch_full = (len(supplier_product_batch) >= batch_size)
+                
+                if is_last_row:
+                    print(f"🔍 DEBUG: Processing final row {index}, batch size: {len(supplier_product_batch)}")
+                
+                if is_batch_full or is_last_row:
+                    print(f"🔍 DEBUG: Batch threshold reached. Batch full: {is_batch_full}, Last row: {is_last_row}")
                     if supplier_product_batch:
                         # DEBUG: Print sample of the batch data to verify structure
                         print(f"🔍 DEBUG: Batch contains {len(supplier_product_batch)} records")
@@ -1011,18 +1019,24 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                                 print(f"🔍 DEBUG: Attempting upsert with table('supplier_products').upsert() method")
                                 print(f"🔍 DEBUG: Batch contains {len(supplier_product_batch)} items")
                                 
+                                # Dump critical info about the batch
+                                print(f"🔍 DEBUG: First 3 EANs in batch: {[item.get('ean', 'None') for item in supplier_product_batch[:3]]}")
+                                print(f"🔍 DEBUG: First 3 MPNs in batch: {[item.get('mpn', 'None') for item in supplier_product_batch[:3]]}")
+                                
                                 # Check if all required fields are present in the first item
                                 if supplier_product_batch:
                                     sample = supplier_product_batch[0]
                                     print(f"🔍 DEBUG: Sample batch item keys: {list(sample.keys())}")
                                     # Check if any values are None that shouldn't be
                                     print(f"🔍 DEBUG: supplier_id: {sample.get('supplier_id', 'MISSING')}")
+                                    print(f"🔍 DEBUG: Full sample item: {sample}")
                                     
                                 # Attempt with just the primary key (id) as the conflict target
                                 # Explicitly specify the onConflict parameter 
+                                print(f"🔍 DEBUG: Executing upsert operation now...")
+                                # Try without the on_conflict parameter to see if that's causing issues
                                 result = supabase.table('supplier_products').upsert(
-                                    supplier_product_batch, 
-                                    on_conflict='id'
+                                    supplier_product_batch
                                 ).execute()
                                 
                                 # Log the complete response for debugging
@@ -1239,6 +1253,42 @@ def process_supplier_file_with_orm(job, df, field_mapping):
                 error_count += 1
                 continue
         
+        # Check if we have any remaining items in batch that weren't processed
+        if supplier_product_batch:
+            print(f"🔍 DEBUG: Found {len(supplier_product_batch)} unprocessed items in batch at end of processing")
+            print(f"🔍 DEBUG: Forcing final batch processing")
+            
+            try:
+                # Log the batch details explicitly
+                print(f"🔍 DEBUG: Final batch contains {len(supplier_product_batch)} items")
+                
+                # Check if all required fields are present in the first item
+                if supplier_product_batch:
+                    sample = supplier_product_batch[0]
+                    print(f"🔍 DEBUG: Sample batch item keys: {list(sample.keys())}")
+                    # Check if any values are None that shouldn't be
+                    print(f"🔍 DEBUG: supplier_id: {sample.get('supplier_id', 'MISSING')}")
+                
+                # Use the upsert method for final batch for consistency
+                print(f"🔍 DEBUG: Attempting final batch upsert")
+                # Also dump the first few items for debugging
+                if supplier_product_batch:
+                    print(f"🔍 DEBUG: First 3 EANs in final batch: {[item.get('ean', 'None') for item in supplier_product_batch[:3]]}")
+                
+                result = supabase.table('supplier_products').upsert(
+                    supplier_product_batch
+                ).execute()
+                
+                print(f"🔍 DEBUG: Final insert result: {result}")
+                
+                if hasattr(result, 'data') and result.data:
+                    successful_count += len(result.data)
+                    print(f"✅ Final batch insertion completed: {len(result.data)} records processed")
+            except Exception as e:
+                print(f"⚠️ DEBUG: Final batch insertion failed: {str(e)}")
+                print(f"⚠️ DEBUG: Error type: {type(e)}")
+                error_count += len(supplier_product_batch)
+                
         # Update job with results
         job.status = 'completed'
         job.progress = 100
