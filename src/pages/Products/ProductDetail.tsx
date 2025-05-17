@@ -571,20 +571,7 @@ const ProductDetail: React.FC = () => {
                       <div className="text-base font-semibold">{safeProduct?.unitsSold.toLocaleString() || '0'}</div>
                     )}
                   </div>
-                  <div className="bg-gray-50 p-2 rounded">
-                    <div className="text-xs text-gray-500">Buy Box</div>
-                    {isEditing ? (
-                      <input
-                        type="number"
-                        step="0.01"
-                        value={editedProduct?.buyBoxPrice || 0}
-                        onChange={(e) => handleEditChange('buyBoxPrice', e.target.value)}
-                        className="border p-1 rounded text-sm w-full"
-                      />
-                    ) : (
-                      <div className="text-base font-semibold">${safeProduct?.buyBoxPrice.toFixed(2) || '0.00'}</div>
-                    )}
-                  </div>
+
                   <div className="bg-gray-50 p-2 rounded">
                     <div className="text-xs text-gray-500">FBA Fee</div>
                     {isEditing ? (
