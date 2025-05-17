@@ -489,166 +489,84 @@ def upload_supplier_data(request):
 @permission_classes([AllowAny])  # Only for development
 @csrf_exempt  # Exempt this view from CSRF protection
 def upload_amazon_data(request):
-    # Handle OPTIONS requests (preflight)
-    if request.method == 'OPTIONS':
-        response = HttpResponse()
-        response['Allow'] = 'GET, POST, OPTIONS'
-        return response
-        
-    # Handle GET requests (testing connection)
-    if request.method == 'GET':
-        return Response({'message': 'Upload endpoint is working. Use POST to upload files.'})
-    
-    # For POST requests, process the file
-    if 'file' not in request.FILES:
-        return Response({'error': 'No file provided'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Log request details to help debug
-    print("=" * 40)
-    print(f"Processing file upload at {request.path}")
-    print(f"Content Type: {request.content_type}")
-    print(f"Files: {list(request.FILES.keys())}")
-    print("=" * 40)
+    """
+    Endpoint to handle Amazon product data uploads
+    """
+    if request.method != 'POST':
+        return JsonResponse({'error': 'Only POST method is allowed'}, status=405)
     
     try:
+        # Log the upload request
+        print('=' * 40)
+        print(f"Processing file upload at {request.path}")
+        print(f"Content Type: {request.content_type}")
+        print(f"Files: {list(request.FILES.keys())}")
+        print('=' * 40)
+        
+        # Check if a file was uploaded
+        if 'file' not in request.FILES:
+            return JsonResponse({'error': 'No file uploaded'}, status=400)
+        
         uploaded_file = request.FILES['file']
-        file_size = uploaded_file.size
+        print(f"File size: {uploaded_file.size} bytes ({uploaded_file.size / 1024 / 1024:.2f} MB)")
         
-        print(f"File size: {file_size} bytes ({file_size/1024/1024:.2f} MB)")
+        # Get field mapping from request
+        field_mapping = {}
+        for key, value in request.POST.items():
+            if key.startswith('field_'):
+                field_name = key.replace('field_', '')
+                field_mapping[field_name] = value
         
-        # Validate file size
-        if file_size > settings.MAX_UPLOAD_SIZE:
-            return Response({
-                'error': f'File too large. Max size is {settings.MAX_UPLOAD_SIZE / (1024 * 1024)}MB'
-            }, status=status.HTTP_400_BAD_REQUEST)
+        # Create a unique filename
+        import uuid
+        unique_id = str(uuid.uuid4())
+        original_name = uploaded_file.name
+        filename = f"{unique_id}_{original_name}"
+        file_path = os.path.join('uploads', filename)
         
-        # Validate file extension
-        file_extension = os.path.splitext(uploaded_file.name)[1].lower()[1:]
-        if file_extension not in ['csv', 'xlsx', 'xls']:
-            return Response({
-                'error': 'Invalid file format. Supported formats: CSV, XLSX, XLS'
-            }, status=status.HTTP_400_BAD_REQUEST)
-        
-        # Create upload directory if it doesn't exist
-        os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
-        
-        # Generate unique filename
-        unique_filename = f"{str(uuid.uuid4())}_{uploaded_file.name}"
-        file_path = os.path.join(settings.UPLOAD_DIR, unique_filename)
-        
-        # Save file to disk
+        # Save the file
+        os.makedirs('uploads', exist_ok=True)
         with open(file_path, 'wb+') as destination:
             for chunk in uploaded_file.chunks():
                 destination.write(chunk)
         
         print(f"File saved to {file_path}")
-        
-        # Create import job
-        field_mapping = request.data.get('field_mapping', {})
-        if isinstance(field_mapping, str):
-            import json
-            field_mapping = json.loads(field_mapping)
-        
         print(f"Field mapping: {field_mapping}")
         
-        batch_size = 100
-        if request.data.get('batch_size'):
-            batch_size = int(request.data.get('batch_size'))
-        
-        # Create job object
-        job = ImportJob.objects.create(
-            user=request.user if request.user.is_authenticated else None,
-            file_name=uploaded_file.name,
-            file_size=file_size,
+        # Create an import job record
+        import_job = ProductImportJob(
+            file_name=original_name,
             file_path=file_path,
-            type='product',
+            field_mapping=json.dumps(field_mapping),
             status='pending',
-            field_mapping=field_mapping,
-            batch_size=batch_size
+            import_type='amazon',
+            total_rows=0,
+            processed_rows=0
         )
+        import_job.save()
+        print(f"Created import job with ID: {import_job.id}")
         
-        print(f"Created import job with ID: {job.id}")
+        # Start processing in the background
+        from django.core.management import call_command
+        import threading
+        thread = threading.Thread(
+            target=lambda: call_command('process_import_job', job_id=str(import_job.id))
+        )
+        thread.daemon = True
+        thread.start()
         
-        # For small files, process directly in the request to provide faster feedback
-        if file_size < 10 * 1024 * 1024:  # Less than 10MB
-            job.status = 'processing'
-            job.save()
-            
-            try:
-                print("Fast-path: Processing file directly (< 10MB)")
-                
-                # Process the file directly (not using Celery)
-                process_product_file(job)
-                
-                # Return the completed job, ensuring job_id is included for frontend compatibility
-                serializer = ImportJobSerializer(job)
-                serialized_data = serializer.data
-                
-                # Ensure job_id is present for frontend compatibility
-                serialized_data['job_id'] = str(job.id)
-                
-                print(f"Small file processing complete. Job status: {job.status}")
-                
-                return Response(serialized_data, status=status.HTTP_201_CREATED)
-            except Exception as e:
-                import traceback
-                print(f"Error processing file directly: {str(e)}")
-                print(traceback.format_exc())
-                
-                # Update job status
-                job.status = 'failed'
-                job.status_message = str(e)
-                job.save()
-                
-                # Return error
-                return Response({
-                    'id': str(job.id),  # Include both id and job_id for compatibility
-                    'job_id': str(job.id),
-                    'status': 'failed',
-                    'error': str(e)
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        # For larger files, queue for background processing
-        print(f"Processing large file directly")
-        
-        # Create a simulated job response with both id and job_id fields for frontend compatibility
-        response_data = {
-            'id': str(job.id),
-            'job_id': str(job.id),  # Add job_id for frontend compatibility
-            'file_name': uploaded_file.name,
-            'file_size': file_size,
-            'file_path': file_path,
-            'type': 'product',
-            'status': 'pending', 
-            'message': 'File received. Processing started.'
-        }
-        
-        # Start processing directly
-        try:
-            job.status = 'processing'
-            job.save()
-            
-            # Process the file directly (not using Celery)
-            process_product_file(job)
-            
-            # Update response with completed status
-            response_data['status'] = job.status
-            response_data['message'] = 'Processing completed'
-            
-            print(f"Direct processing completed for job {job.id}")
-        except Exception as e:
-            import traceback
-            print(f"Failed to process file: {str(e)}")
-            print(traceback.format_exc())
-            # Continue anyway as we've already saved the job
-        
-        return Response(response_data, status=status.HTTP_201_CREATED)
+        # Return success response immediately with job ID
+        return JsonResponse({
+            'success': True, 
+            'message': 'File upload started processing',
+            'job_id': str(import_job.id)
+        })
         
     except Exception as e:
         import traceback
-        print(f"Exception in file upload: {str(e)}")
+        print(f"Error processing file: {str(e)}")
         print(traceback.format_exc())
-        return Response({'error': f'Server error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return JsonResponse({'error': str(e)}, status=500)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])  # Allow anonymous access to check status

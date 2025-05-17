@@ -2,13 +2,19 @@ services:
   - type: web
     name: products-mapping-app
     env: python
+    plan: standard
     buildCommand: npm install && npm run build && pip install -r requirements.txt
-    startCommand: gunicorn products_mapping_project.wsgi:application
+    startCommand: gunicorn products_mapping_project.wsgi:application --timeout 300 --workers 2
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+      targetMemoryPercent: 80
+      targetCPUPercent: 80
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
       - key: WEB_CONCURRENCY
-        value: 4
+        value: 2
       - key: DJANGO_SETTINGS_MODULE
         value: products_mapping_project.settings
       - key: SECRET_KEY
