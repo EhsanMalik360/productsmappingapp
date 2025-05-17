@@ -15,15 +15,15 @@ const ProductRow: React.FC<ProductRowProps> = ({ product }) => {
   const bestSupplier = getBestSupplierForProduct(product.id);
   
   // Calculate profit margin
-  const calculateProfitMargin = (salePrice: number, cost: number, amazonFee: number) => {
-    if (salePrice <= 0 || !cost) return 0;
-    const profit = salePrice - cost - amazonFee;
-    return Math.round((profit / salePrice) * 100);
+  const calculateProfitMargin = (buyBoxPrice: number, cost: number, amazonFee: number) => {
+    if (buyBoxPrice <= 0 || !cost) return 0;
+    const profit = buyBoxPrice - cost - amazonFee;
+    return Math.round((profit / buyBoxPrice) * 100);
   };
 
   const bestCost = bestSupplier?.cost ? `$${bestSupplier.cost.toFixed(2)}` : '-';
   const profitMargin = bestSupplier?.cost 
-    ? calculateProfitMargin(product.salePrice, bestSupplier.cost, product.amazonFee)
+    ? calculateProfitMargin(product.buyBoxPrice, bestSupplier.cost, product.amazonFee)
     : 0;
   
   return (
@@ -31,7 +31,7 @@ const ProductRow: React.FC<ProductRowProps> = ({ product }) => {
       <td className="px-4 py-3 font-medium">{product.title}</td>
       <td className="px-4 py-3">{product.ean}</td>
       <td className="px-4 py-3">{product.brand}</td>
-      <td className="px-4 py-3">${product.salePrice.toFixed(2)}</td>
+      <td className="px-4 py-3">${product.buyBoxPrice.toFixed(2)}</td>
       <td className="px-4 py-3">{product.unitsSold.toLocaleString()}</td>
       <td className="px-4 py-3">${product.amazonFee.toFixed(2)}</td>
       <td className="px-4 py-3">

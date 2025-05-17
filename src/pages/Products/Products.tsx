@@ -50,7 +50,7 @@ const Products: React.FC = () => {
   const priceStats = useMemo(() => {
     if (products.length === 0) return { min: 0, max: 1000 };
     
-    const prices = products.map(p => p.salePrice);
+    const prices = products.map(p => p.buyBoxPrice);
     return {
       min: Math.floor(Math.min(...prices)),
       max: Math.ceil(Math.max(...prices))
@@ -103,8 +103,8 @@ const Products: React.FC = () => {
 
       // Price range filter
       const matchesPriceRange = 
-        product.salePrice >= priceRange.min && 
-        product.salePrice <= priceRange.max;
+        product.buyBoxPrice >= priceRange.min && 
+        product.buyBoxPrice <= priceRange.max;
 
       // Supplier filter
       const { getSuppliersForProduct } = useAppContext();
@@ -126,7 +126,7 @@ const Products: React.FC = () => {
 
       switch (sortField) {
         case 'price':
-          comparison = a.salePrice - b.salePrice;
+          comparison = a.buyBoxPrice - b.buyBoxPrice;
           break;
         case 'units':
           comparison = a.unitsSold - b.unitsSold;
@@ -134,8 +134,8 @@ const Products: React.FC = () => {
         case 'profit': {
           const aSupplier = getBestSupplierForProduct(a.id);
           const bSupplier = getBestSupplierForProduct(b.id);
-          const aProfit = aSupplier ? (a.salePrice - a.amazonFee - aSupplier.cost) : 0;
-          const bProfit = bSupplier ? (b.salePrice - b.amazonFee - bSupplier.cost) : 0;
+          const aProfit = aSupplier ? (a.buyBoxPrice - a.amazonFee - aSupplier.cost) : 0;
+          const bProfit = bSupplier ? (b.buyBoxPrice - b.amazonFee - bSupplier.cost) : 0;
           comparison = aProfit - bProfit;
           break;
         }
@@ -506,9 +506,9 @@ const Products: React.FC = () => {
                 'Product', 
                 'EAN', 
                 'Brand', 
-                'Sale Price', 
+                'Buy Box Price', 
                 'Units Sold', 
-                'Amazon Fee', 
+                'FBA Fee', 
                 'Suppliers', 
                 'Best Cost', 
                 'Profit Margin',

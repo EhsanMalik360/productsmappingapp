@@ -122,9 +122,8 @@ const ProductDetail: React.FC = () => {
       setCustomReferralFee(safeProduct.referralFee || 0);
       
       const bestSupplier = getBestSupplierForProduct(safeProduct.id);
-      if (bestSupplier) {
-        setCustomSupplierCost(bestSupplier.cost);
-      }
+      // Set default value of 0 if no supplier is available
+      setCustomSupplierCost(bestSupplier ? bestSupplier.cost : 0);
     }
   }, [safeProduct, getBestSupplierForProduct]);
 
@@ -205,9 +204,8 @@ const ProductDetail: React.FC = () => {
       setCustomReferralFee(safeProduct.referralFee || 0);
       
       const bestSupplier = getBestSupplierForProduct(safeProduct.id);
-      if (bestSupplier) {
-        setCustomSupplierCost(bestSupplier.cost);
-      }
+      // Set default value of 0 if no supplier is available
+      setCustomSupplierCost(bestSupplier ? bestSupplier.cost : 0);
       
       // Reset results
       setCustomProfit({
@@ -546,7 +544,7 @@ const ProductDetail: React.FC = () => {
                 
                 <div className="grid grid-cols-6 gap-2">
                   <div className="bg-gray-50 p-2 rounded">
-                    <div className="text-xs text-gray-500">Sale Price</div>
+                    <div className="text-xs text-gray-500">Buy Box Price</div>
                     {isEditing ? (
                       <input
                         type="number"
@@ -588,7 +586,7 @@ const ProductDetail: React.FC = () => {
                     )}
                   </div>
                   <div className="bg-gray-50 p-2 rounded">
-                    <div className="text-xs text-gray-500">Amazon Fee</div>
+                    <div className="text-xs text-gray-500">FBA Fee</div>
                     {isEditing ? (
                       <input
                         type="number"
@@ -1003,7 +1001,7 @@ const ProductDetail: React.FC = () => {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Amazon Fee ($)</label>
+                      <label className="block text-xs text-gray-500 mb-0.5">FBA Fee ($)</label>
                       <input 
                         type="number" 
                         value={customAmazonFee || ''}
@@ -1011,7 +1009,7 @@ const ProductDetail: React.FC = () => {
                         onKeyDown={handleKeyDown}
                         step="0.01"
                         min="0"
-                        placeholder="Amazon Fee" 
+                        placeholder="FBA Fee" 
                         className="border p-1 rounded w-full text-xs" 
                       />
                     </div>
@@ -1040,6 +1038,11 @@ const ProductDetail: React.FC = () => {
                         placeholder="Supplier Cost" 
                         className="border p-1 rounded w-full text-xs" 
                       />
+                      {!getBestSupplierForProduct(safeProduct.id) && (
+                        <div className="text-xs text-amber-600 mt-1">
+                          No supplier available. Using 0 as default.
+                        </div>
+                      )}
                     </div>
                   </div>
                   
@@ -1141,11 +1144,11 @@ const ProductDetail: React.FC = () => {
                         <td className="px-2 py-1.5">{safeProduct.mpn || 'N/A'}</td>
                       </tr>
                       <tr className="border-b border-gray-200">
-                        <td className="px-2 py-1.5 font-medium">Sale Price</td>
+                        <td className="px-2 py-1.5 font-medium">Buy Box Price</td>
                         <td className="px-2 py-1.5">${safeProduct.salePrice.toFixed(2)}</td>
                       </tr>
                       <tr className="border-b border-gray-200">
-                        <td className="px-2 py-1.5 font-medium">Amazon Fee</td>
+                        <td className="px-2 py-1.5 font-medium">FBA Fee</td>
                         <td className="px-2 py-1.5">${safeProduct.amazonFee.toFixed(2)}</td>
                       </tr>
                       <tr className="border-b border-gray-200">
