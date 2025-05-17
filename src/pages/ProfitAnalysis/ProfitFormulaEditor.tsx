@@ -190,26 +190,24 @@ const ProfitFormulaEditor: React.FC = () => {
       // Check if formula exists in database
       const { data, error } = await supabase
         .from('settings')
-        .select('value')
-        .eq('key', FORMULA_STORAGE_KEY)
-        .single();
+        .select('*')
+        .eq('key', FORMULA_STORAGE_KEY);
       
       if (error) {
-        if (error.code === 'PGRST116') { // No rows returned
-          // Initialize with default formula
-          await saveFormulaToDB(defaultFormula);
-          setFormulaItems(defaultFormula);
-        } else {
-          console.error('Error fetching formula from database:', error);
-          // Fall back to default formula
-          setFormulaItems(defaultFormula);
-        }
-      } else if (data?.value) {
-        // Load formula from database
-        setFormulaItems(data.value as FormulaItem[]);
-      } else {
+        console.error('Error fetching formula from database:', error);
         // Fall back to default formula
         setFormulaItems(defaultFormula);
+        return;
+      }
+      
+      // If we got data but it's empty or not an array
+      if (!data || !Array.isArray(data) || data.length === 0) {
+        // Initialize with default formula
+        await saveFormulaToDB(defaultFormula);
+        setFormulaItems(defaultFormula);
+      } else {
+        // Load formula from database (first matching record)
+        setFormulaItems(data[0].value as FormulaItem[]);
       }
     } catch (err) {
       console.error('Error loading formula:', err);
@@ -224,20 +222,18 @@ const ProfitFormulaEditor: React.FC = () => {
   const saveFormulaToDB = async (formula: FormulaItem[]) => {
     try {
       // First check if the record exists
-      const { data: existingRecord, error: fetchError } = await supabase
+      const { data, error: fetchError } = await supabase
         .from('settings')
         .select('*')
-        .eq('key', FORMULA_STORAGE_KEY)
-        .single();
+        .eq('key', FORMULA_STORAGE_KEY);
       
-      let error;
-      
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        // Error other than "not found"
+      if (fetchError) {
         throw fetchError;
       }
       
-      if (existingRecord) {
+      let error;
+      
+      if (data && data.length > 0) {
         // Update existing record
         const { error: updateError } = await supabase
           .from('settings')
