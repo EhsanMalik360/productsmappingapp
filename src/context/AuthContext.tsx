@@ -84,7 +84,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setLoading(true);
         
         // Get the session
-        const { data: { session: currentSession } } = await supabase.auth.getSession();
+        const { data: { session: currentSession }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('Error getting session:', sessionError);
+          setLoading(false);
+          return;
+        }
+        
         console.log('Current session:', currentSession ? 'Session found' : 'No session found');
 
         if (!isMounted) return;
@@ -94,7 +101,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           
           // Get the user
           console.log('Getting user data...');
-          const { data: { user: currentUser } } = await supabase.auth.getUser();
+          const { data: { user: currentUser }, error: userError } = await supabase.auth.getUser();
+          
+          if (userError) {
+            console.error('Error getting user data:', userError);
+            setLoading(false);
+            return;
+          }
+          
           console.log('Current user:', currentUser ? 'User found' : 'No user found');
           
           if (!isMounted) return;
@@ -102,39 +116,52 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           if (currentUser) {
             // Get the user's profile
             console.log('Getting user profile for user ID:', currentUser.id);
-            const { data: profileData, error: profileError } = await supabase
-              .from('user_profiles')
-              .select('*')
-              .eq('user_id', currentUser.id)
-              .single();
-            
-            console.log('User profile query completed');
-            console.log('User profile data:', profileData);
-            if (profileError) console.error('User profile error:', profileError);
-            
-            if (!isMounted) return;
-            
-            if (profileData) {
-              console.log('User role from profile (raw):', profileData.role);
-              console.log('Role type:', typeof profileData.role);
-              console.log('Role stringified:', JSON.stringify(profileData.role));
+            try {
+              const { data: profileData, error: profileError } = await supabase
+                .from('user_profiles')
+                .select('*')
+                .eq('user_id', currentUser.id)
+                .single();
               
-              const isUserAdmin = isAdminRole(profileData.role);
+              console.log('User profile query completed');
               
-              const authUser = { ...currentUser, profile: profileData } as AuthUser;
-              setUser(authUser);
-              setIsAdmin(isUserAdmin);
-              console.log('Setting isAdmin to:', isUserAdmin, '(Based on role:', profileData.role, ')');
-            } else {
-              console.log('No profile data found, setting user without profile');
+              if (profileError) {
+                console.error('User profile error:', profileError);
+                // Still set the user even if profile retrieval fails
+                setUser(currentUser);
+                setIsAdmin(false);
+                console.log('Setting user without profile due to profile error');
+              } else {
+                console.log('User profile data:', profileData);
+                
+                if (profileData) {
+                  console.log('User role from profile (raw):', profileData.role);
+                  console.log('Role type:', typeof profileData.role);
+                  console.log('Role stringified:', JSON.stringify(profileData.role));
+                  
+                  const isUserAdmin = isAdminRole(profileData.role);
+                  
+                  const authUser = { ...currentUser, profile: profileData } as AuthUser;
+                  setUser(authUser);
+                  setIsAdmin(isUserAdmin);
+                  console.log('Setting isAdmin to:', isUserAdmin, '(Based on role:', profileData.role, ')');
+                } else {
+                  console.log('No profile data found, setting user without profile');
+                  setUser(currentUser);
+                  setIsAdmin(false);
+                  console.log('No profile data found, setting isAdmin to false');
+                }
+              }
+            } catch (profileQueryError) {
+              console.error('Unexpected error during profile query:', profileQueryError);
               setUser(currentUser);
               setIsAdmin(false);
-              console.log('No profile data found, setting isAdmin to false');
             }
           }
         } else {
           console.log('No session found, user is not authenticated');
           setUser(null);
+          setSession(null);
           setIsAdmin(false);
         }
       } catch (error) {
@@ -160,53 +187,84 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (event === 'SIGNED_IN' && newSession) {
           console.log('Handling SIGNED_IN event');
           setSession(newSession);
-          const { data: { user: newUser } } = await supabase.auth.getUser();
-          console.log('New user on sign in:', newUser ? 'User found' : 'No user found');
           
-          if (!isMounted) return;
-          
-          if (newUser) {
-            // Get the user's profile
-            console.log('Getting user profile on sign in for ID:', newUser.id);
-            const { data: profileData, error: profileError } = await supabase
-              .from('user_profiles')
-              .select('*')
-              .eq('user_id', newUser.id)
-              .single();
+          try {
+            // Get the user
+            console.log('Getting user data after sign in...');
+            const { data: { user: newUser }, error: userError } = await supabase.auth.getUser();
             
-            console.log('User profile query completed on sign in');
-            console.log('User profile on sign in:', profileData);
-            if (profileError) console.error('Profile error on sign in:', profileError);
+            if (userError) {
+              console.error('Error getting user after sign in:', userError);
+              setLoading(false);
+              return;
+            }
+            
+            console.log('New user on sign in:', newUser ? 'User found' : 'No user found');
             
             if (!isMounted) return;
             
-            if (profileData) {
-              console.log('User role on sign in (raw):', profileData.role);
-              console.log('Role type on sign in:', typeof profileData.role);
-              console.log('Role stringified on sign in:', JSON.stringify(profileData.role));
+            if (newUser) {
+              // Get the user's profile
+              console.log('Getting user profile on sign in for ID:', newUser.id);
               
-              const isUserAdmin = isAdminRole(profileData.role);
-              
-              const authUser = { ...newUser, profile: profileData } as AuthUser;
-              setUser(authUser);
-              setIsAdmin(isUserAdmin);
-              console.log('Setting isAdmin to:', isUserAdmin, '(Based on role:', profileData.role, ')');
-            } else {
-              console.log('No profile data found on sign in, setting user without profile');
-              setUser(newUser);
-              setIsAdmin(false);
-              console.log('No profile data found on sign in, isAdmin set to false');
+              try {
+                const { data: profileData, error: profileError } = await supabase
+                  .from('user_profiles')
+                  .select('*')
+                  .eq('user_id', newUser.id)
+                  .single();
+                
+                console.log('User profile query completed on sign in');
+                
+                if (profileError) {
+                  console.error('Profile error on sign in:', profileError);
+                  
+                  // Even if there's a profile error, we still set the user
+                  setUser(newUser);
+                  setIsAdmin(false);
+                  console.log('Setting user without profile due to profile error');
+                } else {
+                  console.log('User profile on sign in:', profileData);
+                  
+                  if (profileData) {
+                    console.log('User role on sign in (raw):', profileData.role);
+                    console.log('Role type on sign in:', typeof profileData.role);
+                    console.log('Role stringified on sign in:', JSON.stringify(profileData.role));
+                    
+                    const isUserAdmin = isAdminRole(profileData.role);
+                    
+                    const authUser = { ...newUser, profile: profileData } as AuthUser;
+                    setUser(authUser);
+                    setIsAdmin(isUserAdmin);
+                    console.log('Setting isAdmin to:', isUserAdmin, '(Based on role:', profileData.role, ')');
+                  } else {
+                    console.log('No profile data found on sign in, setting user without profile');
+                    setUser(newUser);
+                    setIsAdmin(false);
+                    console.log('No profile data found on sign in, isAdmin set to false');
+                  }
+                }
+              } catch (profileQueryError) {
+                console.error('Unexpected error during profile query:', profileQueryError);
+                setUser(newUser);
+                setIsAdmin(false);
+              }
             }
+          } catch (error) {
+            console.error('Error handling auth state change:', error);
+          } finally {
+            setLoading(false);
           }
         } else if (event === 'SIGNED_OUT') {
           console.log('Handling SIGNED_OUT event');
           setSession(null);
           setUser(null);
           setIsAdmin(false);
+          setLoading(false);
+        } else {
+          // Ensure loading state is set to false for other events
+          setLoading(false);
         }
-        
-        // Ensure loading state is set to false after auth state changes
-        setLoading(false);
       }
     );
 
@@ -224,6 +282,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     console.log('Sign in attempt for email:', email);
     try {
       setLoading(true);
+      
+      // Clear any previous user/session before attempting login
+      setUser(null);
+      setSession(null);
+      setIsAdmin(false);
+      
+      console.log('Sending sign in request to Supabase...');
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -231,16 +296,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       if (error) {
         console.error('Sign in error:', error);
+        setLoading(false);
         return { error };
       }
 
-      console.log('Sign in successful');
+      console.log('Sign in successful, session established:', !!data.session);
+      
+      // We don't need to set user data here as it will be handled by the auth listener
+      // Just return the result
       return { data, error: null };
     } catch (error) {
       console.error('Unexpected error during sign in:', error);
+      setLoading(false);
       return { error };
-    } finally {
-      // Don't set loading to false here as the auth state change listener will handle it
     }
   };
 
