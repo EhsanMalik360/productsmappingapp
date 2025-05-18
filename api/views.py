@@ -4,9 +4,11 @@ from django.utils import timezone
 from django.conf import settings
 from django.db.models import Q
 from django.views.decorators.csrf import csrf_exempt
+from django.contrib.auth import authenticate, login, logout
+from django.contrib.auth.models import User
 from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, permission_classes, parser_classes
-from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.pagination import PageNumberPagination
@@ -16,11 +18,12 @@ import json
 import pandas as pd
 from datetime import datetime
 from decimal import Decimal
-from .models import Product, Supplier, SupplierProduct, ImportJob, ImportHistory
+from .models import Product, Supplier, SupplierProduct, ImportJob, ImportHistory, UserProfile
 from .serializers import (
     ProductSerializer, ProductDetailSerializer,
     SupplierSerializer, SupplierDetailSerializer,
-    SupplierProductSerializer, ImportJobSerializer, ImportHistorySerializer
+    SupplierProductSerializer, ImportJobSerializer, ImportHistorySerializer,
+    UserSerializer, UserProfileSerializer, UserCreateSerializer
 )
 from .tasks import process_file_upload, process_supplier_file, process_product_file
 from .utils import (
@@ -28,6 +31,129 @@ from .utils import (
     fetch_supplier_products, create_or_update_record, delete_record,
     detect_and_fix_duplicate_supplier_products
 )
+
+# Custom permission class
+class IsAdminUser:
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and 
+                   hasattr(request.user, 'profile') and 
+                   request.user.profile.role == 'admin')
+
+# Authentication Views
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def user_login(request):
+    username = request.data.get('username', '')
+    password = request.data.get('password', '')
+    
+    user = authenticate(username=username, password=password)
+    
+    if user is not None:
+        if not hasattr(user, 'profile'):
+            return Response(
+                {'error': 'User profile not found'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        if not user.profile.is_active:
+            return Response(
+                {'error': 'This account has been disabled'}, 
+                status=status.HTTP_403_FORBIDDEN
+            )
+        
+        login(request, user)
+        
+        serializer = UserSerializer(user)
+        return Response({
+            'user': serializer.data,
+            'message': 'Login successful'
+        })
+    else:
+        return Response(
+            {'error': 'Invalid credentials'}, 
+            status=status.HTTP_401_UNAUTHORIZED
+        )
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def user_logout(request):
+    logout(request)
+    return Response({'message': 'Logout successful'})
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def current_user(request):
+    serializer = UserSerializer(request.user)
+    return Response(serializer.data)
+
+# User Management (Admin only)
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def user_list(request):
+    if not hasattr(request.user, 'profile') or request.user.profile.role != 'admin':
+        return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+    
+    users = User.objects.select_related('profile').all()
+    serializer = UserSerializer(users, many=True)
+    return Response(serializer.data)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def create_user(request):
+    if not hasattr(request.user, 'profile') or request.user.profile.role != 'admin':
+        return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+    
+    serializer = UserCreateSerializer(data=request.data)
+    if serializer.is_valid():
+        serializer.save()
+        return Response(
+            {'message': 'User created successfully'}, 
+            status=status.HTTP_201_CREATED
+        )
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def user_detail(request, user_id):
+    if not hasattr(request.user, 'profile') or request.user.profile.role != 'admin':
+        return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+    
+    try:
+        user = User.objects.get(id=user_id)
+    except User.DoesNotExist:
+        return Response(status=status.HTTP_404_NOT_FOUND)
+    
+    if request.method == 'GET':
+        serializer = UserSerializer(user)
+        return Response(serializer.data)
+    
+    elif request.method == 'PUT':
+        # Handle profile update separately
+        profile_data = request.data.pop('profile', None)
+        
+        serializer = UserSerializer(user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            
+            # Update profile if provided
+            if profile_data and hasattr(user, 'profile'):
+                profile_serializer = UserProfileSerializer(
+                    user.profile, data=profile_data, partial=True
+                )
+                if profile_serializer.is_valid():
+                    profile_serializer.save()
+            
+            return Response(UserSerializer(user).data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    elif request.method == 'DELETE':
+        if user.id == request.user.id:
+            return Response(
+                {'error': 'Cannot delete your own account'}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        user.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 # Health check
 @api_view(['GET'])
@@ -126,6 +252,7 @@ def supplier_detail(request, pk):
 
 # Products
 @api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
 def product_list(request):
     if request.method == 'GET':
         search_query = request.query_params.get('search', '')
@@ -156,6 +283,10 @@ def product_list(request):
         })
     
     elif request.method == 'POST':
+        # Only admin can create products
+        if not hasattr(request.user, 'profile') or request.user.profile.role != 'admin':
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+        
         # Create a new product using Supabase
         try:
             result = create_or_update_record('products', request.data)
@@ -164,6 +295,7 @@ def product_list(request):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 @api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
 def product_detail(request, pk):
     try:
         # Use Supabase client to get product by ID
@@ -198,6 +330,10 @@ def product_detail(request, pk):
         return Response(product)
     
     elif request.method == 'PUT':
+        # Only admin can update products
+        if not hasattr(request.user, 'profile') or request.user.profile.role != 'admin':
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+            
         try:
             result = create_or_update_record('products', request.data, 'id', str(pk))
             return Response(result.data[0])
@@ -205,6 +341,10 @@ def product_detail(request, pk):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
     elif request.method == 'DELETE':
+        # Only admin can delete products
+        if not hasattr(request.user, 'profile') or request.user.profile.role != 'admin':
+            return Response({'error': 'Permission denied'}, status=status.HTTP_403_FORBIDDEN)
+            
         try:
             delete_record('products', 'id', str(pk))
             return Response(status=status.HTTP_204_NO_CONTENT)
