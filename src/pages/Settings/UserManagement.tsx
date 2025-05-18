@@ -227,14 +227,29 @@ const UserManagement: React.FC = () => {
     try {
       setIsDeleting(true);
       
-      // Attempt to delete the user using a server-less approach
-      // This will only work with the proper permissions
-      const { error } = await supabase.rpc('delete_user', {
-        user_id: userId
-      });
+      // Get the current user's ID to pass as the requester
+      const { data: { user } } = await supabase.auth.getUser();
       
-      if (error) {
-        throw error;
+      // Call our Edge Function to properly delete the user
+      const response = await fetch(
+        `https://wvgiaeuvyfsdhoxrjmib.supabase.co/functions/v1/delete-user`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+          },
+          body: JSON.stringify({
+            userId: userId,
+            requesterId: user?.id
+          })
+        }
+      );
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to delete user');
       }
       
       toast.success('User deleted successfully');
