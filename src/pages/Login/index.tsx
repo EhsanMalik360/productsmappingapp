@@ -7,8 +7,70 @@ const LoginPage: React.FC = () => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loginStarted, setLoginStarted] = useState(false);
-  const { signIn, user, loading } = useAuth();
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+  const { signIn, user, loading, supabase } = useAuth();
   const navigate = useNavigate();
+
+  // Debug function to check Supabase connection and data
+  const checkSupabaseConnection = async (userId?: string) => {
+    try {
+      console.log('Testing Supabase connection...');
+      
+      // Test connection with a simple health check
+      const { data: healthData, error: healthError } = await supabase.from('user_profiles').select('count(*)', { count: 'exact' });
+      
+      if (healthError) {
+        console.error('Health check failed:', healthError);
+        setDebugInfo({ status: 'error', message: 'Database connection failed', error: healthError });
+        return;
+      }
+      
+      console.log('Supabase connection healthy, found profiles:', healthData);
+      
+      // If we have a userId, try to find that specific profile
+      if (userId) {
+        console.log('Looking up user profile for ID:', userId);
+        const { data: profileData, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', userId);
+        
+        if (profileError) {
+          console.error('Profile lookup failed:', profileError);
+          setDebugInfo({ 
+            status: 'error', 
+            message: 'Failed to fetch profile',
+            error: profileError,
+            healthData 
+          });
+          return;
+        }
+        
+        console.log('Profile lookup results:', profileData);
+        setDebugInfo({ 
+          status: 'success', 
+          message: 'Connection verified',
+          userId,
+          profiles: profileData, 
+          healthData 
+        });
+      } else {
+        // If we don't have a userId, just confirm the connection is working
+        setDebugInfo({ 
+          status: 'warning', 
+          message: 'Connection OK but no user ID to check profile',
+          healthData 
+        });
+      }
+    } catch (error) {
+      console.error('Debug check failed:', error);
+      setDebugInfo({ 
+        status: 'error', 
+        message: 'Unexpected error during debug check',
+        error 
+      });
+    }
+  };
 
   // Monitor auth state changes for redirect
   useEffect(() => {
@@ -27,18 +89,29 @@ const LoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setDebugInfo(null);
     setLoginStarted(true);
     
     console.log('Login form submitted for', email);
 
     try {
-      const { error } = await signIn(email, password);
+      const { data, error } = await signIn(email, password);
       
       if (error) {
         console.error('Login error:', error);
         setError(error.message || 'Failed to sign in');
         setLoginStarted(false);
         return;
+      }
+      
+      // Check the user data that was returned
+      console.log('Sign in request completed successfully, data:', data);
+      
+      // If we got a user ID but authentication isn't completing, debug the profile lookup
+      if (data?.user?.id) {
+        await checkSupabaseConnection(data.user.id);
+      } else {
+        await checkSupabaseConnection();
       }
       
       // Don't navigate here - let the useEffect handle it
@@ -110,6 +183,47 @@ const LoginPage: React.FC = () => {
         {(loading || loginStarted) && (
           <div className="mt-4 text-center text-sm text-gray-600">
             Authenticating, please wait...
+          </div>
+        )}
+        
+        {/* Debug information display */}
+        {debugInfo && (
+          <div className={`mt-6 p-3 rounded text-sm ${
+            debugInfo.status === 'success' ? 'bg-green-50 text-green-800' : 
+            debugInfo.status === 'warning' ? 'bg-yellow-50 text-yellow-800' : 
+            'bg-red-50 text-red-800'
+          }`}>
+            <h4 className="font-bold mb-1">Debug Information</h4>
+            <div className="mb-1">Status: {debugInfo.status}</div>
+            <div className="mb-1">Message: {debugInfo.message}</div>
+            {debugInfo.userId && <div className="mb-1">User ID: {debugInfo.userId}</div>}
+            
+            {debugInfo.profiles && (
+              <div className="mb-1">
+                Profiles found: {debugInfo.profiles.length}
+                {debugInfo.profiles.length > 0 && (
+                  <pre className="mt-1 p-2 bg-gray-100 overflow-auto max-h-32 text-xs">
+                    {JSON.stringify(debugInfo.profiles, null, 2)}
+                  </pre>
+                )}
+              </div>
+            )}
+            
+            {debugInfo.error && (
+              <div className="text-red-700 mt-1">
+                Error: {typeof debugInfo.error === 'object' 
+                  ? JSON.stringify(debugInfo.error, null, 2)
+                  : String(debugInfo.error)
+                }
+              </div>
+            )}
+            
+            <button 
+              className="mt-2 px-3 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600"
+              onClick={() => checkSupabaseConnection()}
+            >
+              Test Connection Again
+            </button>
           </div>
         )}
       </div>

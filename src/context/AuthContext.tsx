@@ -117,11 +117,33 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // Get the user's profile
             console.log('Getting user profile for user ID:', currentUser.id);
             try {
-              const { data: profileData, error: profileError } = await supabase
+              // Try different user ID fields since we're not sure which one is used in the database
+              let profileData = null;
+              let profileError = null;
+              
+              // First try user_id
+              const profileResult1 = await supabase
                 .from('user_profiles')
                 .select('*')
                 .eq('user_id', currentUser.id)
                 .single();
+                
+              if (profileResult1.error) {
+                console.log('Profile lookup with user_id failed, trying id field instead...');
+                
+                // Try with id field instead
+                const profileResult2 = await supabase
+                  .from('user_profiles')
+                  .select('*')
+                  .eq('id', currentUser.id)
+                  .single();
+                  
+                profileData = profileResult2.data;
+                profileError = profileResult2.error;
+              } else {
+                profileData = profileResult1.data;
+                profileError = profileResult1.error;
+              }
               
               console.log('User profile query completed');
               
@@ -208,11 +230,33 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               console.log('Getting user profile on sign in for ID:', newUser.id);
               
               try {
-                const { data: profileData, error: profileError } = await supabase
+                // Try different user ID fields since we're not sure which one is used in the database
+                let profileData = null;
+                let profileError = null;
+                
+                // First try user_id
+                const profileResult1 = await supabase
                   .from('user_profiles')
                   .select('*')
                   .eq('user_id', newUser.id)
                   .single();
+                  
+                if (profileResult1.error) {
+                  console.log('Profile lookup with user_id failed, trying id field instead...');
+                  
+                  // Try with id field instead
+                  const profileResult2 = await supabase
+                    .from('user_profiles')
+                    .select('*')
+                    .eq('id', newUser.id)
+                    .single();
+                    
+                  profileData = profileResult2.data;
+                  profileError = profileResult2.error;
+                } else {
+                  profileData = profileResult1.data;
+                  profileError = profileResult1.error;
+                }
                 
                 console.log('User profile query completed on sign in');
                 

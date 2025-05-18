@@ -18,6 +18,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/Login';
 import UserManagement from './pages/Settings/UserManagement';
 import { Toaster } from 'react-hot-toast';
+import DebugView from './pages/DebugView';
 
 // Debugging component to visualize auth state
 const AuthStateVisualizer = () => {
@@ -76,6 +77,9 @@ function App() {
             <Routes>
               {/* Public routes */}
               <Route path="/login" element={<LoginPage />} />
+              
+              {/* Debug route */}
+              <Route path="/debug" element={<DebugView />} />
 
               {/* Protected routes */}
               <Route element={<ProtectedRoute />}>
