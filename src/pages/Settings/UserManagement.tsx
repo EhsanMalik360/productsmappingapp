@@ -149,18 +149,37 @@ const UserManagement: React.FC = () => {
       
       // If a new password is provided, update it
       if (showPasswordField && newPassword) {
-        // Use the auth.resetPasswordForEmail API and then manually set it
-        // This is a workaround since we don't have direct password update from client
-        const { error: passwordError } = await supabase.rpc('admin_update_user_password', {
-          user_id: editingUser.id,
-          new_password: newPassword
-        });
-        
-        if (passwordError) {
-          throw passwordError;
+        try {
+          // Call our Edge Function to update the password
+          const { data: { user } } = await supabase.auth.getUser();
+          
+          // Call our custom Edge Function
+          const response = await fetch(
+            `https://wvgiaeuvyfsdhoxrjmib.supabase.co/functions/v1/update-password`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+              },
+              body: JSON.stringify({
+                userId: editingUser.id,
+                newPassword: newPassword,
+                requesterId: user?.id
+              })
+            }
+          );
+          
+          const result = await response.json();
+          
+          if (!response.ok) {
+            throw new Error(result.error || 'Failed to update password');
+          }
+          
+          toast.success(`Password updated for: ${editingUser.email}`);
+        } catch (passwordError: any) {
+          throw new Error(passwordError.message || 'Failed to update password');
         }
-        
-        toast.success(`Password updated for: ${editingUser.email}`);
       }
       
       toast.success(`User updated: ${editingUser.email}`);
