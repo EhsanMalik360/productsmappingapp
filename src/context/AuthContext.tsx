@@ -126,6 +126,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
 
+      // Create the user in Auth
       const { data, error } = await supabase.auth.admin.createUser({
         email,
         password,
@@ -134,6 +135,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) {
         throw error;
+      }
+      
+      // Create profile entry for the new user
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .insert([
+          { 
+            id: data.user.id,
+            role: 'regular',
+            created_at: new Date().toISOString()
+          }
+        ]);
+        
+      if (profileError) {
+        throw profileError;
       }
 
       return { success: true };

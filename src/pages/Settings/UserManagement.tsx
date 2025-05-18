@@ -27,25 +27,29 @@ const UserManagement: React.FC = () => {
       try {
         setLoading(true);
         
-        // Get all users with their profiles
+        // Get all users with their profiles - join with auth.users
         const { data, error } = await supabase
           .from('profiles')
-          .select(`
-            id,
-            role,
-            created_at,
-            users:id (
-              email
-            )
-          `)
+          .select('id, role, created_at')
           .order('created_at', { ascending: false });
           
         if (error) throw error;
         
+        // Get user emails from auth in a separate query
+        const { data: usersData, error: usersError } = await supabase.auth.admin.listUsers();
+        
+        if (usersError) throw usersError;
+        
+        // Create a map of user IDs to emails
+        const userEmailMap = new Map();
+        usersData.users.forEach((user: any) => {
+          userEmailMap.set(user.id, user.email);
+        });
+        
         // Format the data for display
         const formattedUsers = data.map((item: any) => ({
           id: item.id,
-          email: item.users?.email || 'Unknown',
+          email: userEmailMap.get(item.id) || 'Unknown',
           role: item.role,
           created_at: new Date(item.created_at).toLocaleDateString()
         }));
@@ -92,21 +96,25 @@ const UserManagement: React.FC = () => {
       // Refresh the user list
       const { data, error: fetchError } = await supabase
         .from('profiles')
-        .select(`
-          id,
-          role,
-          created_at,
-          users:id (
-            email
-          )
-        `)
+        .select('id, role, created_at')
         .order('created_at', { ascending: false });
         
       if (fetchError) throw fetchError;
       
+      // Get user emails from auth again
+      const { data: usersData, error: usersError } = await supabase.auth.admin.listUsers();
+      
+      if (usersError) throw usersError;
+      
+      // Create a map of user IDs to emails
+      const userEmailMap = new Map();
+      usersData.users.forEach((user: any) => {
+        userEmailMap.set(user.id, user.email);
+      });
+      
       const formattedUsers = data.map((item: any) => ({
         id: item.id,
-        email: item.users?.email || 'Unknown',
+        email: userEmailMap.get(item.id) || 'Unknown',
         role: item.role,
         created_at: new Date(item.created_at).toLocaleDateString()
       }));
