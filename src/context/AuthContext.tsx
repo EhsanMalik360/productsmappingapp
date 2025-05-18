@@ -27,8 +27,13 @@ interface AuthContextProps {
 const AuthContext = createContext<AuthContextProps | undefined>(undefined);
 
 // Get the Supabase URL and anon key from env variables
-const SUPABASE_URL = import.meta.env.SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = import.meta.env.SUPABASE_ANON_KEY || '';
+console.log('Environment variables:', {
+  VITE_SUPABASE_URL: import.meta.env.VITE_SUPABASE_URL,
+  VITE_SUPABASE_ANON_KEY: import.meta.env.VITE_SUPABASE_ANON_KEY,
+});
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://wvgiaeuvyfsdhoxrjmib.supabase.co';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind2Z2lhZXV2eWZzZGhveHJqbWliIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDY2ODI4NTgsImV4cCI6MjA2MjI1ODg1OH0.Mr3FSXDZibMJBCWp-QdszbEPY9wxtC7M361WPuM2aiw';
 
 // Create the Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
