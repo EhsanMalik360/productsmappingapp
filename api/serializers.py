@@ -1,56 +1,8 @@
 from rest_framework import serializers
-from django.contrib.auth.models import User
 from .models import (
     Product, Supplier, SupplierProduct,
-    ImportJob, ImportHistory, UserProfile
+    ImportJob, ImportHistory
 )
-
-
-class UserProfileSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = UserProfile
-        fields = ['role', 'is_active']
-
-
-class UserSerializer(serializers.ModelSerializer):
-    profile = UserProfileSerializer(read_only=True)
-    password = serializers.CharField(write_only=True)
-    
-    class Meta:
-        model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'password', 'profile']
-        read_only_fields = ['id']
-    
-    def create(self, validated_data):
-        password = validated_data.pop('password')
-        user = User.objects.create(**validated_data)
-        user.set_password(password)
-        user.save()
-        return user
-    
-    def update(self, instance, validated_data):
-        if 'password' in validated_data:
-            password = validated_data.pop('password')
-            instance.set_password(password)
-        return super().update(instance, validated_data)
-
-
-class UserCreateSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only=True)
-    role = serializers.ChoiceField(choices=UserProfile.ROLE_CHOICES, default='user')
-    
-    class Meta:
-        model = User
-        fields = ['username', 'email', 'first_name', 'last_name', 'password', 'role']
-    
-    def create(self, validated_data):
-        role = validated_data.pop('role')
-        password = validated_data.pop('password')
-        user = User.objects.create(**validated_data)
-        user.set_password(password)
-        user.save()
-        UserProfile.objects.create(user=user, role=role)
-        return user
 
 
 class SupplierSerializer(serializers.ModelSerializer):

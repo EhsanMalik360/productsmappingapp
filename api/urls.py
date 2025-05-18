@@ -3,14 +3,6 @@ from . import views
 from django.views.decorators.csrf import csrf_exempt
 
 urlpatterns = [
-    # Authentication and user management
-    path('auth/login/', csrf_exempt(views.user_login), name='user_login'),
-    path('auth/logout/', views.user_logout, name='user_logout'),
-    path('auth/me/', views.current_user, name='current_user'),
-    path('users/', views.user_list, name='user_list'),
-    path('users/create/', csrf_exempt(views.create_user), name='create_user'),
-    path('users/<int:user_id>/', views.user_detail, name='user_detail'),
-    
     # Health check
     path('health/', views.health_check, name='health_check'),
     path('config/', views.server_config, name='server_config'),

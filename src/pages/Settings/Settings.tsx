@@ -1,14 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
-import { Save, FileDown, AlertTriangle, RefreshCcw, Users } from 'lucide-react';
+import { Save, FileDown, AlertTriangle, RefreshCcw } from 'lucide-react';
 import { useSettings } from '../../hooks/useSettings';
-import { useAuth } from '../../context/AuthContext';
 import { toast } from 'react-hot-toast';
 
 const Settings: React.FC = () => {
-  const { isAdmin } = useAuth();
   const {
     generalSettings,
     notificationSettings,
@@ -138,21 +135,6 @@ const Settings: React.FC = () => {
   return (
     <div className="container mx-auto px-4 py-6">
       <h1 className="text-3xl font-bold mb-8">Settings</h1>
-      
-      {isAdmin && (
-        <Card className="mb-6">
-          <h2 className="text-xl font-semibold mb-4">User Management</h2>
-          <p className="text-gray-600 mb-4">
-            Manage user accounts, roles, and permissions. Create new users and control access levels.
-          </p>
-          <Link to="/settings/users">
-            <Button variant="primary" className="flex items-center">
-              <Users size={16} className="mr-2" />
-              Manage Users
-            </Button>
-          </Link>
-        </Card>
-      )}
       
       <div className="grid grid-cols-1 gap-6 mb-6">
         <Card>

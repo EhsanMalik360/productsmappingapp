@@ -1,16 +1,8 @@
 from django.contrib import admin
 from .models import (
     Product, Supplier, SupplierProduct,
-    ImportJob, ImportHistory, UserProfile
+    ImportJob, ImportHistory
 )
-
-
-@admin.register(UserProfile)
-class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'role', 'is_active', 'created_at')
-    list_filter = ('role', 'is_active')
-    search_fields = ('user__username', 'user__email')
-    readonly_fields = ('created_at', 'updated_at')
 
 
 @admin.register(Supplier)
