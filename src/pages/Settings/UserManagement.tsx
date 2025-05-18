@@ -35,16 +35,23 @@ const UserManagement: React.FC = () => {
           
         if (error) throw error;
         
-        // Get user emails from auth in a separate query
-        const { data: usersData, error: usersError } = await supabase.auth.admin.listUsers();
+        // Query for user emails via a view instead of using admin API
+        const { data: userData, error: userDataError } = await supabase
+          .from('users_view')
+          .select('id, email');
         
-        if (usersError) throw usersError;
+        if (userDataError) {
+          console.warn('Could not fetch user emails:', userDataError);
+          // Continue anyway - we'll just show "Unknown" for emails
+        }
         
         // Create a map of user IDs to emails
         const userEmailMap = new Map();
-        usersData.users.forEach((user: any) => {
-          userEmailMap.set(user.id, user.email);
-        });
+        if (userData) {
+          userData.forEach((user: any) => {
+            userEmailMap.set(user.id, user.email);
+          });
+        }
         
         // Format the data for display
         const formattedUsers = data.map((item: any) => ({
@@ -101,16 +108,23 @@ const UserManagement: React.FC = () => {
         
       if (fetchError) throw fetchError;
       
-      // Get user emails from auth again
-      const { data: usersData, error: usersError } = await supabase.auth.admin.listUsers();
+      // Query for user emails via a view instead of using admin API
+      const { data: userData, error: userDataError } = await supabase
+        .from('users_view')
+        .select('id, email');
       
-      if (usersError) throw usersError;
+      if (userDataError) {
+        console.warn('Could not fetch user emails:', userDataError);
+        // Continue anyway - we'll just show "Unknown" for emails
+      }
       
       // Create a map of user IDs to emails
       const userEmailMap = new Map();
-      usersData.users.forEach((user: any) => {
-        userEmailMap.set(user.id, user.email);
-      });
+      if (userData) {
+        userData.forEach((user: any) => {
+          userEmailMap.set(user.id, user.email);
+        });
+      }
       
       const formattedUsers = data.map((item: any) => ({
         id: item.id,

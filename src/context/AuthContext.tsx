@@ -139,31 +139,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
       }
 
-      // Create the user in Auth
-      const { data, error } = await supabase.auth.admin.createUser({
+      // Use the sign-up function instead of admin.createUser
+      // The trigger we created will automatically create a profile
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        email_confirm: true
+        options: {
+          // Adding an attribute to make it clear this is an admin-created account
+          data: {
+            created_by_admin: true
+          }
+        }
       });
 
       if (error) {
         throw error;
       }
       
-      // Create profile entry for the new user
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert([
-          { 
-            id: data.user.id,
-            role: 'regular',
-            created_at: new Date().toISOString()
-          }
-        ]);
-        
-      if (profileError) {
-        throw profileError;
-      }
+      // No need to manually insert a profile - our trigger handles this
+      // The trigger function we created will automatically create a profile with 'regular' role
 
       return { success: true };
     } catch (error: any) {
