@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import Layout from './components/Layout/Layout';
 import Dashboard from './pages/Dashboard/Dashboard';
@@ -18,6 +18,45 @@ import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/Login';
 import UserManagement from './pages/Settings/UserManagement';
 import { Toaster } from 'react-hot-toast';
+
+// Debugging component to visualize auth state
+const AuthStateVisualizer = () => {
+  const { user, loading, isAdmin } = useAuth();
+  const [forceRender, setForceRender] = useState(0);
+
+  // Force a render every 2 seconds to update the display
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setForceRender(prev => prev + 1);
+    }, 2000);
+    return () => clearInterval(timer);
+  }, []);
+
+  if (process.env.NODE_ENV !== 'development') return null;
+
+  return (
+    <div 
+      style={{
+        position: 'fixed',
+        bottom: '10px',
+        left: '10px',
+        backgroundColor: 'rgba(0,0,0,0.8)',
+        color: 'white',
+        padding: '10px',
+        borderRadius: '5px',
+        zIndex: 9999,
+        fontSize: '14px',
+        maxWidth: '300px'
+      }}
+    >
+      <h4 style={{ margin: '0 0 5px 0' }}>Auth Debug ({forceRender})</h4>
+      <div>Loading: {loading ? '✅' : '❌'}</div>
+      <div>Authenticated: {user ? '✅' : '❌'}</div>
+      <div>Admin: {isAdmin ? '✅' : '❌'}</div>
+      <div>Email: {user?.email || 'Not logged in'}</div>
+    </div>
+  );
+};
 
 // Wrapper component for Layout
 const LayoutWrapper = () => {
@@ -63,6 +102,9 @@ function App() {
               {/* Catch all route */}
               <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
+            
+            {/* Debug auth state visualizer */}
+            <AuthStateVisualizer />
           </Router>
           <Toaster 
             position="top-right"
