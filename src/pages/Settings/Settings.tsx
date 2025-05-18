@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
-import { Save, FileDown, AlertTriangle, RefreshCcw } from 'lucide-react';
+import { Save, FileDown, AlertTriangle, RefreshCcw, Users } from 'lucide-react';
 import { useSettings } from '../../hooks/useSettings';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '../../context/AuthContext';
+import UserManagement from './UserManagement';
 
 const Settings: React.FC = () => {
+  const { isAdmin } = useAuth();
   const {
     generalSettings,
     notificationSettings,
@@ -27,6 +30,7 @@ const Settings: React.FC = () => {
   const [resetting, setResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [activeTab, setActiveTab] = useState('general');
 
   // Update local state when settings are loaded
   useEffect(() => {
@@ -134,319 +138,366 @@ const Settings: React.FC = () => {
   
   return (
     <div className="container mx-auto px-4 py-6">
-      <h1 className="text-3xl font-bold mb-8">Settings</h1>
+      <h1 className="text-3xl font-bold mb-6">Settings</h1>
+      
+      {/* Tabs */}
+      <div className="flex border-b border-gray-200 mb-6">
+        <button
+          onClick={() => setActiveTab('general')}
+          className={`px-4 py-2 border-b-2 font-medium text-sm ${
+            activeTab === 'general' 
+              ? 'border-blue-500 text-blue-600' 
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          General
+        </button>
+        <button
+          onClick={() => setActiveTab('notifications')}
+          className={`px-4 py-2 border-b-2 font-medium text-sm ${
+            activeTab === 'notifications' 
+              ? 'border-blue-500 text-blue-600' 
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          Notifications
+        </button>
+        <button
+          onClick={() => setActiveTab('data')}
+          className={`px-4 py-2 border-b-2 font-medium text-sm ${
+            activeTab === 'data' 
+              ? 'border-blue-500 text-blue-600' 
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+          }`}
+        >
+          Data Management
+        </button>
+        
+        {isAdmin && (
+          <button
+            onClick={() => setActiveTab('users')}
+            className={`px-4 py-2 border-b-2 font-medium text-sm ${
+              activeTab === 'users' 
+                ? 'border-blue-500 text-blue-600' 
+                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+            }`}
+          >
+            <div className="flex items-center">
+              <Users size={16} className="mr-1" />
+              User Management
+            </div>
+          </button>
+        )}
+      </div>
       
       <div className="grid grid-cols-1 gap-6 mb-6">
-        <Card>
-          <h2 className="text-xl font-semibold mb-4">General Settings</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Company Name
-              </label>
-              <input
-                type="text"
-                name="companyName"
-                className="w-full border p-2 rounded"
-                value={localGeneralSettings.companyName || ''}
-                onChange={handleGeneralSettingsChange}
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Currency
-              </label>
-              <select
-                name="currency"
-                className="w-full border p-2 rounded"
-                value={localGeneralSettings.currency}
-                onChange={handleGeneralSettingsChange}
-              >
-                <option value="USD">USD ($)</option>
-                <option value="EUR">EUR (€)</option>
-                <option value="GBP">GBP (£)</option>
-                <option value="CAD">CAD ($)</option>
-                <option value="AUD">AUD ($)</option>
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Date Format
-              </label>
-              <select
-                name="dateFormat"
-                className="w-full border p-2 rounded"
-                value={localGeneralSettings.dateFormat}
-                onChange={handleGeneralSettingsChange}
-              >
-                <option value="MM/DD/YYYY">MM/DD/YYYY</option>
-                <option value="DD/MM/YYYY">DD/MM/YYYY</option>
-                <option value="YYYY-MM-DD">YYYY-MM-DD</option>
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Default Product View
-              </label>
-              <select
-                name="defaultProductView"
-                className="w-full border p-2 rounded"
-                value={localGeneralSettings.defaultProductView}
-                onChange={handleGeneralSettingsChange}
-              >
-                <option value="grid">Grid</option>
-                <option value="list">List</option>
-                <option value="table">Table</option>
-              </select>
-            </div>
-          </div>
-          
-          <Button 
-            variant="primary" 
-            className="flex items-center"
-            onClick={handleSaveGeneralSettings}
-            disabled={savingGeneral}
-          >
-            <Save size={16} className="mr-2" />
-            {savingGeneral ? 'Saving...' : 'Save General Settings'}
-          </Button>
-        </Card>
-        
-        <Card>
-          <h2 className="text-xl font-semibold mb-4">Notification Settings</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <div>
-              <div className="flex items-center mb-2">
-                <input 
-                  type="checkbox"
-                  id="emailNotifications"
-                  name="emailNotifications"
-                  checked={localNotificationSettings.emailNotifications}
-                  onChange={handleNotificationSettingsChange}
-                  className="mr-2"
-                />
-                <label htmlFor="emailNotifications" className="text-sm font-medium text-gray-700">
-                  Enable Email Notifications
-                </label>
-              </div>
-              
-              <div className="flex items-center mb-2">
-                <input 
-                  type="checkbox"
-                  id="stockAlerts"
-                  name="stockAlerts"
-                  checked={localNotificationSettings.stockAlerts}
-                  onChange={handleNotificationSettingsChange}
-                  className="mr-2"
-                />
-                <label htmlFor="stockAlerts" className="text-sm font-medium text-gray-700">
-                  Stock Level Alerts
-                </label>
-              </div>
-              
-              <div className="flex items-center mb-2">
-                <input 
-                  type="checkbox"
-                  id="priceAlerts"
-                  name="priceAlerts"
-                  checked={localNotificationSettings.priceAlerts}
-                  onChange={handleNotificationSettingsChange}
-                  className="mr-2"
-                />
-                <label htmlFor="priceAlerts" className="text-sm font-medium text-gray-700">
-                  Price Change Alerts
-                </label>
-              </div>
-            </div>
-            
-            <div>
-              <div className="mb-3">
+        {/* General Settings Tab */}
+        {activeTab === 'general' && (
+          <Card>
+            <h2 className="text-xl font-semibold mb-4">General Settings</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Alert Threshold (%)
+                  Company Name
                 </label>
                 <input
-                  type="number"
-                  name="alertThreshold"
+                  type="text"
+                  name="companyName"
                   className="w-full border p-2 rounded"
-                  value={localNotificationSettings.alertThreshold}
-                  onChange={handleNotificationSettingsChange}
-                  min="1"
-                  max="100"
+                  value={localGeneralSettings.companyName || ''}
+                  onChange={handleGeneralSettingsChange}
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Trigger alerts when prices change by this percentage
-                </p>
               </div>
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Low Stock Threshold
+                  Currency
                 </label>
-                <input
-                  type="number"
-                  name="lowStockThreshold"
+                <select
+                  name="currency"
                   className="w-full border p-2 rounded"
-                  value={localNotificationSettings.lowStockThreshold}
-                  onChange={handleNotificationSettingsChange}
-                  min="1"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Trigger alerts when stock level falls below this number
-                </p>
+                  value={localGeneralSettings.currency}
+                  onChange={handleGeneralSettingsChange}
+                >
+                  <option value="USD">USD ($)</option>
+                  <option value="EUR">EUR (€)</option>
+                  <option value="GBP">GBP (£)</option>
+                  <option value="CAD">CAD ($)</option>
+                  <option value="AUD">AUD ($)</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Date Format
+                </label>
+                <select
+                  name="dateFormat"
+                  className="w-full border p-2 rounded"
+                  value={localGeneralSettings.dateFormat}
+                  onChange={handleGeneralSettingsChange}
+                >
+                  <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+                  <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+                  <option value="YYYY-MM-DD">YYYY-MM-DD</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Default Product View
+                </label>
+                <select
+                  name="defaultProductView"
+                  className="w-full border p-2 rounded"
+                  value={localGeneralSettings.defaultProductView}
+                  onChange={handleGeneralSettingsChange}
+                >
+                  <option value="grid">Grid</option>
+                  <option value="list">List</option>
+                  <option value="table">Table</option>
+                </select>
               </div>
             </div>
-          </div>
-          
-          <Button 
-            variant="primary" 
-            className="flex items-center"
-            onClick={handleSaveNotificationSettings}
-            disabled={savingNotifications}
-          >
-            <Save size={16} className="mr-2" />
-            {savingNotifications ? 'Saving...' : 'Save Notification Settings'}
-          </Button>
-        </Card>
+            
+            <Button 
+              variant="primary" 
+              className="flex items-center"
+              onClick={handleSaveGeneralSettings}
+              disabled={savingGeneral}
+            >
+              <Save size={16} className="mr-2" />
+              {savingGeneral ? 'Saving...' : 'Save General Settings'}
+            </Button>
+          </Card>
+        )}
         
-        <Card>
-          <h2 className="text-xl font-semibold mb-4">Data Management</h2>
-          
-          <div className="mb-6">
-            <h3 className="text-md font-medium mb-2">Export Data</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              Export your data in CSV format for backup or analysis
-            </p>
-            
-            <div className="flex gap-2">
-              <Button 
-                variant="secondary" 
-                className="flex items-center"
-                onClick={() => handleExportData('products')}
-                disabled={exporting}
-              >
-                <FileDown size={16} className="mr-2" />
-                {exporting ? 'Exporting...' : 'Export Products'}
-              </Button>
+        {/* Notifications Settings Tab */}
+        {activeTab === 'notifications' && (
+          <Card>
+            <h2 className="text-xl font-semibold mb-4">Notification Settings</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <div className="flex items-center mb-2">
+                  <input 
+                    type="checkbox"
+                    id="emailNotifications"
+                    name="emailNotifications"
+                    checked={localNotificationSettings.emailNotifications}
+                    onChange={handleNotificationSettingsChange}
+                    className="mr-2"
+                  />
+                  <label htmlFor="emailNotifications" className="text-sm font-medium text-gray-700">
+                    Enable Email Notifications
+                  </label>
+                </div>
+                
+                <div className="flex items-center mb-2">
+                  <input 
+                    type="checkbox"
+                    id="lowProfitAlert"
+                    name="lowProfitAlert"
+                    checked={localNotificationSettings.lowProfitAlert}
+                    onChange={handleNotificationSettingsChange}
+                    className="mr-2"
+                  />
+                  <label htmlFor="lowProfitAlert" className="text-sm font-medium text-gray-700">
+                    Low Profit Alerts
+                  </label>
+                </div>
+                
+                <div className="flex items-center mb-2">
+                  <input 
+                    type="checkbox"
+                    id="priceChangeAlert"
+                    name="priceChangeAlert"
+                    checked={localNotificationSettings.priceChangeAlert}
+                    onChange={handleNotificationSettingsChange}
+                    className="mr-2"
+                  />
+                  <label htmlFor="priceChangeAlert" className="text-sm font-medium text-gray-700">
+                    Price Change Alerts
+                  </label>
+                </div>
+              </div>
               
-              <Button 
-                variant="secondary" 
-                className="flex items-center"
-                onClick={() => handleExportData('suppliers')}
-                disabled={exporting}
-              >
-                <FileDown size={16} className="mr-2" />
-                {exporting ? 'Exporting...' : 'Export Suppliers'}
-              </Button>
-              
-              <Button 
-                variant="secondary" 
-                className="flex items-center"
-                onClick={() => handleExportData('all')}
-                disabled={exporting}
-              >
-                <FileDown size={16} className="mr-2" />
-                {exporting ? 'Exporting...' : 'Export All Data'}
-              </Button>
+              <div>
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Low Profit Threshold (%)
+                  </label>
+                  <input 
+                    type="number"
+                    name="lowProfitThreshold"
+                    min="0"
+                    max="100"
+                    value={localNotificationSettings.lowProfitThreshold}
+                    onChange={handleNotificationSettingsChange}
+                    className="w-full border p-2 rounded"
+                  />
+                </div>
+                
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Price Change Threshold (%)
+                  </label>
+                  <input 
+                    type="number"
+                    name="priceChangeThreshold"
+                    min="0"
+                    max="100"
+                    value={localNotificationSettings.priceChangeThreshold}
+                    onChange={handleNotificationSettingsChange}
+                    className="w-full border p-2 rounded"
+                  />
+                </div>
+              </div>
             </div>
-          </div>
-          
-          <div className="border-t border-gray-200 pt-6 mb-6">
-            <h3 className="text-md font-medium mb-2 text-amber-700">Clear Product Data</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              Remove all product data from the system. This action cannot be undone.
-            </p>
             
-            {showClearConfirm ? (
-              <div className="bg-amber-50 border border-amber-200 rounded p-3 mb-3">
-                <div className="flex items-start">
-                  <AlertTriangle size={20} className="text-amber-500 mr-2 flex-shrink-0 mt-0.5" />
+            <Button 
+              variant="primary" 
+              className="flex items-center"
+              onClick={handleSaveNotificationSettings}
+              disabled={savingNotifications}
+            >
+              <Save size={16} className="mr-2" />
+              {savingNotifications ? 'Saving...' : 'Save Notification Settings'}
+            </Button>
+          </Card>
+        )}
+        
+        {/* Data Management Tab */}
+        {activeTab === 'data' && (
+          <Card>
+            <h2 className="text-xl font-semibold mb-4">Data Management</h2>
+            
+            <div className="mb-6">
+              <h3 className="text-lg font-medium mb-2">Export Data</h3>
+              <div className="flex flex-wrap gap-2">
+                <Button 
+                  variant="secondary" 
+                  className="flex items-center"
+                  onClick={() => handleExportData('products')}
+                  disabled={exporting}
+                >
+                  <FileDown size={16} className="mr-2" />
+                  {exporting ? 'Exporting...' : 'Export Products'}
+                </Button>
+                
+                <Button 
+                  variant="secondary" 
+                  className="flex items-center"
+                  onClick={() => handleExportData('suppliers')}
+                  disabled={exporting}
+                >
+                  <FileDown size={16} className="mr-2" />
+                  {exporting ? 'Exporting...' : 'Export Suppliers'}
+                </Button>
+                
+                <Button 
+                  variant="secondary" 
+                  className="flex items-center"
+                  onClick={() => handleExportData('all')}
+                  disabled={exporting}
+                >
+                  <FileDown size={16} className="mr-2" />
+                  {exporting ? 'Exporting...' : 'Export All Data'}
+                </Button>
+              </div>
+            </div>
+            
+            <div className="border-t pt-6">
+              <h3 className="text-lg font-medium mb-2 text-red-600">Danger Zone</h3>
+              <div className="bg-red-50 border border-red-200 rounded p-4 mb-4">
+                <div className="flex justify-between items-center">
                   <div>
-                    <p className="font-medium text-amber-800">Are you sure you want to clear all products?</p>
-                    <p className="text-sm text-amber-700 mt-1">This will permanently delete all product data and cannot be undone.</p>
-                    
-                    <div className="flex gap-2 mt-3">
-                      <Button 
-                        variant="secondary" 
-                        className="text-amber-800 bg-white border-amber-300 hover:bg-amber-50"
-                        onClick={() => setShowClearConfirm(false)}
-                      >
-                        Cancel
-                      </Button>
-                      
-                      <Button 
-                        variant="secondary" 
-                        className="bg-amber-600 text-white border-amber-700 hover:bg-amber-700"
-                        onClick={handleClearProducts}
-                        disabled={clearingProducts}
-                      >
-                        {clearingProducts ? 'Clearing...' : 'Yes, Clear All Products'}
-                      </Button>
-                    </div>
+                    <h4 className="font-medium text-red-800">Clear All Products</h4>
+                    <p className="text-sm text-red-600">This will remove all products from the system. This action cannot be undone.</p>
+                  </div>
+                  <Button 
+                    variant="danger" 
+                    className="flex items-center"
+                    onClick={() => setShowClearConfirm(true)}
+                  >
+                    <AlertTriangle size={16} className="mr-2" />
+                    Clear Products
+                  </Button>
+                </div>
+              </div>
+              
+              <div className="bg-red-50 border border-red-200 rounded p-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h4 className="font-medium text-red-800">Reset Application</h4>
+                    <p className="text-sm text-red-600">This will reset the entire application to its default state. All data will be lost.</p>
+                  </div>
+                  <Button 
+                    variant="danger" 
+                    className="flex items-center"
+                    onClick={() => setShowResetConfirm(true)}
+                  >
+                    <RefreshCcw size={16} className="mr-2" />
+                    Reset App
+                  </Button>
+                </div>
+              </div>
+            </div>
+            
+            {/* Confirmation modals */}
+            {showClearConfirm && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
+                  <h3 className="text-xl font-bold text-red-600 mb-4">Confirm Clear Products</h3>
+                  <p className="mb-4">Are you sure you want to clear all products? This action cannot be undone.</p>
+                  <div className="flex justify-end space-x-2">
+                    <Button 
+                      variant="secondary" 
+                      onClick={() => setShowClearConfirm(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      variant="danger"
+                      onClick={handleClearProducts}
+                      disabled={clearingProducts}
+                    >
+                      {clearingProducts ? 'Clearing...' : 'Yes, Clear All Products'}
+                    </Button>
                   </div>
                 </div>
               </div>
-            ) : (
-              <Button 
-                variant="secondary" 
-                className="flex items-center bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100"
-                onClick={() => setShowClearConfirm(true)}
-              >
-                <AlertTriangle size={16} className="mr-2" />
-                Clear All Products
-              </Button>
             )}
-          </div>
-          
-          <div className="border-t border-gray-200 pt-6">
-            <h3 className="text-md font-medium mb-2 text-red-700">Reset Application</h3>
-            <p className="text-sm text-gray-600 mb-3">
-              Reset the entire application to its initial state. This will delete all data.
-            </p>
             
-            {showResetConfirm ? (
-              <div className="bg-red-50 border border-red-200 rounded p-3 mb-3">
-                <div className="flex items-start">
-                  <AlertTriangle size={20} className="text-red-500 mr-2 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-red-800">Are you sure you want to reset the application?</p>
-                    <p className="text-sm text-red-700 mt-1">This will permanently delete all data and cannot be undone.</p>
-                    
-                    <div className="flex gap-2 mt-3">
-                      <Button 
-                        variant="secondary" 
-                        className="text-red-800 bg-white border-red-300 hover:bg-red-50"
-                        onClick={() => setShowResetConfirm(false)}
-                      >
-                        Cancel
-                      </Button>
-                      
-                      <Button 
-                        variant="secondary" 
-                        className="bg-red-600 text-white border-red-700 hover:bg-red-700"
-                        onClick={handleResetApplication}
-                        disabled={resetting}
-                      >
-                        {resetting ? 'Resetting...' : 'Yes, Reset Application'}
-                      </Button>
-                    </div>
+            {showResetConfirm && (
+              <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
+                  <h3 className="text-xl font-bold text-red-600 mb-4">Confirm Reset Application</h3>
+                  <p className="mb-4">Are you sure you want to reset the entire application? All data will be permanently deleted.</p>
+                  <div className="flex justify-end space-x-2">
+                    <Button 
+                      variant="secondary" 
+                      onClick={() => setShowResetConfirm(false)}
+                    >
+                      Cancel
+                    </Button>
+                    <Button 
+                      variant="danger"
+                      onClick={handleResetApplication}
+                      disabled={resetting}
+                    >
+                      {resetting ? 'Resetting...' : 'Yes, Reset Application'}
+                    </Button>
                   </div>
                 </div>
               </div>
-            ) : (
-              <Button 
-                variant="secondary" 
-                className="flex items-center bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
-                onClick={() => setShowResetConfirm(true)}
-              >
-                <AlertTriangle size={16} className="mr-2" />
-                Reset Application
-              </Button>
             )}
-          </div>
-        </Card>
+          </Card>
+        )}
+        
+        {/* User Management Tab (Admin Only) */}
+        {activeTab === 'users' && isAdmin && (
+          <UserManagement />
+        )}
       </div>
     </div>
   );
