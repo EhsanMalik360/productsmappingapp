@@ -15,7 +15,7 @@ import { useAuth } from '../../context/AuthContext';
 
 const Sidebar: React.FC = () => {
   const location = useLocation();
-  const { user, signOut } = useAuth();
+  const { user, signOut, isAdmin } = useAuth();
   
   const isActive = (path: string) => {
     return location.pathname === path ? 'bg-blue-800 text-white' : 'text-white hover:text-blue-200';
@@ -54,24 +54,30 @@ const Sidebar: React.FC = () => {
               Suppliers
             </Link>
           </li>
-          <li className="mb-4">
-            <Link to="/attributes" className={`flex items-center ${isActive('/attributes')} p-2 rounded-md transition-colors`}>
-              <Tags className="w-5 h-5 mr-3" />
-              Custom Attributes
-            </Link>
-          </li>
-          <li className="mb-4">
-            <Link to="/profit-analysis" className={`flex items-center ${isActive('/profit-analysis')} p-2 rounded-md transition-colors`}>
-              <TrendingUp className="w-5 h-5 mr-3" />
-              Profit Analysis
-            </Link>
-          </li>
-          <li className="mb-4">
-            <Link to="/settings" className={`flex items-center ${isActive('/settings')} p-2 rounded-md transition-colors`}>
-              <Settings className="w-5 h-5 mr-3" />
-              Settings
-            </Link>
-          </li>
+          
+          {/* Show these links only to admin users */}
+          {isAdmin && (
+            <>
+              <li className="mb-4">
+                <Link to="/attributes" className={`flex items-center ${isActive('/attributes')} p-2 rounded-md transition-colors`}>
+                  <Tags className="w-5 h-5 mr-3" />
+                  Custom Attributes
+                </Link>
+              </li>
+              <li className="mb-4">
+                <Link to="/profit-analysis" className={`flex items-center ${isActive('/profit-analysis')} p-2 rounded-md transition-colors`}>
+                  <TrendingUp className="w-5 h-5 mr-3" />
+                  Profit Analysis
+                </Link>
+              </li>
+              <li className="mb-4">
+                <Link to="/settings" className={`flex items-center ${isActive('/settings')} p-2 rounded-md transition-colors`}>
+                  <Settings className="w-5 h-5 mr-3" />
+                  Settings
+                </Link>
+              </li>
+            </>
+          )}
         </ul>
         
         {/* User info and sign out button */}

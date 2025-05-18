@@ -1,5 +1,5 @@
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import Layout from './components/Layout/Layout';
 import Dashboard from './pages/Dashboard/Dashboard';
 import ImportData from './pages/ImportData/ImportData';
@@ -17,6 +17,29 @@ import { AuthProvider } from './context/AuthContext';
 import Login from './pages/Login/Login';
 import ProtectedRoute from './components/ProtectedRoute/ProtectedRoute';
 import { Toaster } from 'react-hot-toast';
+import { useAuth } from './context/AuthContext';
+
+// Admin-only route component
+const AdminRoute = () => {
+  const { isAdmin, loading } = useAuth();
+  
+  // While checking authentication status, show loading spinner
+  if (loading) {
+    return (
+      <div className="min-h-screen flex justify-center items-center">
+        <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500"></div>
+      </div>
+    );
+  }
+  
+  // If not admin, redirect to the dashboard
+  if (!isAdmin) {
+    return <Navigate to="/" />;
+  }
+  
+  // If admin, render the child routes
+  return <Outlet />;
+};
 
 function App() {
   return (
@@ -28,7 +51,7 @@ function App() {
               {/* Public route */}
               <Route path="/login" element={<Login />} />
               
-              {/* Protected routes */}
+              {/* Protected routes - for all authenticated users */}
               <Route element={<ProtectedRoute />}>
                 <Route path="/" element={<Layout><Dashboard /></Layout>} />
                 <Route path="/import-data" element={<Layout><ImportData /></Layout>} />
@@ -37,9 +60,13 @@ function App() {
                 <Route path="/products/imported" element={<Layout><ImportedProducts /></Layout>} />
                 <Route path="/suppliers" element={<Layout><Suppliers /></Layout>} />
                 <Route path="/suppliers/:id" element={<Layout><SupplierDetail /></Layout>} />
-                <Route path="/attributes" element={<Layout><CustomAttributes /></Layout>} />
-                <Route path="/profit-analysis" element={<Layout><ProfitAnalysis /></Layout>} />
-                <Route path="/settings" element={<Layout><Settings /></Layout>} />
+                
+                {/* Admin-only routes */}
+                <Route element={<AdminRoute />}>
+                  <Route path="/attributes" element={<Layout><CustomAttributes /></Layout>} />
+                  <Route path="/profit-analysis" element={<Layout><ProfitAnalysis /></Layout>} />
+                  <Route path="/settings" element={<Layout><Settings /></Layout>} />
+                </Route>
               </Route>
             </Routes>
           </Router>

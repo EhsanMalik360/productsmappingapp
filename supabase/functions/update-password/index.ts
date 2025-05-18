@@ -1,14 +1,26 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { corsHeaders } from '../_shared/cors.ts';
 
 // The function that will be called when the Edge Function is invoked
 serve(async (req) => {
+  // Handle CORS preflight requests
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
+  }
+
   try {
     // Check if the request method is POST
     if (req.method !== 'POST') {
       return new Response(
         JSON.stringify({ error: 'Method not allowed' }),
-        { status: 405, headers: { 'Content-Type': 'application/json' } }
+        { 
+          status: 405, 
+          headers: { 
+            ...corsHeaders,
+            'Content-Type': 'application/json' 
+          } 
+        }
       );
     }
 
@@ -19,7 +31,13 @@ serve(async (req) => {
     if (!userId || !newPassword || !requesterId) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields' }),
-        { status: 400, headers: { 'Content-Type': 'application/json' } }
+        { 
+          status: 400, 
+          headers: { 
+            ...corsHeaders,
+            'Content-Type': 'application/json' 
+          } 
+        }
       );
     }
 
@@ -42,7 +60,13 @@ serve(async (req) => {
     if (requesterError || !requesterProfile || requesterProfile.role !== 'admin') {
       return new Response(
         JSON.stringify({ error: 'Only administrators can update user passwords' }),
-        { status: 403, headers: { 'Content-Type': 'application/json' } }
+        { 
+          status: 403, 
+          headers: { 
+            ...corsHeaders,
+            'Content-Type': 'application/json' 
+          } 
+        }
       );
     }
 
@@ -55,19 +79,37 @@ serve(async (req) => {
     if (updateError) {
       return new Response(
         JSON.stringify({ error: `Failed to update password: ${updateError.message}` }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
+        { 
+          status: 500, 
+          headers: { 
+            ...corsHeaders,
+            'Content-Type': 'application/json' 
+          } 
+        }
       );
     }
 
     // All good! Password was updated successfully
     return new Response(
       JSON.stringify({ success: true, message: 'Password updated successfully' }),
-      { status: 200, headers: { 'Content-Type': 'application/json' } }
+      { 
+        status: 200, 
+        headers: { 
+          ...corsHeaders,
+          'Content-Type': 'application/json' 
+        } 
+      }
     );
   } catch (error) {
     return new Response(
       JSON.stringify({ error: `Server error: ${error.message}` }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { 
+        status: 500, 
+        headers: { 
+          ...corsHeaders,
+          'Content-Type': 'application/json' 
+        } 
+      }
     );
   }
 }); 

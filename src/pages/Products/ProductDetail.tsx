@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
 import { useProfitFormula } from '../../context/ProfitFormulaContext';
+import { useAuth } from '../../context/AuthContext';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
 import { Bar } from 'react-chartjs-2';
@@ -31,6 +32,7 @@ ChartJS.register(
 const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { 
     getProductById, 
     getSuppliersForProduct, 
@@ -832,245 +834,247 @@ const ProductDetail: React.FC = () => {
           </Card>
         </div>
         
-        {/* Profit calculator - 6 columns */}
+        {/* Profit calculator - 6 columns - Available to all users */}
         <div className="col-span-12 md:col-span-6">
           <Card>
             <div className="flex justify-between items-center mb-2">
               <h3 className="text-sm font-semibold">Profit Calculation</h3>
-              <Button 
-                variant="secondary" 
-                onClick={() => navigate('/profit-analysis')} 
-                className="text-xs flex items-center text-blue-600"
-              >
-                <Calculator size={12} className="mr-1" />
-                Edit Formula
-              </Button>
+              {isAdmin && (
+                <Button 
+                  variant="secondary" 
+                  onClick={() => navigate('/profit-analysis')} 
+                  className="text-xs flex items-center text-blue-600"
+                >
+                  <Calculator size={12} className="mr-1" />
+                  Edit Formula
+                </Button>
+              )}
             </div>
-            <div className="bg-gray-50 p-2 rounded">
-              <table className="w-full text-xs">
-                <tbody>
-                  {/* Dynamically generate formula steps based on formula items */}
-                  {formulaItems.map((item, index) => {
-                    // Skip operators in the table view
-                    if (item.type === 'operator') return null;
-                    
-                    // Get the value for this item
-                    let value = 0;
-                    let prefix = '';
-                    
-                    if (item.type === 'field') {
-                      switch (item.value) {
-                        case 'salePrice':
-                          value = revenue;
-                          // Update display to show Buy Box Price instead of Sale Price
-                          item = {
-                            ...item,
-                            displayValue: 'Buy Box Price'
-                          };
-                          break;
-                        case 'amazonFee':
-                          value = amazonFee;
-                          // Add minus sign for costs in the formula, unless it's the first item
-                          prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
-                          break;
-                        case 'referralFee':
-                          value = referralFee;
-                          // Add minus sign for costs in the formula, unless it's the first item
-                          prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
-                          break;
-                        case 'supplierCost':
-                          value = costBestSupplier;
-                          // Add minus sign for costs in the formula, unless it's the first item
-                          prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
-                          break;
-                        case 'buyBoxPrice':
-                          value = buyBoxPrice;
-                          break;
-                        case 'unitsSold':
-                          value = safeProduct.unitsSold;
-                          break;
-                        default:
-                          value = 0;
+              <div className="bg-gray-50 p-2 rounded">
+                <table className="w-full text-xs">
+                  <tbody>
+                    {/* Dynamically generate formula steps based on formula items */}
+                    {formulaItems.map((item, index) => {
+                      // Skip operators in the table view
+                      if (item.type === 'operator') return null;
+                      
+                      // Get the value for this item
+                      let value = 0;
+                      let prefix = '';
+                      
+                      if (item.type === 'field') {
+                        switch (item.value) {
+                          case 'salePrice':
+                            value = revenue;
+                            // Update display to show Buy Box Price instead of Sale Price
+                            item = {
+                              ...item,
+                              displayValue: 'Buy Box Price'
+                            };
+                            break;
+                          case 'amazonFee':
+                            value = amazonFee;
+                            // Add minus sign for costs in the formula, unless it's the first item
+                            prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
+                            break;
+                          case 'referralFee':
+                            value = referralFee;
+                            // Add minus sign for costs in the formula, unless it's the first item
+                            prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
+                            break;
+                          case 'supplierCost':
+                            value = costBestSupplier;
+                            // Add minus sign for costs in the formula, unless it's the first item
+                            prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
+                            break;
+                          case 'buyBoxPrice':
+                            value = buyBoxPrice;
+                            break;
+                          case 'unitsSold':
+                            value = safeProduct.unitsSold;
+                            break;
+                          default:
+                            value = 0;
+                        }
+                      } else if (item.type === 'customAttribute') {
+                        // Find custom attribute value
+                        const attrId = item.value.replace('attr_', '');
+                        const attr = productAttrs.find(a => a.attribute.id === attrId);
+                        value = attr && typeof attr.value === 'number' ? attr.value : 0;
+                        
+                        // Add minus sign if the previous operator was subtraction
+                        prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
+                      } else if (item.type === 'constant') {
+                        value = parseFloat(item.value);
+                        
+                        // Add minus sign if the previous operator was subtraction
+                        prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
                       }
-                    } else if (item.type === 'customAttribute') {
-                      // Find custom attribute value
-                      const attrId = item.value.replace('attr_', '');
-                      const attr = productAttrs.find(a => a.attribute.id === attrId);
-                      value = attr && typeof attr.value === 'number' ? attr.value : 0;
                       
-                      // Add minus sign if the previous operator was subtraction
-                      prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
-                    } else if (item.type === 'constant') {
-                      value = parseFloat(item.value);
-                      
-                      // Add minus sign if the previous operator was subtraction
-                      prefix = index > 0 && formulaItems[index-1]?.value === '-' ? '-' : '';
-                    }
+                      // Only render table rows for non-operator items
+                      return (
+                        <tr key={item.id}>
+                          <td className="font-medium py-0.5">
+                            {item.displayValue || item.value}:
+                          </td>
+                          <td className="text-right">
+                            {prefix}{prefix === '-' ? '' : (index > 0 && ['*', '/'].includes(formulaItems[index-1]?.value as string) ? '' : '$')}
+                            {typeof value === 'number' ? (
+                              item.value === 'unitsSold' ? 
+                                value.toLocaleString() : 
+                                value.toFixed(2)
+                            ) : value}
+                          </td>
+                        </tr>
+                      );
+                    })}
                     
-                    // Only render table rows for non-operator items
-                    return (
-                      <tr key={item.id}>
-                        <td className="font-medium py-0.5">
-                          {item.displayValue || item.value}:
-                        </td>
-                        <td className="text-right">
-                          {prefix}{prefix === '-' ? '' : (index > 0 && ['*', '/'].includes(formulaItems[index-1]?.value as string) ? '' : '$')}
-                          {typeof value === 'number' ? (
-                            item.value === 'unitsSold' ? 
-                              value.toLocaleString() : 
-                              value.toFixed(2)
-                          ) : value}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  
-                  {/* Result row */}
-                  <tr className="border-t">
-                    <td className="font-medium py-1">Profit per Unit:</td>
-                    <td className={`text-right font-bold ${profitPerUnit > 0 ? '' : 'text-red-600'}`}>
-                      ${profitPerUnit.toFixed(2)}
-                    </td>
-                  </tr>
-                  
-                  {/* Monthly calculation */}
-                  <tr>
-                    <td className="font-medium py-0.5">Monthly Units Sold:</td>
-                    <td className="text-right">{safeProduct.unitsSold.toLocaleString()}</td>
-                  </tr>
-                  <tr className="border-t">
-                    <td className="font-medium py-1">Monthly Profit:</td>
-                    <td className={`text-right font-bold ${monthlyProfit > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                      ${monthlyProfit.toFixed(2)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              
-              <div className="mt-2">
-                <div className="flex justify-between items-center mb-1">
-                  <h4 className="font-medium text-xs">Custom Profit Calculator</h4>
-                  <div className="flex items-center space-x-2">
-                    <label className="flex items-center text-xs cursor-pointer">
-                      <input 
-                        type="checkbox" 
-                        checked={autoCalculate}
-                        onChange={() => setAutoCalculate(!autoCalculate)}
-                        className="mr-1 h-3 w-3"
-                      />
-                      Auto
-                    </label>
-                    <Button 
-                      variant="secondary" 
-                      onClick={resetCalculator}
-                      className="text-xs py-0.5 px-1.5"
-                    >
-                      Reset
-                    </Button>
-                  </div>
-                </div>
+                    {/* Result row */}
+                    <tr className="border-t">
+                      <td className="font-medium py-1">Profit per Unit:</td>
+                      <td className={`text-right font-bold ${profitPerUnit > 0 ? '' : 'text-red-600'}`}>
+                        ${profitPerUnit.toFixed(2)}
+                      </td>
+                    </tr>
+                    
+                    {/* Monthly calculation */}
+                    <tr>
+                      <td className="font-medium py-0.5">Monthly Units Sold:</td>
+                      <td className="text-right">{safeProduct.unitsSold.toLocaleString()}</td>
+                    </tr>
+                    <tr className="border-t">
+                      <td className="font-medium py-1">Monthly Profit:</td>
+                      <td className={`text-right font-bold ${monthlyProfit > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                        ${monthlyProfit.toFixed(2)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
                 
-                <div className="bg-white p-1.5 rounded mb-1.5 border border-gray-100">
-                  <div className="grid grid-cols-4 gap-1.5">
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Buy Box Price ($)</label>
-                      <input 
-                        type="number" 
-                        value={customSalePrice || ''}
-                        onChange={(e) => handleInputChange(setCustomSalePrice, e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        step="0.01" 
-                        min="0"
-                        placeholder="Buy Box Price"
-                        className="border p-1 rounded w-full text-xs" 
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">FBA Fee ($)</label>
-                      <input 
-                        type="number" 
-                        value={customAmazonFee || ''}
-                        onChange={(e) => handleInputChange(setCustomAmazonFee, e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        step="0.01"
-                        min="0"
-                        placeholder="FBA Fee" 
-                        className="border p-1 rounded w-full text-xs" 
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Referral Fee ($)</label>
-                      <input 
-                        type="number" 
-                        value={customReferralFee || ''}
-                        onChange={(e) => handleInputChange(setCustomReferralFee, e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        step="0.01"
-                        min="0"
-                        placeholder="Referral Fee" 
-                        className="border p-1 rounded w-full text-xs" 
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-gray-500 mb-0.5">Supplier Cost ($)</label>
-                      <input 
-                        type="number" 
-                        value={customSupplierCost || ''}
-                        onChange={(e) => handleInputChange(setCustomSupplierCost, e.target.value)}
-                        onKeyDown={handleKeyDown}
-                        step="0.01"
-                        min="0"
-                        placeholder="Supplier Cost" 
-                        className="border p-1 rounded w-full text-xs" 
-                      />
-                      {!getBestSupplierForProduct(safeProduct.id) && (
-                        <div className="text-xs text-amber-600 mt-1">
-                          No supplier available. Using 0 as default.
-                        </div>
-                      )}
+                <div className="mt-2">
+                  <div className="flex justify-between items-center mb-1">
+                    <h4 className="font-medium text-xs">Custom Profit Calculator</h4>
+                    <div className="flex items-center space-x-2">
+                      <label className="flex items-center text-xs cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={autoCalculate}
+                          onChange={() => setAutoCalculate(!autoCalculate)}
+                          className="mr-1 h-3 w-3"
+                        />
+                        Auto
+                      </label>
+                      <Button 
+                        variant="secondary" 
+                        onClick={resetCalculator}
+                        className="text-xs py-0.5 px-1.5"
+                      >
+                        Reset
+                      </Button>
                     </div>
                   </div>
                   
-                  <div className="mt-1.5 flex justify-end">
-                    <Button 
-                      onClick={calculateCustomProfit}
-                      disabled={autoCalculate}
-                      className={`text-xs py-0.5 px-2 ${autoCalculate ? 'opacity-50' : ''}`}
-                    >
-                      Calculate
-                    </Button>
+                  <div className="bg-white p-1.5 rounded mb-1.5 border border-gray-100">
+                    <div className="grid grid-cols-4 gap-1.5">
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-0.5">Buy Box Price ($)</label>
+                        <input 
+                          type="number" 
+                          value={customSalePrice || ''}
+                          onChange={(e) => handleInputChange(setCustomSalePrice, e.target.value)}
+                          onKeyDown={handleKeyDown}
+                          step="0.01" 
+                          min="0"
+                          placeholder="Buy Box Price"
+                          className="border p-1 rounded w-full text-xs" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-0.5">FBA Fee ($)</label>
+                        <input 
+                          type="number" 
+                          value={customAmazonFee || ''}
+                          onChange={(e) => handleInputChange(setCustomAmazonFee, e.target.value)}
+                          onKeyDown={handleKeyDown}
+                          step="0.01"
+                          min="0"
+                          placeholder="FBA Fee" 
+                          className="border p-1 rounded w-full text-xs" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-0.5">Referral Fee ($)</label>
+                        <input 
+                          type="number" 
+                          value={customReferralFee || ''}
+                          onChange={(e) => handleInputChange(setCustomReferralFee, e.target.value)}
+                          onKeyDown={handleKeyDown}
+                          step="0.01"
+                          min="0"
+                          placeholder="Referral Fee" 
+                          className="border p-1 rounded w-full text-xs" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs text-gray-500 mb-0.5">Supplier Cost ($)</label>
+                        <input 
+                          type="number" 
+                          value={customSupplierCost || ''}
+                          onChange={(e) => handleInputChange(setCustomSupplierCost, e.target.value)}
+                          onKeyDown={handleKeyDown}
+                          step="0.01"
+                          min="0"
+                          placeholder="Supplier Cost" 
+                          className="border p-1 rounded w-full text-xs" 
+                        />
+                        {!getBestSupplierForProduct(safeProduct.id) && (
+                          <div className="text-xs text-amber-600 mt-1">
+                            No supplier available. Using 0 as default.
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    <div className="mt-1.5 flex justify-end">
+                      <Button 
+                        onClick={calculateCustomProfit}
+                        disabled={autoCalculate}
+                        className={`text-xs py-0.5 px-2 ${autoCalculate ? 'opacity-50' : ''}`}
+                      >
+                        Calculate
+                      </Button>
+                    </div>
                   </div>
-                </div>
-                
-                {(customProfit.perUnit !== 0 || customProfit.monthly !== 0 || customProfit.margin !== 0) && (
-                  <div className="p-1.5 bg-blue-50 rounded border border-blue-100">
-                    <h5 className="font-medium text-xs mb-1 text-blue-800">Calculation Results</h5>
-                    <div className="grid grid-cols-3 gap-1.5 text-xs">
-                      <div>
-                        <div className="text-gray-600">Profit per Unit</div>
-                        <div className={`font-semibold ${customProfit.perUnit > 0 ? 'text-black' : 'text-red-600'}`}>
-                          ${customProfit.perUnit.toFixed(2)}
+                  
+                  {(customProfit.perUnit !== 0 || customProfit.monthly !== 0 || customProfit.margin !== 0) && (
+                    <div className="p-1.5 bg-blue-50 rounded border border-blue-100">
+                      <h5 className="font-medium text-xs mb-1 text-blue-800">Calculation Results</h5>
+                      <div className="grid grid-cols-3 gap-1.5 text-xs">
+                        <div>
+                          <div className="text-gray-600">Profit per Unit</div>
+                          <div className={`font-semibold ${customProfit.perUnit > 0 ? 'text-black' : 'text-red-600'}`}>
+                            ${customProfit.perUnit.toFixed(2)}
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <div className="text-gray-600">Monthly Profit</div>
-                        <div className={`font-semibold ${customProfit.monthly > 0 ? 'text-black' : 'text-red-600'}`}>
-                          ${customProfit.monthly.toFixed(2)}
+                        <div>
+                          <div className="text-gray-600">Monthly Profit</div>
+                          <div className={`font-semibold ${customProfit.monthly > 0 ? 'text-black' : 'text-red-600'}`}>
+                            ${customProfit.monthly.toFixed(2)}
+                          </div>
                         </div>
-                      </div>
-                      <div>
-                        <div className="text-gray-600">Profit Margin</div>
-                        <div className={`font-semibold ${customProfit.margin > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {customProfit.margin.toFixed(1)}%
+                        <div>
+                          <div className="text-gray-600">Profit Margin</div>
+                          <div className={`font-semibold ${customProfit.margin > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {customProfit.margin.toFixed(1)}%
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          </Card>
-        </div>
+            </Card>
+          </div>
       </div>
       
       {/* Fifth row - Product Data (previously Mapping Columns) */}
