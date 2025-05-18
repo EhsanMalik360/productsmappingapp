@@ -346,8 +346,112 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       console.log('Sign in successful, session established:', !!data.session);
       
-      // We don't need to set user data here as it will be handled by the auth listener
-      // Just return the result
+      if (!data.user) {
+        console.error('No user data returned from login');
+        setLoading(false);
+        return { error: new Error('No user data returned from login') };
+      }
+      
+      // Now let's immediately get the user profile
+      console.log('Fetching user profile for', data.user.id);
+      
+      try {
+        // First try looking up the profile
+        const { data: profileData, error: profileError } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('user_id', data.user.id)
+          .single();
+        
+        if (profileError || !profileData) {
+          console.log('Profile not found with user_id, checking id field...');
+          
+          // Try with id field instead
+          const { data: profileData2, error: profileError2 } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', data.user.id)
+            .single();
+          
+          if (profileError2 || !profileData2) {
+            console.log('No profile found with either field, creating new profile...');
+            
+            // No profile found, create one for the admin user - ONLY for tahir@leverify.com
+            if (email.toLowerCase() === 'tahir@leverify.com') {
+              console.log('Creating admin profile for tahir@leverify.com');
+              
+              const { data: newProfile, error: createError } = await supabase
+                .from('user_profiles')
+                .upsert({
+                  user_id: data.user.id,
+                  role: 'admin',
+                  is_active: true,
+                  created_at: new Date().toISOString(),
+                  updated_at: new Date().toISOString()
+                })
+                .select();
+              
+              if (createError) {
+                console.error('Error creating admin profile:', createError);
+              } else {
+                console.log('Admin profile created successfully:', newProfile);
+                
+                // Use the newly created profile
+                const authUser = { ...data.user, profile: newProfile[0] } as AuthUser;
+                setUser(authUser);
+                setSession(data.session);
+                setIsAdmin(true);
+                setLoading(false);
+                return { data, error: null };
+              }
+            }
+            
+            // For other users or if profile creation failed, set as regular user
+            const authUser = { ...data.user } as AuthUser;
+            setUser(authUser);
+            setSession(data.session);
+            setIsAdmin(false);
+            console.log('Setting user without profile, isAdmin=false');
+          } else {
+            // Profile found with id field
+            console.log('Profile found with id field:', profileData2);
+            const isUserAdmin = isAdminRole(profileData2.role);
+            const authUser = { ...data.user, profile: profileData2 } as AuthUser;
+            setUser(authUser);
+            setSession(data.session);
+            setIsAdmin(isUserAdmin);
+            console.log('Setting isAdmin to:', isUserAdmin, '(Based on role:', profileData2.role, ')');
+          }
+        } else {
+          // Profile found with user_id field
+          console.log('Profile found with user_id field:', profileData);
+          const isUserAdmin = isAdminRole(profileData.role);
+          const authUser = { ...data.user, profile: profileData } as AuthUser;
+          setUser(authUser);
+          setSession(data.session);
+          setIsAdmin(isUserAdmin);
+          console.log('Setting isAdmin to:', isUserAdmin, '(Based on role:', profileData.role, ')');
+        }
+      } catch (profileError) {
+        console.error('Error during profile fetch:', profileError);
+        
+        // If tahir@leverify.com, make admin anyway
+        if (email.toLowerCase() === 'tahir@leverify.com') {
+          console.log('Setting tahir@leverify.com as admin despite profile error');
+          const authUser = { ...data.user } as AuthUser;
+          setUser(authUser);
+          setSession(data.session);
+          setIsAdmin(true);
+        } else {
+          // For other users, set as regular user
+          const authUser = { ...data.user } as AuthUser;
+          setUser(authUser);
+          setSession(data.session);
+          setIsAdmin(false);
+        }
+      }
+      
+      setLoading(false);
       return { data, error: null };
     } catch (error) {
       console.error('Unexpected error during sign in:', error);
