@@ -7,14 +7,22 @@ import {
   Truck, 
   Tags, 
   TrendingUp, 
-  Settings 
+  Settings,
+  LogOut,
+  User
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 const Sidebar: React.FC = () => {
   const location = useLocation();
+  const { user, signOut } = useAuth();
   
   const isActive = (path: string) => {
     return location.pathname === path ? 'bg-blue-800 text-white' : 'text-white hover:text-blue-200';
+  };
+
+  const handleSignOut = async () => {
+    await signOut();
   };
 
   return (
@@ -65,6 +73,21 @@ const Sidebar: React.FC = () => {
             </Link>
           </li>
         </ul>
+        
+        {/* User info and sign out button */}
+        <div className="mt-10 pt-6 border-t border-blue-800">
+          <div className="flex items-center text-white mb-3 px-2">
+            <User className="w-5 h-5 mr-3" />
+            <span className="text-sm overflow-hidden text-ellipsis">{user?.email}</span>
+          </div>
+          <button
+            onClick={handleSignOut}
+            className="flex items-center w-full text-white hover:text-red-300 p-2 rounded-md transition-colors"
+          >
+            <LogOut className="w-5 h-5 mr-3" />
+            Sign Out
+          </button>
+        </div>
       </div>
     </div>
   );
