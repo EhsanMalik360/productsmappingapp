@@ -13,54 +13,63 @@ import ProductDetail from './pages/Products/ProductDetail';
 import ImportedProducts from './pages/ImportData/ImportedProducts';
 import { AppProvider } from './context/AppContext';
 import { ProfitFormulaProvider } from './context/ProfitFormulaContext';
+import { AuthProvider } from './context/AuthContext';
+import Login from './pages/Login/Login';
+import ProtectedRoute from './components/ProtectedRoute/ProtectedRoute';
 import { Toaster } from 'react-hot-toast';
 
 function App() {
   return (
-    <AppProvider>
-      <ProfitFormulaProvider>
-        <Router>
-          <Layout>
+    <AuthProvider>
+      <AppProvider>
+        <ProfitFormulaProvider>
+          <Router>
             <Routes>
-              <Route path="/" element={<Dashboard />} />
-              <Route path="/import-data" element={<ImportData />} />
-              <Route path="/products" element={<Products />} />
-              <Route path="/products/:id" element={<ProductDetail />} />
-              <Route path="/products/imported" element={<ImportedProducts />} />
-              <Route path="/suppliers" element={<Suppliers />} />
-              <Route path="/suppliers/:id" element={<SupplierDetail />} />
-              <Route path="/attributes" element={<CustomAttributes />} />
-              <Route path="/profit-analysis" element={<ProfitAnalysis />} />
-              <Route path="/settings" element={<Settings />} />
+              {/* Public route */}
+              <Route path="/login" element={<Login />} />
+              
+              {/* Protected routes */}
+              <Route element={<ProtectedRoute />}>
+                <Route path="/" element={<Layout><Dashboard /></Layout>} />
+                <Route path="/import-data" element={<Layout><ImportData /></Layout>} />
+                <Route path="/products" element={<Layout><Products /></Layout>} />
+                <Route path="/products/:id" element={<Layout><ProductDetail /></Layout>} />
+                <Route path="/products/imported" element={<Layout><ImportedProducts /></Layout>} />
+                <Route path="/suppliers" element={<Layout><Suppliers /></Layout>} />
+                <Route path="/suppliers/:id" element={<Layout><SupplierDetail /></Layout>} />
+                <Route path="/attributes" element={<Layout><CustomAttributes /></Layout>} />
+                <Route path="/profit-analysis" element={<Layout><ProfitAnalysis /></Layout>} />
+                <Route path="/settings" element={<Layout><Settings /></Layout>} />
+              </Route>
             </Routes>
-          </Layout>
-        </Router>
-        <Toaster 
-          position="top-right"
-          toastOptions={{
-            duration: 3000,
-            style: {
-              background: '#363636',
-              color: '#fff',
-            },
-            success: {
+          </Router>
+          <Toaster 
+            position="top-right"
+            toastOptions={{
               duration: 3000,
-              iconTheme: {
-                primary: '#10B981',
-                secondary: '#fff',
+              style: {
+                background: '#363636',
+                color: '#fff',
               },
-            },
-            error: {
-              duration: 4000,
-              iconTheme: {
-                primary: '#EF4444',
-                secondary: '#fff',
+              success: {
+                duration: 3000,
+                iconTheme: {
+                  primary: '#10B981',
+                  secondary: '#fff',
+                },
               },
-            },
-          }}
-        />
-      </ProfitFormulaProvider>
-    </AppProvider>
+              error: {
+                duration: 4000,
+                iconTheme: {
+                  primary: '#EF4444',
+                  secondary: '#fff',
+                },
+              },
+            }}
+          />
+        </ProfitFormulaProvider>
+      </AppProvider>
+    </AuthProvider>
   );
 }
 
