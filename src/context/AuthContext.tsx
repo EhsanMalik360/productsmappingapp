@@ -1,11 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-hot-toast';
 
 // Define user profile with role
 interface UserProfile {
   id: string;
   role: 'admin' | 'regular';
+  is_active?: boolean; // Added is_active property
 }
 
 interface AuthContextType {
@@ -36,7 +38,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       const { data, error } = await supabase
         .from('profiles')
-        .select('id, role')
+        .select('id, role, is_active')
         .eq('id', userId)
         .single();
       
@@ -48,7 +50,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.log('Using hardcoded admin profile as fallback');
           return {
             id: userId,
-            role: 'admin'
+            role: 'admin',
+            is_active: true
           } as UserProfile;
         }
         
@@ -89,7 +92,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           // Fetch user profile with role
           const profile = await fetchUserProfile(session.user.id);
-          setUserProfile(profile);
+          
+          // If user is inactive, sign them out immediately
+          if (profile && profile.is_active === false) {
+            console.log('Inactive user detected, signing out');
+            await supabase.auth.signOut();
+            toast.error('Your account has been deactivated. Please contact an administrator.');
+            setUser(null);
+            setUserProfile(null);
+          } else {
+            setUserProfile(profile);
+          }
         } else {
           setUser(null);
           setUserProfile(null);
@@ -106,6 +119,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signIn = async (email: string, password: string) => {
     try {
+      // Attempt to sign in with email and password
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password
@@ -113,6 +127,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) {
         throw error;
+      }
+
+      // Check if the user is active before allowing login
+      const { data: profileData, error: profileError } = await supabase
+        .from('profiles')
+        .select('is_active')
+        .eq('id', data.user.id)
+        .single();
+      
+      if (profileError) {
+        console.error('Error checking user active status:', profileError);
+        throw new Error('Error verifying account status');
+      }
+
+      // If user is inactive, sign them out and return error
+      if (profileData && profileData.is_active === false) {
+        // Sign out the user immediately
+        await supabase.auth.signOut();
+        return { 
+          success: false, 
+          error: 'Your account has been deactivated. Please contact an administrator.' 
+        };
       }
 
       return { success: true };
