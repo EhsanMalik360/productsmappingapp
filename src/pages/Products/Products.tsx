@@ -1,16 +1,16 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Table from '../../components/UI/Table';
 import Button from '../../components/UI/Button';
 import ProductRow from '../../components/Products/ProductRow';
-import { Search, Filter, ChevronLeft, ChevronRight, RefreshCcw, X, ArrowDownAZ, ArrowDownUp, Briefcase, DollarSign, Database, AlertTriangle, Info, Loader2 } from 'lucide-react';
+import { Search, Filter, ChevronLeft, ChevronRight, RefreshCcw, X, ArrowDownAZ, ArrowDownUp, Briefcase, DollarSign, Database, Loader2 } from 'lucide-react';
 
 type SortField = 'price' | 'units' | 'profit' | 'brand' | '';
 type SortOrder = 'asc' | 'desc';
 
 const Products: React.FC = () => {
-  const { products, loading, initialLoading, error, refreshData, totalProductCount } = useAppContext();
+  const { products, loading, initialLoading, error, totalProductCount, fetchProducts, getBrands, getCategories, getPriceRange } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedBrand, setSelectedBrand] = useState<string>('');
@@ -22,137 +22,57 @@ const Products: React.FC = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
-  const [loadingMessage, setLoadingMessage] = useState("Loading products from database...");
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
-  const [loadingRemainingData, setLoadingRemainingData] = useState(false);
+  const [brands, setBrands] = useState<string[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [priceStats, setPriceStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
   
-  // Auto-refresh data when component mounts
+  // Load data when component mounts
   useEffect(() => {
-    // Force a data refresh when the component mounts
-    handleRefresh();
+    loadData();
+    loadMetadata();
   }, []);
   
-  // Extract unique brands and categories from products
-  const brands = useMemo(() => {
-    const uniqueBrands = new Set(products.map(product => product.brand));
-    return Array.from(uniqueBrands).sort();
-  }, [products]);
-  
-  const categories = useMemo(() => {
-    const uniqueCategories = new Set(
-      products.map(product => product.category)
-        .filter(category => category !== null && category !== undefined)
-    );
-    return Array.from(uniqueCategories as Set<string>).sort();
-  }, [products]);
-
-  // Get price range for all products
-  const priceStats = useMemo(() => {
-    if (products.length === 0) return { min: 0, max: 1000 };
-    
-    const prices = products.map(p => p.buyBoxPrice);
-    return {
-      min: Math.floor(Math.min(...prices)),
-      max: Math.ceil(Math.max(...prices))
-    };
-  }, [products]);
-  
-  // Reset price range when products change
+  // Load data when page changes or filters change
   useEffect(() => {
-    if (products.length > 0) {
-      setPriceRange(priceStats);
+    loadData();
+  }, [currentPage, itemsPerPage, searchTerm, selectedBrand, selectedCategory, priceRange, hasSuppliers, sortField, sortOrder]);
+  
+  // Load metadata (brands, categories, price range)
+  const loadMetadata = async () => {
+    try {
+      // Load brands
+      const brandsData = await getBrands();
+      setBrands(brandsData);
+      
+      // Load categories
+      const categoriesData = await getCategories();
+      setCategories(categoriesData);
+      
+      // Load price range
+      const priceRangeData = await getPriceRange();
+      setPriceStats(priceRangeData);
+      setPriceRange(priceRangeData);
+    } catch (error) {
+      console.error('Error loading metadata:', error);
     }
-  }, [priceStats]);
+  };
   
-  // Listen for console logs to update loading message
-  useEffect(() => {
-    const originalConsoleLog = console.log;
-    
-    console.log = function(...args) {
-      // Call original console.log
-      originalConsoleLog.apply(console, args);
-      
-      // Check if the message is related to product loading
-      const message = args.join(' ');
-      if (message.includes('Fetching batch') || message.includes('Fetched')) {
-        setLoadingMessage(message);
-      }
-    };
-    
-    // Restore original console.log on unmount
-    return () => {
-      console.log = originalConsoleLog;
-    };
-  }, []);
-  
-  // Filter products based on search and filters
-  const filteredProducts = useMemo(() => {
-    return products.filter(product => {
-      // Search filter
-      const matchesSearch = 
-        product.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.ean.includes(searchTerm) ||
-        (product.mpn && product.mpn.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        product.brand.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      // Brand filter
-      const matchesBrand = selectedBrand ? product.brand === selectedBrand : true;
-      
-      // Category filter
-      const matchesCategory = selectedCategory ? product.category === selectedCategory : true;
-
-      // Price range filter
-      const matchesPriceRange = 
-        product.buyBoxPrice >= priceRange.min && 
-        product.buyBoxPrice <= priceRange.max;
-
-      // Supplier filter
-      const { getSuppliersForProduct } = useAppContext();
-      const suppliers = getSuppliersForProduct(product.id);
-      const matchesSuppliers = hasSuppliers === null ? true : 
-        hasSuppliers ? suppliers.length > 0 : suppliers.length === 0;
-      
-      return matchesSearch && matchesBrand && matchesCategory && matchesPriceRange && matchesSuppliers;
-    });
-  }, [products, searchTerm, selectedBrand, selectedCategory, priceRange, hasSuppliers]);
-
-  // Apply sorting
-  const sortedProducts = useMemo(() => {
-    if (!sortField) return filteredProducts;
-
-    return [...filteredProducts].sort((a, b) => {
-      let comparison = 0;
-      const { getSuppliersForProduct, getBestSupplierForProduct } = useAppContext();
-
-      switch (sortField) {
-        case 'price':
-          comparison = a.buyBoxPrice - b.buyBoxPrice;
-          break;
-        case 'units':
-          comparison = a.unitsSold - b.unitsSold;
-          break;
-        case 'profit': {
-          const aSupplier = getBestSupplierForProduct(a.id);
-          const bSupplier = getBestSupplierForProduct(b.id);
-          const aProfit = aSupplier ? (a.buyBoxPrice - a.amazonFee - aSupplier.cost) : 0;
-          const bProfit = bSupplier ? (b.buyBoxPrice - b.amazonFee - bSupplier.cost) : 0;
-          comparison = aProfit - bProfit;
-          break;
-        }
-        case 'brand':
-          comparison = a.brand.localeCompare(b.brand);
-          break;
-        default:
-          break;
-      }
-      
-      return sortOrder === 'asc' ? comparison : -comparison;
-    });
-  }, [filteredProducts, sortField, sortOrder]);
-  
-  const totalPages = Math.ceil(sortedProducts.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedProducts = sortedProducts.slice(startIndex, startIndex + itemsPerPage);
+  const loadData = async () => {
+    try {
+      await fetchProducts(currentPage, itemsPerPage, {
+        searchTerm,
+        brand: selectedBrand,
+        category: selectedCategory,
+        priceRange,
+        hasSuppliers,
+        sortField,
+        sortOrder
+      });
+    } catch (error) {
+      console.error('Error loading products:', error);
+    }
+  };
   
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -160,7 +80,7 @@ const Products: React.FC = () => {
   };
   
   const changePage = (page: number) => {
-    if (page > 0 && page <= totalPages) {
+    if (page > 0 && page <= Math.ceil(totalProductCount / itemsPerPage)) {
       setCurrentPage(page);
     }
   };
@@ -174,13 +94,14 @@ const Products: React.FC = () => {
       setSortField(field);
       setSortOrder('asc');
     }
+    setCurrentPage(1); // Reset to first page on sort
   };
 
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
-      setLoadingMessage("Starting to refresh products from database...");
-      await refreshData();
+      await loadMetadata();
+      await loadData();
       setLastRefreshed(new Date());
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -234,7 +155,7 @@ const Products: React.FC = () => {
     }
     
     // If no products after initial load, show empty state
-    if (products.length === 0) {
+    if (products.length === 0 && !loading) {
       return (
         <div className="flex flex-col items-center justify-center py-12">
           <Database className="w-12 h-12 text-gray-400 mb-4" />
@@ -244,42 +165,9 @@ const Products: React.FC = () => {
       );
     }
     
-    // If filtering results in no products
-    if (filteredProducts.length === 0) {
-      return (
-        <div className="flex flex-col items-center justify-center py-12">
-          <Filter className="w-12 h-12 text-gray-400 mb-4" />
-          <h3 className="text-xl font-semibold mb-2">No products match your filters</h3>
-          <p className="text-gray-500">Try adjusting your search or filter criteria.</p>
-          <Button 
-            variant="secondary" 
-            className="mt-4"
-            onClick={handleClearFilters}
-          >
-            Clear All Filters
-          </Button>
-        </div>
-      );
-    }
-    
     return null;
   };
 
-  const renderBottomLoadingIndicator = () => {
-    if (loading && !initialLoading && products.length > 0) {
-      return (
-        <div className="bg-blue-50 border-t border-blue-100 px-4 py-2 mt-2">
-          <div className="flex items-center text-sm text-blue-700">
-            <Loader2 className="w-3 h-3 text-blue-500 animate-spin mr-2" />
-            <span>Loading additional data in background...</span>
-          </div>
-        </div>
-      );
-    }
-    return null;
-  };
-
-  // Add a loader for the table 
   return (
     <div className="container mx-auto px-4 py-6">
       <Card>
@@ -335,7 +223,7 @@ const Products: React.FC = () => {
             <div className="flex items-center">
               <div className="flex items-center mr-2 text-sm">
                 <span className="text-gray-600 mr-1">Total:</span>
-                <span className="font-medium">{filteredProducts.length}</span>
+                <span className="font-medium">{totalProductCount}</span>
                 {getActiveFilterCount() > 0 && (
                   <span className="ml-1 text-blue-600">({getActiveFilterCount()} filter{getActiveFilterCount() !== 1 ? 's' : ''})</span>
                 )}
@@ -498,8 +386,17 @@ const Products: React.FC = () => {
         {/* Loading states */}
         {renderLoadingState()}
 
+        {/* Show loading overlay when refreshing data */}
+        {loading && !initialLoading && (
+          <div className="relative">
+            <div className="absolute inset-0 bg-white bg-opacity-70 flex items-center justify-center z-10">
+              <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+            </div>
+          </div>
+        )}
+
         {/* Only render table if we have data and passed initial loading */}
-        {!initialLoading && filteredProducts.length > 0 && (
+        {!initialLoading && products.length > 0 && (
           <>
             <Table
               headers={[
@@ -515,23 +412,15 @@ const Products: React.FC = () => {
                 'Actions'
               ]}
             >
-              {paginatedProducts.map(product => (
+              {products.map(product => (
                 <ProductRow key={product.id} product={product} />
               ))}
             </Table>
 
-            {/* Background loading indicator */}
-            {renderBottomLoadingIndicator()}
-
             {/* Pagination controls */}
             <div className="flex justify-between items-center mt-4">
               <div className="text-sm text-gray-500">
-                Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredProducts.length)} of {filteredProducts.length} products
-                {totalProductCount > products.length && !loading && (
-                  <span className="ml-1">
-                    (of {totalProductCount} total in database)
-                  </span>
-                )}
+                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, totalProductCount)} of {totalProductCount} products
               </div>
               <div className="flex items-center space-x-1">
                 <Button
@@ -543,12 +432,12 @@ const Products: React.FC = () => {
                   <ChevronLeft className="w-4 h-4" />
                 </Button>
                 <span className="px-2">
-                  Page {currentPage} of {totalPages || 1}
+                  Page {currentPage} of {Math.ceil(totalProductCount / itemsPerPage) || 1}
                 </span>
                 <Button
                   variant="secondary"
                   onClick={() => changePage(currentPage + 1)}
-                  disabled={currentPage === totalPages}
+                  disabled={currentPage === Math.ceil(totalProductCount / itemsPerPage)}
                   className="p-1"
                 >
                   <ChevronRight className="w-4 h-4" />

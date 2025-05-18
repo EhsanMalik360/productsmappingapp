@@ -85,6 +85,22 @@ interface AppContextType {
   getSuppliersForProduct: (productId: string) => SupplierProduct[];
   getBestSupplierForProduct: (productId: string) => SupplierProduct | undefined;
   refreshData: () => Promise<void>;
+  fetchProducts: (
+    page?: number, 
+    pageSize?: number, 
+    filters?: {
+      searchTerm?: string,
+      brand?: string,
+      category?: string,
+      priceRange?: { min: number, max: number },
+      hasSuppliers?: boolean | null,
+      sortField?: string,
+      sortOrder?: 'asc' | 'desc'
+    }
+  ) => Promise<{ data: any[], count: number }>;
+  getBrands: () => Promise<string[]>;
+  getCategories: () => Promise<string[]>;
+  getPriceRange: () => Promise<{min: number, max: number}>;
 }
 
 // Create context
@@ -101,7 +117,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     initialLoading: productsInitialLoading,
     error: productsError,
     addProduct: addProductToDb,
-    refreshProducts,
+    fetchProducts: fetchProductsFromDb,
+    getBrands: getBrandsFromDb,
+    getCategories: getCategoriesFromDb,
+    getPriceRange: getPriceRangeFromDb,
     totalProductCount 
   } = useProducts(dataInitialized);
 
@@ -662,7 +681,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refreshData = async () => {
     try {
       await Promise.all([
-        refreshProducts(),
+        fetchProductsFromDb(),
         refreshSuppliers()
       ]);
       
@@ -771,7 +790,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getProductById,
         getSuppliersForProduct,
         getBestSupplierForProduct,
-        refreshData
+        refreshData,
+        fetchProducts: fetchProductsFromDb,
+        getBrands: getBrandsFromDb,
+        getCategories: getCategoriesFromDb,
+        getPriceRange: getPriceRangeFromDb
       }}
     >
       {children}

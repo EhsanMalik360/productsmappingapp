@@ -11,7 +11,6 @@ type ImportHistoryInsert = Tables['import_history']['Insert'];
 
 export function useProducts(dataInitialized: boolean = false) {
   const [products, setProducts] = useState<Product[]>([]);
-  const [initialProducts, setInitialProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(!dataInitialized);
   const [initialLoading, setInitialLoading] = useState(!dataInitialized);
   const [error, setError] = useState<Error | null>(null);
@@ -20,211 +19,128 @@ export function useProducts(dataInitialized: boolean = false) {
 
   // Load initial data when component mounts or when switching back to the tab
   useEffect(() => {
-    // If we already have data and dataInitialized is true, don't reload
     if (dataInitialized && products.length > 0) {
       setLoading(false);
       setInitialLoading(false);
       return;
     }
 
-    // Otherwise, fetch initial data
     if (!hasLoadedInitial) {
-      fetchInitialProducts();
+      fetchProducts(1, 20);
     }
   }, [dataInitialized]);
-  
-  // Effect to update initial products only when background loading is FULLY complete
-  useEffect(() => {
-    if (!loading && initialProducts.length > 0 && products.length > initialProducts.length) {
-      // Only update initialProducts when background loading is completely finished
-      // This prevents partial updates from affecting the UI during loading
-      
-      // Create a map of all products by ID for efficient lookup
-      const productsMap = new Map<string, Product>();
-      
-      // First add initial products (they take precedence)
-      initialProducts.forEach(product => {
-        productsMap.set(product.id, product);
-      });
-      
-      // Then add all background loaded products
-      products.forEach(product => {
-        if (!productsMap.has(product.id)) {
-          productsMap.set(product.id, product);
-        }
-      });
-      
-      // Convert map back to array
-      const mergedProducts = Array.from(productsMap.values());
-      
-      // Only update once at the end of loading
-      console.log(`Background loading complete. Merging ${products.length - initialProducts.length} additional products into view.`);
-      setInitialProducts(mergedProducts);
-    }
-  }, [loading]); // Only trigger when loading state changes to false
 
-  // Function to fetch just the first page of products for immediate display
-  async function fetchInitialProducts() {
-    try {
-      setInitialLoading(true);
-      setError(null);
-      
-      // First, get the total count of products
-      const { count, error: countError } = await supabase
-        .from('products')
-        .select('*', { count: 'exact', head: true });
-      
-      if (countError) throw countError;
-      
-      const totalCount = count || 0;
-      setTotalProductCount(totalCount);
-      console.log(`Total products in database: ${totalCount}`);
-      
-      // Only fetch first 20 products for immediate display
-      const { data, error: productsError } = await supabase
-        .from('products')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .range(0, 19); // Fetch first 20 products
-      
-      if (productsError) throw productsError;
-      
-      // Set both products and initialProducts to maintain consistency
-      setProducts(data || []);
-      setInitialProducts(data || []);
-      setHasLoadedInitial(true);
-      console.log(`Fetched initial ${data?.length} products for immediate display`);
-      
-      // After loading initial data, fetch remaining data in the background
-      setInitialLoading(false);
-      fetchRemainingProducts(totalCount, data?.length || 0);
-      
-    } catch (err) {
-      console.error('Error fetching initial products:', err);
-      setError(err instanceof Error ? err : new Error('An error occurred fetching initial products'));
-      setInitialLoading(false);
-    }
-  }
-
-  // Function to fetch remaining products in the background
-  async function fetchRemainingProducts(totalCount: number, initialCount: number) {
-    try {
-      if (initialCount >= totalCount) {
-        // No more products to load
-        setLoading(false);
-        return;
-      }
-      
-      // Fetch products in batches of 1000 (Supabase limit)
-      const batchSize = 1000;
-      const remainingProducts = totalCount - initialCount;
-      const batches = Math.ceil(remainingProducts / batchSize);
-      let backgroundProducts = [...products]; // Start with initial products for background loading
-      
-      console.log(`Fetching remaining ${remainingProducts} products in ${batches} batches (background)`);
-      
-      for (let i = 0; i < batches; i++) {
-        const from = initialCount + (i * batchSize);
-        const to = Math.min(from + batchSize - 1, totalCount - 1);
-        
-        const { data, error: batchError } = await supabase
-          .from('products')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .range(from, to);
-        
-        if (batchError) throw batchError;
-        
-        backgroundProducts = [...backgroundProducts, ...(data || [])];
-        
-        // Log progress but don't update UI
-        console.log(`Fetched batch ${i+1}/${batches} (${data?.length || 0} products)`);
-      }
-      
-      // Update products only once at the end of all batches
-      setProducts(backgroundProducts);
-      console.log(`Successfully fetched all ${backgroundProducts.length} products in background`);
-    } catch (err) {
-      console.error('Error fetching remaining products:', err);
-      setError(err instanceof Error ? err : new Error('An error occurred fetching remaining products'));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // Original full fetch function - now with option to skip initial load
-  async function fetchProducts(skipInitial = false) {
+  // Function to fetch products with pagination and filtering
+  async function fetchProducts(
+    page: number = 1, 
+    pageSize: number = 20, 
+    filters: {
+      searchTerm?: string,
+      brand?: string,
+      category?: string,
+      priceRange?: { min: number, max: number },
+      hasSuppliers?: boolean | null,
+      sortField?: string,
+      sortOrder?: 'asc' | 'desc'
+    } = {}
+  ) {
     try {
       setLoading(true);
-      if (!skipInitial) {
+      if (page === 1) {
         setInitialLoading(true);
       }
       setError(null);
       
-      // First, get the total count of products
-      const { count, error: countError } = await supabase
+      // Calculate start and end for pagination
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize - 1;
+      
+      // Build query
+      let query = supabase
         .from('products')
-        .select('*', { count: 'exact', head: true });
+        .select('*', { count: 'exact' });
       
-      if (countError) throw countError;
+      // Apply filters
+      if (filters.searchTerm) {
+        query = query.or(
+          `title.ilike.%${filters.searchTerm}%,ean.ilike.%${filters.searchTerm}%,brand.ilike.%${filters.searchTerm}%,mpn.ilike.%${filters.searchTerm}%`
+        );
+      }
       
-      const totalCount = count || 0;
-      setTotalProductCount(totalCount);
-      console.log(`Total products in database: ${totalCount}`);
+      if (filters.brand) {
+        query = query.eq('brand', filters.brand);
+      }
       
-      // If not skipping initial, fetch first 20 immediately
-      if (!skipInitial) {
-        const { data: initialData, error: initialError } = await supabase
-          .from('products')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .range(0, 19);
+      if (filters.category) {
+        query = query.eq('category', filters.category);
+      }
+      
+      if (filters.priceRange) {
+        query = query
+          .gte('buy_box_price', filters.priceRange.min)
+          .lte('buy_box_price', filters.priceRange.max);
+      }
+      
+      // Apply sort
+      if (filters.sortField) {
+        let sortColumn: string;
         
-        if (initialError) throw initialError;
-        setProducts(initialData || []);
-        setInitialProducts(initialData || []);
-        setInitialLoading(false);
-        
-        // If we already have all products, we're done
-        if ((initialData?.length || 0) >= totalCount) {
-          setLoading(false);
-          return;
+        switch (filters.sortField) {
+          case 'price':
+            sortColumn = 'buy_box_price';
+            break;
+          case 'units':
+            sortColumn = 'units_sold';
+            break;
+          case 'brand':
+            sortColumn = 'brand';
+            break;
+          default:
+            sortColumn = 'created_at';
+            break;
         }
+        
+        query = query.order(sortColumn, { 
+          ascending: filters.sortOrder === 'asc' 
+        });
+      } else {
+        // Default sort
+        query = query.order('created_at', { ascending: false });
       }
       
-      // Fetch remaining products in batches
-      const batchSize = 1000;
-      const initialCount = skipInitial ? 0 : Math.min(20, totalCount);
-      const batches = Math.ceil((totalCount - initialCount) / batchSize);
-      let backgroundProducts = skipInitial ? [] : [...products];
+      // For hasSuppliers filter, we need a different approach since that requires joining with supplier_products
+      // We'll handle that separately if needed
       
-      console.log(`Fetching ${totalCount - initialCount} products in ${batches} batches`);
+      // Apply pagination
+      query = query.range(start, end);
       
-      for (let i = 0; i < batches; i++) {
-        const from = initialCount + (i * batchSize);
-        const to = Math.min(from + batchSize - 1, totalCount - 1);
-        
-        console.log(`Fetching batch ${i + 1} of ${batches} (range ${from}-${to})...`);
-        
-        const { data, error: batchError } = await supabase
-          .from('products')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .range(from, to);
-        
-        if (batchError) throw batchError;
-        
-        backgroundProducts = [...backgroundProducts, ...(data || [])];
-        setProducts(backgroundProducts);
+      // Execute the query
+      const { data, error: fetchError, count } = await query;
+      
+      if (fetchError) throw fetchError;
+      
+      if (count !== undefined && count !== null) {
+        setTotalProductCount(count);
+        console.log(`Total filtered products: ${count}`);
       }
       
-      console.log(`Successfully fetched all ${backgroundProducts.length} products`);
+      setProducts(data || []);
+      
+      // Special handling for hasSuppliers filter if needed (this would be done on client-side after fetching)
+      // This is a limitation as it requires an additional query or client-side filtering
+      
+      return {
+        data: data || [],
+        count: count || 0
+      };
     } catch (err) {
       console.error('Error fetching products:', err);
       setError(err instanceof Error ? err : new Error('An error occurred fetching products'));
+      return { data: [], count: 0 };
     } finally {
       setLoading(false);
       setInitialLoading(false);
+      setHasLoadedInitial(true);
     }
   }
 
@@ -238,7 +154,6 @@ export function useProducts(dataInitialized: boolean = false) {
 
       if (error) throw error;
       setProducts(prev => [data, ...prev]);
-      setInitialProducts(prev => [data, ...prev]);
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to add product');
@@ -256,7 +171,6 @@ export function useProducts(dataInitialized: boolean = false) {
 
       if (error) throw error;
       setProducts(prev => prev.map(p => p.id === id ? data : p));
-      setInitialProducts(prev => prev.map(p => p.id === id ? data : p));
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to update product');
@@ -272,14 +186,80 @@ export function useProducts(dataInitialized: boolean = false) {
 
       if (error) throw error;
       setProducts(prev => prev.filter(p => p.id !== id));
-      setInitialProducts(prev => prev.filter(p => p.id !== id));
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to delete product');
     }
   }
 
+  // Get unique brands
+  async function getBrands() {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('brand')
+        .order('brand');
+      
+      if (error) throw error;
+      
+      // Extract unique brands
+      const brands = [...new Set(data?.map(p => p.brand))].filter(Boolean);
+      return brands;
+    } catch (err) {
+      console.error('Error fetching brands:', err);
+      return [];
+    }
+  }
+  
+  // Get unique categories
+  async function getCategories() {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('category')
+        .order('category');
+      
+      if (error) throw error;
+      
+      // Extract unique categories
+      const categories = [...new Set(data?.map(p => p.category))].filter(Boolean);
+      return categories;
+    } catch (err) {
+      console.error('Error fetching categories:', err);
+      return [];
+    }
+  }
+  
+  // Get price range
+  async function getPriceRange() {
+    try {
+      const { data: minData, error: minError } = await supabase
+        .from('products')
+        .select('buy_box_price')
+        .order('buy_box_price', { ascending: true })
+        .limit(1)
+        .single();
+      
+      const { data: maxData, error: maxError } = await supabase
+        .from('products')
+        .select('buy_box_price')
+        .order('buy_box_price', { ascending: false })
+        .limit(1)
+        .single();
+      
+      if (minError || maxError) throw minError || maxError;
+      
+      return {
+        min: Math.floor(minData?.buy_box_price || 0),
+        max: Math.ceil(maxData?.buy_box_price || 1000)
+      };
+    } catch (err) {
+      console.error('Error fetching price range:', err);
+      return { min: 0, max: 1000 };
+    }
+  }
+
   return {
-    products: initialProducts, // Return initialProducts instead of products
+    products,
     loading,
     initialLoading,
     error,
@@ -287,7 +267,10 @@ export function useProducts(dataInitialized: boolean = false) {
     addProduct,
     updateProduct,
     deleteProduct,
-    refreshProducts: fetchProducts
+    fetchProducts,
+    getBrands,
+    getCategories,
+    getPriceRange
   };
 }
 
