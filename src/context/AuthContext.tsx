@@ -38,6 +38,18 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJ
 // Create the Supabase client
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+// Function to determine if a role is admin
+const isAdminRole = (role: any): boolean => {
+  if (!role) return false;
+  
+  // Handle string or object with toString
+  const roleStr = typeof role === 'string' ? role : String(role);
+  // Normalize: trim whitespace and convert to lowercase
+  const normalizedRole = roleStr.trim().toLowerCase();
+  
+  return normalizedRole === 'admin';
+};
+
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -51,27 +63,41 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       
       // Get the session
       const { data: { session: currentSession } } = await supabase.auth.getSession();
+      console.log('Current session:', currentSession);
 
       if (currentSession) {
         setSession(currentSession);
         
         // Get the user
         const { data: { user: currentUser } } = await supabase.auth.getUser();
+        console.log('Current user:', currentUser);
         
         if (currentUser) {
           // Get the user's profile
-          const { data: profileData } = await supabase
+          const { data: profileData, error: profileError } = await supabase
             .from('user_profiles')
             .select('*')
             .eq('user_id', currentUser.id)
             .single();
           
+          console.log('User profile data:', profileData);
+          console.log('User profile error:', profileError);
+          
           if (profileData) {
+            console.log('User role from profile (raw):', profileData.role);
+            console.log('Role type:', typeof profileData.role);
+            console.log('Role stringified:', JSON.stringify(profileData.role));
+            
+            const isUserAdmin = isAdminRole(profileData.role);
+            
             const authUser = { ...currentUser, profile: profileData } as AuthUser;
             setUser(authUser);
-            setIsAdmin(profileData.role === 'admin');
+            setIsAdmin(isUserAdmin);
+            console.log('Setting isAdmin to:', isUserAdmin, '(Based on role:', profileData.role, ')');
           } else {
             setUser(currentUser);
+            setIsAdmin(false);
+            console.log('No profile data found, setting isAdmin to false');
           }
         }
       }
@@ -84,25 +110,38 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Set up listener for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, newSession) => {
+        console.log('Auth state changed:', event);
         if (event === 'SIGNED_IN' && newSession) {
           setSession(newSession);
           const { data: { user: newUser } } = await supabase.auth.getUser();
+          console.log('New user on sign in:', newUser);
           
           if (newUser) {
             // Get the user's profile
-            const { data: profileData } = await supabase
+            const { data: profileData, error: profileError } = await supabase
               .from('user_profiles')
               .select('*')
               .eq('user_id', newUser.id)
               .single();
             
+            console.log('User profile on sign in:', profileData);
+            console.log('Profile error on sign in:', profileError);
+            
             if (profileData) {
+              console.log('User role on sign in (raw):', profileData.role);
+              console.log('Role type on sign in:', typeof profileData.role);
+              console.log('Role stringified on sign in:', JSON.stringify(profileData.role));
+              
+              const isUserAdmin = isAdminRole(profileData.role);
+              
               const authUser = { ...newUser, profile: profileData } as AuthUser;
               setUser(authUser);
-              setIsAdmin(profileData.role === 'admin');
+              setIsAdmin(isUserAdmin);
+              console.log('Setting isAdmin to:', isUserAdmin, '(Based on role:', profileData.role, ')');
             } else {
               setUser(newUser);
               setIsAdmin(false);
+              console.log('No profile data found on sign in, isAdmin set to false');
             }
           }
         } else if (event === 'SIGNED_OUT') {
