@@ -39,7 +39,6 @@
     
     <script>
       const statusEl = document.getElementById('loadingStatus');
-      const CREDENTIALS_STORAGE_KEY = 'app_supabase_credentials'; // Same key as in supabase.ts
       
       async function initializeApp() {
         try {
@@ -49,7 +48,7 @@
           if (!configResponse.ok) throw new Error(`Failed to load config: ${configResponse.status}`);
           const config = await configResponse.json();
           
-          // Step 2: Set up Supabase
+          // Step 2: Create Supabase client
           statusEl.textContent = "Establishing database connection...";
           const supabaseUrl = config.supabase.url;
           const supabaseKey = config.supabase.anon_key;
@@ -57,27 +56,10 @@
             throw new Error("Missing Supabase credentials in server config");
           }
           
-          // Reliably store these credentials for consistent access between refreshes
-          try {
-            localStorage.setItem(CREDENTIALS_STORAGE_KEY, JSON.stringify({
-              url: supabaseUrl,
-              key: supabaseKey
-            }));
-            console.log('Stored Supabase credentials for reliable access');
-          } catch (e) {
-            console.error('Error storing credentials:', e);
-          }
-          
           // Initialize the client globally
-          window.supabaseClient = supabase.createClient(supabaseUrl, supabaseKey, {
-            auth: {
-              autoRefreshToken: true,
-              persistSession: true,
-              detectSessionInUrl: false
-            }
-          });
+          window.supabaseClient = supabase.createClient(supabaseUrl, supabaseKey);
           
-          // Step 3: Test DB connection
+          // Step 3: Check if we can connect to Supabase
           statusEl.textContent = "Testing database connection...";
           const { data, error } = await window.supabaseClient.from('products').select('count(*)', { count: 'exact' }).limit(1);
           if (error) throw new Error(`Supabase connection error: ${error.message}`);
@@ -85,14 +67,21 @@
           // Connection successful, inject global variables and load the app
           statusEl.textContent = "Connection established. Loading application...";
           
-          // Create global variables for the React app to find
+          // Create global variables for the React app
           window.VITE_SUPABASE_URL = supabaseUrl;
           window.VITE_SUPABASE_ANON_KEY = supabaseKey;
           
-          // Also set up legacy global format for backward compatibility
+          // Set up globals for potential imports
           window.__SUPABASE_CREDENTIALS__ = {
             url: supabaseUrl,
             key: supabaseKey
+          };
+          
+          // Monkey patch createClient globally to use our credentials
+          const originalCreateClient = supabase.createClient;
+          supabase.createClient = function(url, key, ...args) {
+            console.log("Intercepted createClient call");
+            return originalCreateClient(supabaseUrl, supabaseKey, ...args);
           };
           
           // Now load the React app
@@ -100,59 +89,16 @@
           
         } catch (error) {
           console.error('Initialization error:', error);
-          
-          // Check if we can recover using stored credentials
-          try {
-            const storedCredentials = localStorage.getItem(CREDENTIALS_STORAGE_KEY);
-            if (storedCredentials) {
-              console.log('Attempting recovery with stored credentials...');
-              statusEl.textContent = "Attempting recovery with stored credentials...";
-              
-              const { url, key } = JSON.parse(storedCredentials);
-              if (url && key) {
-                window.VITE_SUPABASE_URL = url;
-                window.VITE_SUPABASE_ANON_KEY = key;
-                window.__SUPABASE_CREDENTIALS__ = { url, key };
-                
-                // Try to proceed with stored credentials
-                loadApp();
-                return;
-              }
-            }
-          } catch (recoveryError) {
-            console.error('Recovery attempt failed:', recoveryError);
-          }
-          
-          // If recovery failed, show error
           document.getElementById('root').innerHTML = `
             <div style="color: red; padding: 20px; max-width: 800px; margin: 0 auto; text-align: left;">
               <h2>Application Initialization Error</h2>
               <p>Failed to initialize the application:</p>
               <pre style="background: #f5f5f5; padding: 10px; overflow: auto;">${error.message}</pre>
               <p>Please check your Supabase configuration and try again.</p>
-              <button onclick="clearCacheAndReload()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">Clear Cache & Retry</button>
               <button onclick="window.location.reload()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">Retry</button>
             </div>
           `;
         }
-      }
-      
-      // Helper function to clear cache and reload
-      function clearCacheAndReload() {
-        try {
-          // Clear only Supabase-related items
-          Object.keys(localStorage).forEach(key => {
-            if (key.includes('supabase') || key.includes('sb-') || key === CREDENTIALS_STORAGE_KEY) {
-              console.log('Removing item:', key);
-              localStorage.removeItem(key);
-            }
-          });
-        } catch (e) {
-          console.error('Error clearing cache:', e);
-        }
-        
-        // Force reload
-        window.location.reload();
       }
       
       function loadApp() {
@@ -171,7 +117,6 @@
               <p>Failed to load the application bundle:</p>
               <pre style="background: #f5f5f5; padding: 10px; overflow: auto;">Bundle load failed</pre>
               <p>Please check your network connection and try again.</p>
-              <button onclick="clearCacheAndReload()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; margin-right: 10px;">Clear Cache & Retry</button>
               <button onclick="window.location.reload()" style="padding: 8px 16px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">Retry</button>
             </div>
           `;

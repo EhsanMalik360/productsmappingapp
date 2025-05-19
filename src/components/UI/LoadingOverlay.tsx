@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 interface LoadingOverlayProps {
   message?: string;
@@ -79,24 +79,6 @@ const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ message = 'Loading...',
     return 'bg-green-600'; // 100% complete
   };
   
-  // Function to clear localStorage and reload the page
-  const handleClearCache = () => {
-    console.log('Clearing cache and reloading...');
-    
-    // Clear only Supabase-related items to avoid clearing other app data
-    if (typeof window !== 'undefined') {
-      Object.keys(localStorage).forEach(key => {
-        if (key.includes('supabase') || key.includes('sb-')) {
-          console.log('Removing item:', key);
-          localStorage.removeItem(key);
-        }
-      });
-    }
-    
-    // Force reload the page
-    window.location.reload();
-  };
-  
   return (
     <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 backdrop-blur-sm">
       <div className="bg-white p-8 rounded-lg shadow-2xl flex flex-col items-center" style={{ minWidth: '400px', maxWidth: '90%' }}>
@@ -146,23 +128,6 @@ const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ message = 'Loading...',
           <p className="text-gray-500 text-sm mt-2 italic">
             {displayProgress < 100 ? "Processing your data, please wait..." : "Almost done!"}
           </p>
-        )}
-        
-        {/* Show cache clear button after 15 seconds if still loading */}
-        {elapsedSeconds > 15 && (
-          <div className="mt-4 border-t border-gray-200 pt-4 w-full">
-            <div className="flex flex-col items-center">
-              <p className="text-amber-600 text-sm mb-2">Taking longer than expected?</p>
-              <button
-                onClick={handleClearCache}
-                className="bg-amber-100 hover:bg-amber-200 text-amber-800 font-medium py-2 px-4 rounded-full inline-flex items-center text-sm transition-colors"
-              >
-                <RefreshCw size={16} className="mr-2" />
-                Clear Cache & Reload
-              </button>
-              <p className="text-gray-500 text-xs mt-2">This may help if you're stuck in a loading state</p>
-            </div>
-          </div>
         )}
       </div>
     </div>
