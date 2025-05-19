@@ -63,7 +63,11 @@ const SupplierDetail: React.FC = () => {
     if (!normalizedId) return;
     
     try {
-      setLoadingStats(true);
+      // Don't reset existing stats while loading to avoid flickering
+      // Only set loading to true if we don't already have stats
+      if (productStats.totalProducts === 0) {
+        setLoadingStats(true);
+      }
       
       // Get total count
       const totalResult = await fetchSupplierProducts(normalizedId, 1, 1);
@@ -99,6 +103,7 @@ const SupplierDetail: React.FC = () => {
         }
       }
       
+      // Only update stats once we have all the data to prevent partial updates
       setProductStats({
         totalProducts,
         matchedProducts,
@@ -408,7 +413,7 @@ const SupplierDetail: React.FC = () => {
           <h3 className="text-lg font-semibold mb-2">Total Products</h3>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-bold">
-              {loadingStats ? '...' : totalProducts.toLocaleString()}
+              {loadingStats ? '\u00A0' : totalProducts.toLocaleString()}
             </span>
           </div>
         </Card>
@@ -417,7 +422,7 @@ const SupplierDetail: React.FC = () => {
           <h3 className="text-lg font-semibold mb-2">Matched Products</h3>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-bold text-blue-600">
-              {loadingStats ? '...' : matchedProducts.toLocaleString()}
+              {loadingStats ? '\u00A0' : matchedProducts.toLocaleString()}
             </span>
             <span className="text-sm text-gray-500 mb-1">
               {loadingStats ? '' : `(${Math.round((matchedProducts / totalProducts) * 100) || 0}%)`}
@@ -429,7 +434,7 @@ const SupplierDetail: React.FC = () => {
           <h3 className="text-lg font-semibold mb-2">Average Cost</h3>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-bold text-green-600">
-              ${loadingStats ? '...' : avgCost.toFixed(2)}
+              {loadingStats ? '\u00A0' : `$${avgCost.toFixed(2)}`}
             </span>
           </div>
         </Card>

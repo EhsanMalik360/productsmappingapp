@@ -666,6 +666,8 @@ const Suppliers: React.FC = () => {
             >
               {paginatedSuppliers.map(supplier => {
                 const stats = getSupplierStats(supplier.id);
+                const isStatLoaded = supplierStatsMap.has(supplier.id);
+                
                 return (
                   <tr key={supplier.id} className="border-t hover:bg-gray-50">
                     <td className="px-4 py-4 font-medium">
@@ -673,9 +675,21 @@ const Suppliers: React.FC = () => {
                         {supplier.name}
                       </Link>
                     </td>
-                    <td className="px-4 py-4">{stats.productCount}</td>
-                    <td className="px-4 py-4">${stats.avgCost.toFixed(2)}</td>
-                    <td className="px-4 py-4">{stats.bestValueCount}</td>
+                    <td className="px-4 py-4">
+                      {!isStatLoaded && loadingStats 
+                        ? <span className="text-gray-400">\u00A0</span> 
+                        : stats.productCount}
+                    </td>
+                    <td className="px-4 py-4">
+                      {!isStatLoaded && loadingStats 
+                        ? <span className="text-gray-400">\u00A0</span> 
+                        : `$${stats.avgCost.toFixed(2)}`}
+                    </td>
+                    <td className="px-4 py-4">
+                      {!isStatLoaded && loadingStats 
+                        ? <span className="text-gray-400">\u00A0</span> 
+                        : stats.bestValueCount}
+                    </td>
                     <td className="px-4 py-4 text-right space-x-2">
                       <Link to={`/suppliers/${supplier.id}`}>
                         <Button variant="secondary" className="text-blue-600 text-sm">
@@ -693,7 +707,7 @@ const Suppliers: React.FC = () => {
                         variant="secondary" 
                         className="text-red-600 text-sm"
                         onClick={() => handleDelete(supplier)}
-                        disabled={isDeleting || getProductCount(supplier.id) > 0}
+                        disabled={isDeleting || stats.productCount > 0}
                       >
                         <Trash2 className="w-4 h-4 mr-1" /> Delete
                       </Button>
