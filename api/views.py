@@ -831,10 +831,8 @@ def supplier_product_stats(request, supplier_id):
             return Response(cache_result)
         
         # Use a more efficient SQL query with better error handling
-        # and a query timeout to prevent long-running queries
         with connection.cursor() as cursor:
-            # Set a statement timeout to prevent long-running queries (1 second)
-            cursor.execute("SET statement_timeout = 1000")
+            # Remove the statement timeout that's causing syntax errors
             
             # Use a more efficient query that handles NULL values properly
             cursor.execute("""
@@ -847,9 +845,6 @@ def supplier_product_stats(request, supplier_id):
             """, [supplier_id_str])
             
             result = cursor.fetchone()
-            
-            # Reset the timeout to default
-            cursor.execute("SET statement_timeout = 0")
         
         # Handle case where no products exist or all costs are NULL
         if not result or (result[0] == 0 and result[1] == 0):
@@ -924,11 +919,10 @@ def supplier_product_methods(request, supplier_id):
         if cache_result:
             return Response(cache_result)
         
-        # Use a safer query with proper handling of NULL values and a timeout
+        # Use a safer query with proper handling of NULL values
         with connection.cursor() as cursor:
             try:
-                # Set a statement timeout to prevent long-running queries (1 second)
-                cursor.execute("SET statement_timeout = 1000")
+                # Remove the statement timeout that's causing syntax errors
                 
                 cursor.execute("""
                     SELECT DISTINCT match_method
@@ -941,8 +935,8 @@ def supplier_product_methods(request, supplier_id):
                 
                 methods = [row[0] for row in cursor.fetchall() if row[0]]
             finally:
-                # Always reset the timeout to default, even if there's an error
-                cursor.execute("SET statement_timeout = 0")
+                # No need to reset the timeout since we're not setting it
+                pass
             
         # Return the match methods
         response_data = {
