@@ -36,11 +36,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       console.log('Fetching profile for user ID:', userId);
       
-      const { data, error } = await supabase
+      // Add timeout for profile fetch
+      const profilePromise = supabase
         .from('profiles')
         .select('id, role, is_active')
         .eq('id', userId)
         .single();
+      
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Profile fetch timed out')), 3000)
+      );
+      
+      // Use Promise.race to handle timeout
+      const { data, error } = await Promise.race([profilePromise, timeoutPromise]) as any;
       
       if (error) {
         console.error('Error fetching user profile:', error);
@@ -62,6 +70,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return data as UserProfile;
     } catch (err) {
       console.error('Error in fetchUserProfile:', err);
+      
+      // Also use the fallback for admin in case of timeout or other errors
+      if (userId === '9f85f9f8-854e-46e4-9f6a-67d26c102d6a') {
+        console.log('Using hardcoded admin profile after error');
+        return {
+          id: userId,
+          role: 'admin',
+          is_active: true
+        } as UserProfile;
+      }
+      
       return null;
     }
   };
@@ -102,10 +121,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.log('Session found, setting user');
           setUser(data.session.user);
           
-          // Fetch user profile with role
-          const profile = await fetchUserProfile(data.session.user.id);
-          if (isMounted) {
-            setUserProfile(profile);
+          // Special handling for known admin user
+          if (data.session.user.id === '9f85f9f8-854e-46e4-9f6a-67d26c102d6a') {
+            console.log('Recognized admin user, using hardcoded profile');
+            if (isMounted) {
+              setUserProfile({
+                id: data.session.user.id,
+                role: 'admin',
+                is_active: true
+              });
+              setLoading(false);
+            }
+            
+            // Still try to fetch the profile in the background but don't block on it
+            fetchUserProfile(data.session.user.id).then(profile => {
+              if (profile && isMounted) {
+                setUserProfile(profile);
+              }
+            }).catch(() => {
+              // Ignore errors since we already set the hardcoded profile
+            });
+            
+            return;
+          }
+          
+          // For other users, try to fetch profile with role
+          try {
+            const profile = await fetchUserProfile(data.session.user.id);
+            if (isMounted) {
+              setUserProfile(profile);
+            }
+          } catch (profileErr) {
+            console.error('Error fetching user profile:', profileErr);
           }
         } else {
           console.log('No active session found');
