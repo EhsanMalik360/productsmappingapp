@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, ExternalLink, Link, Info, Search, Filter, X, ArrowDownAZ, DollarSign, TrendingUp, Tag, ChevronLeft, ChevronRight, RefreshCcw } from 'lucide-react';
 import Card from '../UI/Card';
@@ -42,8 +42,54 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const [hasInitializedFilters, setHasInitializedFilters] = useState(false);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   
+  // Add refs to track component mount state and pending requests
+  const isMounted = useRef(true);
+  const pendingRequests = useRef<{[key: string]: AbortController}>({});
+  const isInitialMount = useRef(true);
+  const dataLoadAttempted = useRef(false);
+  
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      isMounted.current = false;
+      // Cancel all pending requests on unmount
+      Object.values(pendingRequests.current).forEach(controller => {
+        controller.abort();
+      });
+    };
+  }, []);
+  
+  // Helper function to create an abort controller and track request
+  const createRequest = useCallback((requestKey: string) => {
+    // Cancel existing request with the same key if any
+    if (pendingRequests.current[requestKey]) {
+      pendingRequests.current[requestKey].abort();
+    }
+    
+    const controller = new AbortController();
+    pendingRequests.current[requestKey] = controller;
+    
+    return {
+      signal: controller.signal,
+      cleanup: () => {
+        if (pendingRequests.current[requestKey] === controller) {
+          delete pendingRequests.current[requestKey];
+        }
+      }
+    };
+  }, []);
+  
   // Fetch data when component mounts or parameters change
   const loadData = useCallback(async () => {
+    // Prevent loading if component is unmounted
+    if (!isMounted.current) return;
+    
+    // Create a unique key for this request to prevent duplicates
+    const requestKey = `loadData_${supplierId}_${currentPage}_${itemsPerPage}_${searchTerm}_${filterOption}_${JSON.stringify(costRange)}_${matchMethodFilter}_${sortField}_${sortOrder}`;
+    
+    // Setup request tracking and abort controller
+    const { signal, cleanup } = createRequest(requestKey);
+    
     try {
       // Only show loading state for subsequent loads, not initial load
       if (initialLoadComplete) {
@@ -65,6 +111,9 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         }
       );
       
+      // Don't update state if component unmounted or request was cancelled
+      if (!isMounted.current || signal.aborted) return;
+      
       setSupplierProductsData(result.data);
       setTotalCount(result.count);
     
@@ -75,31 +124,71 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       
       // Mark initial load as complete
       setInitialLoadComplete(true);
+      dataLoadAttempted.current = true;
       
     } catch (error) {
-      console.error('Error loading supplier products:', error);
+      // Only log errors if not caused by abort
+      if (!signal.aborted) {
+        console.error('Error loading supplier products:', error);
+      }
     } finally {
-      setIsLoading(false);
-    }
-  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters, initialLoadComplete]);
-  
-  // Load filter statistics (match stats, cost range, match methods)
-  const loadFilterStats = useCallback(async () => {
-    try {
-      // Fetch total count stats for matched/unmatched
-      const matchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'matched' });
-      const unmatchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'unmatched' });
-      const totalResult = await fetchSupplierProducts(supplierId, 1, 1);
+      // Clean up this request
+      cleanup();
       
+      // Only update loading state if still mounted and not aborted
+      if (isMounted.current && !signal.aborted) {
+        setIsLoading(false);
+      }
+    }
+  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters, initialLoadComplete, createRequest]);
+  
+  // Load filter statistics with proper request tracking
+  const loadFilterStats = useCallback(async () => {
+    // Skip if component is unmounted
+    if (!isMounted.current) return;
+    
+    // Create a unique request key
+    const requestKey = `loadFilterStats_${supplierId}`;
+    const { signal, cleanup } = createRequest(requestKey);
+    
+    try {
+      // Fetch using safer promise handling patterns
+      // Convert all UUIDs to strings in requests to avoid DB type errors
+      const stringifiedSupplierId = String(supplierId);
+      
+      // First get total count
+      const totalPromise = fetchSupplierProducts(stringifiedSupplierId, 1, 1);
+      
+      // Then get matched and unmatched counts - but don't wait yet
+      const matchedPromise = fetchSupplierProducts(stringifiedSupplierId, 1, 1, { filterOption: 'matched' });
+      const unmatchedPromise = fetchSupplierProducts(stringifiedSupplierId, 1, 1, { filterOption: 'unmatched' });
+      
+      // Wait for total result first
+      const totalResult = await totalPromise;
+      
+      // Check if request was aborted or component unmounted
+      if (signal.aborted || !isMounted.current) return;
+      
+      // Now wait for the remaining promises
+      const [matchedResult, unmatchedResult] = await Promise.all([
+        matchedPromise,
+        unmatchedPromise
+      ]);
+      
+      // Check again if aborted or unmounted
+      if (signal.aborted || !isMounted.current) return;
+      
+      // Update match stats
       setMatchStats({
-        total: totalResult.count,
-        matched: matchedResult.count,
-        unmatched: unmatchedResult.count
+        total: totalResult.count || 0,
+        matched: matchedResult.count || 0,
+        unmatched: unmatchedResult.count || 0
       });
       
-      // Fetch min/max cost with improved error handling
+      // Fetch cost stats
       try {
-        const response = await fetch(`/api/supplier-product-stats/${supplierId}`)
+        // Set an abort signal for this fetch
+        const response = await fetch(`/api/supplier-product-stats/${stringifiedSupplierId}`, { signal })
           .then(res => {
             if (!res.ok) {
               throw new Error(`API returned ${res.status}: ${res.statusText}`);
@@ -107,63 +196,96 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
             return res.json();
           });
           
+        // Check if aborted or unmounted
+        if (signal.aborted || !isMounted.current) return;
+          
         if (response && response.data) {
-          setCostStats({
-            min: response.data.minCost || 0,
-            max: response.data.maxCost || 1000
-          });
-
-          // Initialize cost range filter with the full range
-          setCostRange({
-            min: response.data.minCost || 0,
-            max: response.data.maxCost || 1000
-          });
+          const min = response.data.minCost || 0;
+          const max = response.data.maxCost || 1000;
+          
+          setCostStats({ min, max });
+          // Only set cost range once to avoid triggering rerenders
+          if (!hasInitializedFilters) {
+            setCostRange({ min, max });
+          }
         }
-      } catch (costError) {
-        console.error('Error fetching cost stats:', costError);
-        // Use fallback values if API fails
-        const fallbackMax = Math.max(...supplierProductsData.map(sp => sp.cost || 0), 1000);
-        setCostStats({
-          min: 0,
-          max: fallbackMax
-        });
-        setCostRange({
-          min: 0, 
-          max: fallbackMax
-        });
+      } catch (costError: any) {
+        // Only log if not aborted
+        if (!signal.aborted) {
+          console.error('Error fetching cost stats:', costError);
+          // Use fallback values if API fails
+          const fallbackMax = Math.max(...supplierProductsData.map(sp => sp.cost || 0), 1000);
+          const min = 0;
+          const max = fallbackMax;
+          
+          setCostStats({ min, max });
+          // Only set cost range once to avoid triggering rerenders
+          if (!hasInitializedFilters) {
+            setCostRange({ min, max });
+          }
+        }
       }
       
-      // Fetch unique match methods with improved error handling
+      // Fetch match methods
       try {
-        const response = await fetch(`/api/supplier-product-methods/${supplierId}`)
+        const response = await fetch(`/api/supplier-product-methods/${stringifiedSupplierId}`, { signal })
           .then(res => {
             if (!res.ok) {
               throw new Error(`API returned ${res.status}: ${res.statusText}`);
             }
             return res.json();
           });
+        
+        // Check if aborted or unmounted
+        if (signal.aborted || !isMounted.current) return;
           
         if (response && response.data && response.data.matchMethods) {
           setMatchMethods(response.data.matchMethods);
         }
-      } catch (methodsError) {
-        console.error('Error fetching match methods:', methodsError);
-        // Use empty array as fallback
-        setMatchMethods([]);
+      } catch (methodsError: any) {
+        // Only log if not aborted
+        if (!signal.aborted) {
+          console.error('Error fetching match methods:', methodsError);
+          setMatchMethods([]);
+        }
       }
       
       setHasInitializedFilters(true);
-    } catch (error) {
-      console.error('Error loading filter stats:', error);
-      // Ensure we still mark filters as initialized even on error
-      // to prevent endless retry loops
-      setHasInitializedFilters(true);
+    } catch (error: any) {
+      // Only log if not aborted
+      if (!signal.aborted) {
+        console.error('Error loading filter stats:', error);
+        // Still mark filters as initialized to prevent endless retry loops
+        setHasInitializedFilters(true);
+      }
+    } finally {
+      cleanup();
     }
-  }, [supplierId, fetchSupplierProducts, supplierProductsData]);
+  }, [supplierId, fetchSupplierProducts, supplierProductsData, hasInitializedFilters, createRequest]);
 
-  // Load data when component mounts or when parameters change
+  // Load data when component mounts or when parameters change - with debouncing
   useEffect(() => {
-    loadData();
+    // Skip the automatic load on first render, we'll handle it with the isInitialMount ref
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return;
+    }
+    
+    // Use a debounce timer to avoid excessive API calls
+    const timer = setTimeout(() => {
+      loadData();
+    }, 300); // 300ms debounce
+    
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [loadData]);
+  
+  // Initial data load - executed only once
+  useEffect(() => {
+    if (!dataLoadAttempted.current) {
+      loadData();
+    }
   }, [loadData]);
 
   // Join with product data for additional information

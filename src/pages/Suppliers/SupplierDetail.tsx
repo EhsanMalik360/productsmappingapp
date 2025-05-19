@@ -527,7 +527,7 @@ const SupplierDetail: React.FC = () => {
                       }}
                       className="w-full px-2 py-1 border rounded"
                     />
-                  ) : (
+                      ) : (
                     <p className="text-gray-800">{value || '-'}</p>
                       )}
                     </div>

@@ -826,12 +826,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } = {}
   ) => {
     try {
+      // Ensure supplierId is a string to avoid UUID type errors in database queries
+      const safeSupplierIdString = String(supplierId);
+      
       // Generate a unique key for this specific API call to deduplicate
-      const requestKey = `supplier_products_${supplierId}_${page}_${pageSize}_${JSON.stringify(filters)}`;
+      const requestKey = `supplier_products_${safeSupplierIdString}_${page}_${pageSize}_${JSON.stringify(filters)}`;
       
       // Use throttling to prevent multiple identical calls
       const result = await throttleApiCall(requestKey, async () => {
-        console.log(`Fetching supplier products for supplier ${supplierId}, page ${page}, size ${pageSize}`);
+        console.log(`Fetching supplier products for supplier ${safeSupplierIdString}, page ${page}, size ${pageSize}`);
         
         // Calculate start and end for pagination
         const start = (page - 1) * pageSize;
@@ -859,7 +862,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               name
             )
           `, { count: 'exact' })
-          .eq('supplier_id', supplierId);
+          .eq('supplier_id', safeSupplierIdString);
         
         // Apply filter for matched/unmatched products
         if (filters.filterOption === 'matched') {
@@ -897,7 +900,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const sortFieldMap: {[key: string]: string} = {
             'name': 'product_name',
             'cost': 'cost',
-            // Other mappings as needed
+            'price': 'price',
+            'profit': 'profit',
+            'margin': 'margin'
           };
           
           const dbSortField = sortFieldMap[filters.sortField] || filters.sortField;
@@ -912,12 +917,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // Apply pagination
         query = query.range(start, end);
         
-        // Execute query
+        // Execute query with error handling
         const { data, error, count } = await query;
         
-        if (error) throw error;
+        if (error) {
+          console.error('Supabase query error:', error);
+          throw error;
+        }
         
-        return { data, count };
+        return { 
+          data: data || [], 
+          count: count || 0
+        };
       });
       
       // If throttled (already in progress), return empty results

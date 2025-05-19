@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Table from '../../components/UI/Table';
@@ -28,6 +28,8 @@ const Products: React.FC = () => {
   const [priceStats, setPriceStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
   const [dataLoaded, setDataLoaded] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
+  const isMounted = useRef(true);
+  const activeRequests = useRef<AbortController[]>([]);
   
   // Load data with debounce to prevent multiple API calls
   const loadData = useCallback(async () => {
@@ -36,6 +38,10 @@ const Products: React.FC = () => {
       console.log('Skipping data load during navigation');
       return;
     }
+    
+    // Create abort controller for this request
+    const controller = new AbortController();
+    activeRequests.current.push(controller);
     
     try {
       console.log('Loading products data...');
@@ -50,10 +56,20 @@ const Products: React.FC = () => {
       };
       
       const result = await fetchProducts(currentPage, itemsPerPage, filters);
-      console.log(`Loaded ${result.data.length} products`);
-      setDataLoaded(true);
+      
+      // Check if component is still mounted and request wasn't aborted
+      if (isMounted.current && !controller.signal.aborted) {
+        console.log(`Loaded ${result.data.length} products`);
+        setDataLoaded(true);
+      }
     } catch (error) {
-      console.error('Error loading products:', error);
+      // Only log if not aborted and component is mounted
+      if (isMounted.current && !controller.signal.aborted) {
+        console.error('Error loading products:', error);
+      }
+    } finally {
+      // Remove this controller from active requests
+      activeRequests.current = activeRequests.current.filter(c => c !== controller);
     }
   }, [
     currentPage,
@@ -69,6 +85,22 @@ const Products: React.FC = () => {
     isNavigating
   ]);
   
+  // Track navigation state
+  useEffect(() => {
+    // This runs when component mounts - reset navigation state
+    setIsNavigating(false);
+    
+    return () => {
+      // When component unmounts (navigating away), set flag to true
+      // and cancel all active requests
+      isMounted.current = false;
+      setIsNavigating(true);
+      activeRequests.current.forEach(controller => {
+        controller.abort();
+      });
+    };
+  }, []);
+  
   // Create a debounced version of loadData with useEffect
   useEffect(() => {
     // Skip initial load to prevent double-loading
@@ -76,7 +108,10 @@ const Products: React.FC = () => {
     
     // Use a small delay to batch rapid changes
     const timer = setTimeout(() => {
-      loadData();
+      // Only load if not navigating away
+      if (!isNavigating && isMounted.current) {
+        loadData();
+      }
     }, 300);
     
     return () => clearTimeout(timer);
@@ -91,50 +126,61 @@ const Products: React.FC = () => {
     sortField,
     sortOrder,
     loadData,
-    dataLoaded
+    dataLoaded,
+    isNavigating
   ]);
   
   // Initial data load
   useEffect(() => {
-    loadData();
-    loadMetadata();
-  }, []);
-  
-  // Track navigation state
-  useEffect(() => {
-    // This runs when component mounts - initial navigation start
-    setIsNavigating(true);
-    
-    // After a short delay, assume navigation is complete
-    const timer = setTimeout(() => {
-      setIsNavigating(false);
-    }, 500);
-    
-    // Cleanup
-    return () => {
-      clearTimeout(timer);
-      // When component unmounts (navigating away), set flag to true
-      setIsNavigating(true);
-    };
+    // Only run if not navigating away and component is mounted
+    if (!isNavigating && isMounted.current) {
+      loadData();
+      loadMetadata();
+    }
   }, []);
   
   // Load metadata (brands, categories, price range)
   const loadMetadata = async () => {
+    // Skip if navigating or unmounted
+    if (isNavigating || !isMounted.current) return;
+    
+    // Create abort controller
+    const controller = new AbortController();
+    activeRequests.current.push(controller);
+    
     try {
       // Load brands
       const brandsData = await getBrands();
+      
+      // Check if still mounted and not aborted
+      if (!isMounted.current || controller.signal.aborted) return;
+      
       setBrands(brandsData);
       
       // Load categories
       const categoriesData = await getCategories();
+      
+      // Check again
+      if (!isMounted.current || controller.signal.aborted) return;
+      
       setCategories(categoriesData);
       
       // Load price range
       const priceRangeData = await getPriceRange();
+      
+      // Final check
+      if (!isMounted.current || controller.signal.aborted) return;
+      
       setPriceStats(priceRangeData);
       setPriceRange(priceRangeData);
     } catch (error) {
-      console.error('Error loading metadata:', error);
+      // Only log if mounted and not aborted
+      if (isMounted.current && !controller.signal.aborted) {
+        console.error('Error loading metadata:', error);
+      }
+    } finally {
+      // Remove this controller
+      activeRequests.current = activeRequests.current.filter(c => c !== controller);
     }
   };
   
