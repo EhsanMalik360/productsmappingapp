@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, RefreshCcw, Edit, Save, X } from 'lucide-react';
+import { ArrowLeft, RefreshCcw, Edit, Save, X, Loader2 } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
@@ -31,6 +31,7 @@ const SupplierDetail: React.FC = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [dataFetched, setDataFetched] = useState(false);
   const [totalProductCount, setTotalProductCount] = useState(0);
+  const [countLoading, setCountLoading] = useState(false);
   
   // Edit mode states
   const [isEditing, setIsEditing] = useState(false);
@@ -55,7 +56,8 @@ const SupplierDetail: React.FC = () => {
     if (!normalizedId) return;
     
     try {
-      setStatsLoading(true);
+      // Track loading state for the count specifically
+      setCountLoading(true);
       
       // Fetch the total, matched, and unmatched counts from the server
       const totalResult = await fetchSupplierProducts(normalizedId, 1, 1);
@@ -65,7 +67,7 @@ const SupplierDetail: React.FC = () => {
     } catch (error) {
       console.error('Error fetching total product count:', error);
     } finally {
-      setStatsLoading(false);
+      setCountLoading(false);
     }
   }, [normalizedId, fetchSupplierProducts]);
 
@@ -373,41 +375,35 @@ const SupplierDetail: React.FC = () => {
       <Card className="mb-6">
         <h2 className="text-xl font-semibold mb-4">Supplier Overview</h2>
         
-        {statsLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="bg-gray-100 p-4 rounded-lg animate-pulse">
-                <div className="h-4 bg-gray-200 rounded w-20 mb-2"></div>
-                <div className="h-8 bg-gray-200 rounded w-16"></div>
-              </div>
-            ))}
-              </div>
-            ) : (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="text-sm text-blue-700 mb-1">Total Products</div>
-              <div className="text-2xl font-bold">{totalProductCount || supplierProductsList.length}</div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+          <div className="bg-blue-50 p-4 rounded-lg">
+            <div className="text-sm text-blue-700 mb-1">Total Products</div>
+            <div className="text-2xl font-bold flex items-center">
+              {totalProductCount || supplierProductsList.length}
+              {countLoading && (
+                <Loader2 className="w-4 h-4 text-blue-500 animate-spin ml-2" />
+              )}
             </div>
-        
-            <div className="bg-green-50 p-4 rounded-lg">
-              <div className="text-sm text-green-700 mb-1">Matched Products</div>
-              <div className="text-2xl font-bold">{matchedProducts}</div>
-              <div className="text-sm text-green-700">
-                ({totalProductCount > 0 ? Math.round((matchedProducts / totalProductCount) * 100) : 0}%)
-              </div>
-            </div>
+          </div>
       
-            <div className="bg-amber-50 p-4 rounded-lg">
-              <div className="text-sm text-amber-700 mb-1">Average Cost</div>
-              <div className="text-2xl font-bold">${avgCost.toFixed(2)}</div>
+          <div className="bg-green-50 p-4 rounded-lg">
+            <div className="text-sm text-green-700 mb-1">Matched Products</div>
+            <div className="text-2xl font-bold">{matchedProducts}</div>
+            <div className="text-sm text-green-700">
+              ({totalProductCount > 0 ? Math.round((matchedProducts / totalProductCount) * 100) : 0}%)
             </div>
-            
-            <div className="bg-purple-50 p-4 rounded-lg">
-              <div className="text-sm text-purple-700 mb-1">Avg Profit Margin</div>
-              <div className="text-2xl font-bold">{avgProfitMargin.toFixed(1)}%</div>
-            </div>
+          </div>
+    
+          <div className="bg-amber-50 p-4 rounded-lg">
+            <div className="text-sm text-amber-700 mb-1">Average Cost</div>
+            <div className="text-2xl font-bold">${avgCost.toFixed(2)}</div>
+          </div>
+          
+          <div className="bg-purple-50 p-4 rounded-lg">
+            <div className="text-sm text-purple-700 mb-1">Avg Profit Margin</div>
+            <div className="text-2xl font-bold">{avgProfitMargin.toFixed(1)}%</div>
+          </div>
         </div>
-        )}
         
         {/* Custom Attributes Section */}
         {customAttributes.length > 0 && (
@@ -535,7 +531,12 @@ const SupplierDetail: React.FC = () => {
                 </tr>
                 <tr className="border-b border-gray-200">
                   <td className="px-2 py-1.5 font-medium">Total Products</td>
-                  <td className="px-2 py-1.5">{totalProductCount || supplierProductsList.length}</td>
+                  <td className="px-2 py-1.5 flex items-center">
+                    {totalProductCount || supplierProductsList.length}
+                    {countLoading && (
+                      <Loader2 className="w-3 h-3 text-blue-500 animate-spin ml-2" />
+                    )}
+                  </td>
                 </tr>
                 <tr className="border-b border-gray-200">
                   <td className="px-2 py-1.5 font-medium">Matched Products</td>
