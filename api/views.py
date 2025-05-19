@@ -829,7 +829,7 @@ def supplier_product_stats(request, supplier_id):
                     MIN(cost) as min_cost,
                     MAX(cost) as max_cost
                 FROM supplier_products
-                WHERE supplier_id::text = %s
+                WHERE supplier_id = %s
             """, [supplier_id_str])
             
             result = cursor.fetchone()
@@ -878,7 +878,7 @@ def supplier_product_methods(request, supplier_id):
             cursor.execute("""
                 SELECT DISTINCT match_method
                 FROM supplier_products
-                WHERE supplier_id::text = %s AND match_method IS NOT NULL
+                WHERE supplier_id = %s AND match_method IS NOT NULL
             """, [supplier_id_str])
             
             methods = [row[0] for row in cursor.fetchall()]
