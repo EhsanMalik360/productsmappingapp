@@ -1435,20 +1435,40 @@ def process_product_file(job):
                 # Apply fix for scientific notation on EAN values
                 ean = fix_scientific_notation(ean_raw)
                 
-                # Skip rows with missing or already seen EANs to avoid constraint violations
-                if not ean or ean.lower() == 'nan' or ean.lower() == 'none' or ean in seen_eans:
-                    skipped_count += 1
-                    if index < 10 or index % 1000 == 0:  # Log first few skips and periodic samples
-                        print(f"Row {index}: Skipping product with invalid or duplicate EAN: '{ean_raw}', current skipped count: {skipped_count}")
-                    continue
-                
-                # Remember this EAN to prevent duplicates in the same batch
-                seen_eans.add(ean)
-                if index < 10 or index % 1000 == 0 or index == total_rows - 1:  # Log periodically
-                    print(f"Row {index}: Added EAN '{ean}' to tracking set")
-                
                 # Get brand with default
                 brand = str(row[field_mapping['brand']]).strip() if row[field_mapping['brand']] else "Unknown Brand"
+                
+                # NEW LOGIC: Skip only if brand or title is missing/empty
+                if not title.strip() or title.lower() == 'nan' or title.lower() == 'none' or title == "Untitled Product":
+                    skipped_count += 1
+                    if index < 10 or index % 1000 == 0:  # Log first few skips and periodic samples
+                        print(f"Row {index}: Skipping product with missing title, current skipped count: {skipped_count}")
+                    continue
+                
+                if not brand.strip() or brand.lower() == 'nan' or brand.lower() == 'none' or brand == "Unknown Brand":
+                    skipped_count += 1
+                    if index < 10 or index % 1000 == 0:  # Log first few skips and periodic samples
+                        print(f"Row {index}: Skipping product with missing brand, current skipped count: {skipped_count}")
+                    continue
+                
+                # For duplicate EANs, skip the duplicate entry
+                if ean and ean in seen_eans:
+                    skipped_count += 1
+                    if index < 10 or index % 1000 == 0:  # Log first few skips and periodic samples
+                        print(f"Row {index}: Skipping duplicate EAN: '{ean}', current skipped count: {skipped_count}")
+                    continue
+                
+                # For missing EANs, keep the field empty
+                if ean and ean.lower() != 'nan' and ean.lower() != 'none':
+                    # Remember this EAN to prevent duplicates in the same batch
+                    seen_eans.add(ean)
+                    if index < 10 or index % 1000 == 0 or index == total_rows - 1:  # Log periodically
+                        print(f"Row {index}: Added EAN '{ean}' to tracking set")
+                else:
+                    # Missing EAN, keep it empty
+                    ean = ""
+                    if index < 10 or index % 1000 == 0:  # Log periodically
+                        print(f"Row {index}: Empty EAN, keeping field empty")
                 
                 # Handle numeric fields carefully
                 try:
@@ -1732,7 +1752,7 @@ def process_product_file(job):
         job.results = job_results
         
         # Set status message with full details
-        status_message = f"Import completed: {successful_count} products imported, {error_count} errors, {skipped_count} skipped (invalid EANs)"
+        status_message = f"Import completed: {successful_count} products imported, {error_count} errors, {skipped_count} skipped (missing title/brand or duplicate EANs)"
         print(f"[DEBUG RESULTS] Setting job.status_message to: '{status_message}'")
         job.status_message = status_message
         
