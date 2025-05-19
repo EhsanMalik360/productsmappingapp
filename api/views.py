@@ -819,6 +819,9 @@ def supplier_product_stats(request, supplier_id):
     Used for filtering in the frontend
     """
     try:
+        # Convert UUID to string to avoid type binding issues
+        supplier_id_str = str(supplier_id)
+        
         # Query the database for cost statistics
         with connection.cursor() as cursor:
             cursor.execute("""
@@ -827,7 +830,7 @@ def supplier_product_stats(request, supplier_id):
                     MAX(cost) as max_cost
                 FROM supplier_products
                 WHERE supplier_id = %s
-            """, [supplier_id])
+            """, [supplier_id_str])
             
             result = cursor.fetchone()
             
@@ -867,13 +870,16 @@ def supplier_product_methods(request, supplier_id):
     Used for filtering in the frontend
     """
     try:
+        # Convert UUID to string to avoid type binding issues
+        supplier_id_str = str(supplier_id)
+        
         # Query the database for unique match methods
         with connection.cursor() as cursor:
             cursor.execute("""
                 SELECT DISTINCT match_method
                 FROM supplier_products
                 WHERE supplier_id = %s AND match_method IS NOT NULL
-            """, [supplier_id])
+            """, [supplier_id_str])
             
             methods = [row[0] for row in cursor.fetchall()]
             

@@ -142,21 +142,33 @@ const Suppliers: React.FC = () => {
             // Get matched count
             const matchedResult = await fetchSupplierProducts(supplier.id, 1, 1, { filterOption: 'matched' });
             
-            // Calculate average cost (approximation)
-            const { data: costData } = await fetch(`/api/supplier-product-stats/${supplier.id}`)
-              .then(res => res.json())
-              .catch(() => ({ data: null }));
-            
-            const avgCost = costData ? (costData.minCost + costData.maxCost) / 2 : 0;
-            
-            // Calculate best value count - this is more complex and might need a server endpoint
-            // For now, we'll continue using client-side calculation
+            // Calculate best value count
             const bestValue = calculateBestValueCount(supplier.id);
             
-            // Create stats object
+            // Calculate average cost (approximation)
+            let avgCost = 0;
+            try {
+              const response = await fetch(`/api/supplier-product-stats/${supplier.id}`)
+                .then(res => {
+                  if (!res.ok) {
+                    throw new Error(`API returned ${res.status}: ${res.statusText}`);
+                  }
+                  return res.json();
+                });
+              
+              if (response && response.data) {
+                // If we have min and max cost, use their average as an approximation
+                avgCost = (response.data.minCost + response.data.maxCost) / 2;
+              }
+            } catch (statsError) {
+              console.error(`Error fetching cost stats for supplier ${supplier.id}:`, statsError);
+              avgCost = calculateAverageCost(supplier.id);
+            }
+            
+            // Create stats object with all the data we've gathered
             const stats: SupplierStats = {
               productCount: totalResult.count || 0,
-              avgCost: avgCost || 0,
+              avgCost: avgCost,
               bestValueCount: bestValue
             };
             

@@ -94,12 +94,17 @@ const SupplierDetail: React.FC = () => {
       
       // Try to use the cost stats endpoint if available
       try {
-        const { data: costData } = await fetch(`/api/supplier-product-stats/${normalizedId}`)
-          .then(res => res.json());
+        const response = await fetch(`/api/supplier-product-stats/${normalizedId}`)
+          .then(res => {
+            if (!res.ok) {
+              throw new Error(`API returned ${res.status}: ${res.statusText}`);
+            }
+            return res.json();
+          });
           
-        if (costData) {
+        if (response && response.data) {
           // If we have min and max cost, use their average as an approximation
-          avgCost = (costData.minCost + costData.maxCost) / 2;
+          avgCost = (response.data.minCost + response.data.maxCost) / 2;
         }
       } catch (e) {
         console.error('Error fetching cost stats:', e);
