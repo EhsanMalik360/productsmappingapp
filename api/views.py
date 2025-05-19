@@ -4,6 +4,7 @@ from django.utils import timezone
 from django.conf import settings
 from django.db.models import Q
 from django.views.decorators.csrf import csrf_exempt
+from django.core.cache import cache
 from rest_framework import status, viewsets
 from rest_framework.decorators import api_view, permission_classes, parser_classes
 from rest_framework.parsers import MultiPartParser, FormParser
@@ -14,7 +15,7 @@ import os
 import uuid
 import json
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from .models import Product, Supplier, SupplierProduct, ImportJob, ImportHistory
 from .serializers import (
@@ -822,36 +823,79 @@ def supplier_product_stats(request, supplier_id):
         # Convert UUID to string to avoid type binding issues
         supplier_id_str = str(supplier_id)
         
-        # Query the database for cost statistics
+        # Check cache first to avoid repeated database hits
+        cache_key = f"supplier_stats_{supplier_id_str}"
+        cache_result = cache.get(cache_key)
+        
+        if cache_result:
+            return Response(cache_result)
+        
+        # Use a more efficient SQL query with better error handling
+        # and a query timeout to prevent long-running queries
         with connection.cursor() as cursor:
+            # Set a statement timeout to prevent long-running queries (1 second)
+            cursor.execute("SET statement_timeout = 1000")
+            
+            # Use a more efficient query that handles NULL values properly
             cursor.execute("""
                 SELECT 
-                    MIN(cost) as min_cost,
-                    MAX(cost) as max_cost
+                    COALESCE(MIN(cost), 0) as min_cost,
+                    COALESCE(MAX(cost), 100) as max_cost
                 FROM supplier_products
                 WHERE supplier_id = %s
+                  AND cost IS NOT NULL
             """, [supplier_id_str])
             
             result = cursor.fetchone()
             
-        # Handle case where no products exist
-        if not result or not result[0]:
-            return Response({
+            # Reset the timeout to default
+            cursor.execute("SET statement_timeout = 0")
+        
+        # Handle case where no products exist or all costs are NULL
+        if not result or (result[0] == 0 and result[1] == 0):
+            response_data = {
                 'data': {
                     'minCost': 0,
                     'maxCost': 100
                 },
                 'error': None
-            })
+            }
+            
+            # Cache the result for 5 minutes
+            cache.set(cache_key, response_data, 300)
+            return Response(response_data)
         
-        # Return the cost range
-        return Response({
-            'data': {
-                'minCost': float(result[0]),
-                'maxCost': float(result[1])
-            },
-            'error': None
-        })
+        # Ensure values are valid numbers and handle Decimal conversion safely
+        try:
+            min_cost = float(result[0]) if result[0] is not None else 0
+            max_cost = float(result[1]) if result[1] is not None else 100
+            
+            # Ensure max is at least min + 1 to avoid empty ranges
+            if max_cost <= min_cost:
+                max_cost = min_cost + 1
+                
+            response_data = {
+                'data': {
+                    'minCost': min_cost,
+                    'maxCost': max_cost
+                },
+                'error': None
+            }
+            
+            # Cache the result for 5 minutes
+            cache.set(cache_key, response_data, 300)
+            return Response(response_data)
+        except (TypeError, ValueError) as e:
+            # Handle conversion errors
+            print(f"Error converting cost values: {str(e)}")
+            response_data = {
+                'data': {
+                    'minCost': 0,
+                    'maxCost': 100
+                },
+                'error': f"Data conversion error: {str(e)}"
+            }
+            return Response(response_data)
         
     except Exception as e:
         print(f"Error fetching supplier product stats: {str(e)}")
@@ -873,25 +917,47 @@ def supplier_product_methods(request, supplier_id):
         # Convert UUID to string to avoid type binding issues
         supplier_id_str = str(supplier_id)
         
-        # Query the database for unique match methods
+        # Check cache first
+        cache_key = f"supplier_methods_{supplier_id_str}"
+        cache_result = cache.get(cache_key)
+        
+        if cache_result:
+            return Response(cache_result)
+        
+        # Use a safer query with proper handling of NULL values and a timeout
         with connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT DISTINCT match_method
-                FROM supplier_products
-                WHERE supplier_id = %s AND match_method IS NOT NULL
-            """, [supplier_id_str])
-            
-            methods = [row[0] for row in cursor.fetchall()]
+            try:
+                # Set a statement timeout to prevent long-running queries (1 second)
+                cursor.execute("SET statement_timeout = 1000")
+                
+                cursor.execute("""
+                    SELECT DISTINCT match_method
+                    FROM supplier_products
+                    WHERE supplier_id = %s 
+                      AND match_method IS NOT NULL
+                      AND match_method != ''
+                    LIMIT 20
+                """, [supplier_id_str])
+                
+                methods = [row[0] for row in cursor.fetchall() if row[0]]
+            finally:
+                # Always reset the timeout to default, even if there's an error
+                cursor.execute("SET statement_timeout = 0")
             
         # Return the match methods
-        return Response({
+        response_data = {
             'data': {
                 'matchMethods': methods
             },
             'error': None
-        })
+        }
+        
+        # Cache the result for 5 minutes
+        cache.set(cache_key, response_data, 300)
+        return Response(response_data)
         
     except Exception as e:
+        # Catch all exceptions and return a safe response
         print(f"Error fetching supplier product match methods: {str(e)}")
         return Response({
             'data': {

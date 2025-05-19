@@ -2,6 +2,8 @@ from supabase import create_client
 import os
 from django.conf import settings
 import re
+import time
+from django.db import OperationalError
 
 def get_supabase_client():
     """
@@ -263,19 +265,56 @@ def fetch_supplier_products(supplier_id=None, product_id=None, limit=50, offset=
     """
     Fetch supplier products with optional filtering by supplier or product
     """
-    supabase = get_supabase_client()
-    query = supabase.table('supplier_products').select('*')
-    
+    # Apply reasonable defaults and limits to prevent excessive queries
+    if limit > 500:
+        limit = 500  # Cap at a reasonable maximum
+        
+    # Convert IDs to strings to avoid UUID type binding errors
     if supplier_id:
-        query = query.eq('supplier', supplier_id)
-    
+        supplier_id = str(supplier_id)
     if product_id:
-        query = query.eq('product', product_id)
+        product_id = str(product_id)
     
-    # Add pagination
-    query = query.range(offset, offset + limit - 1)
+    # Get Supabase client with retries
+    max_retries = 3
+    retry_delay = 0.5  # seconds
     
-    return query.execute()
+    for attempt in range(max_retries):
+        try:
+            # Get a fresh client for each retry to avoid connection issues
+            supabase = get_supabase_client()
+            query = supabase.table('supplier_products').select('*')
+            
+            if supplier_id:
+                query = query.eq('supplier_id', supplier_id)
+            
+            if product_id:
+                query = query.eq('product_id', product_id)
+            
+            # Add pagination
+            query = query.range(offset, offset + limit - 1)
+            
+            # Set a request timeout to prevent hanging requests
+            result = query.execute(count_option='exact', timeout=5000)  # 5 second timeout
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error fetching supplier products (attempt {attempt+1}): {str(e)}")
+            
+            # If this is the last retry, raise the exception
+            if attempt == max_retries - 1:
+                # Return empty result instead of raising, to improve resilience
+                return {
+                    "data": [],
+                    "count": 0,
+                    "error": str(e)
+                }
+            
+            # Wait before retrying
+            time.sleep(retry_delay)
+            # Increase delay for next retry
+            retry_delay *= 2
 
 
 def create_or_update_record(table, data, id_field='id', id_value=None):
