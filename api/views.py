@@ -28,6 +28,7 @@ from .utils import (
     fetch_supplier_products, create_or_update_record, delete_record,
     detect_and_fix_duplicate_supplier_products
 )
+from django.db import connection
 
 # Health check
 @api_view(['GET'])
@@ -808,4 +809,87 @@ def fix_duplicates(request):
         return Response({
             'status': 'error',
             'message': str(e)
-        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR) 
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+# Add new endpoints for supplier product statistics
+@api_view(['GET'])
+def supplier_product_stats(request, supplier_id):
+    """
+    Get statistics for supplier products (min/max cost)
+    Used for filtering in the frontend
+    """
+    try:
+        # Query the database for cost statistics
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT 
+                    MIN(cost) as min_cost,
+                    MAX(cost) as max_cost
+                FROM supplier_products
+                WHERE supplier_id = %s
+            """, [supplier_id])
+            
+            result = cursor.fetchone()
+            
+        # Handle case where no products exist
+        if not result or not result[0]:
+            return Response({
+                'data': {
+                    'minCost': 0,
+                    'maxCost': 100
+                },
+                'error': None
+            })
+        
+        # Return the cost range
+        return Response({
+            'data': {
+                'minCost': float(result[0]),
+                'maxCost': float(result[1])
+            },
+            'error': None
+        })
+        
+    except Exception as e:
+        print(f"Error fetching supplier product stats: {str(e)}")
+        return Response({
+            'data': {
+                'minCost': 0,
+                'maxCost': 100
+            },
+            'error': str(e)
+        })
+
+@api_view(['GET'])
+def supplier_product_methods(request, supplier_id):
+    """
+    Get unique match methods for supplier products
+    Used for filtering in the frontend
+    """
+    try:
+        # Query the database for unique match methods
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT DISTINCT match_method
+                FROM supplier_products
+                WHERE supplier_id = %s AND match_method IS NOT NULL
+            """, [supplier_id])
+            
+            methods = [row[0] for row in cursor.fetchall()]
+            
+        # Return the match methods
+        return Response({
+            'data': {
+                'matchMethods': methods
+            },
+            'error': None
+        })
+        
+    except Exception as e:
+        print(f"Error fetching supplier product match methods: {str(e)}")
+        return Response({
+            'data': {
+                'matchMethods': []
+            },
+            'error': str(e)
+        }) 

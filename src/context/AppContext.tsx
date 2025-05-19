@@ -98,6 +98,19 @@ interface AppContextType {
       sortOrder?: 'asc' | 'desc'
     }
   ) => Promise<{ data: any[], count: number }>;
+  fetchSupplierProducts: (
+    supplierId: string,
+    page?: number,
+    pageSize?: number,
+    filters?: {
+      searchTerm?: string,
+      filterOption?: 'all' | 'matched' | 'unmatched',
+      costRange?: { min: number, max: number },
+      matchMethodFilter?: string | null,
+      sortField?: string,
+      sortOrder?: 'asc' | 'desc'
+    }
+  ) => Promise<{ data: SupplierProduct[], count: number }>;
   getBrands: () => Promise<string[]>;
   getCategories: () => Promise<string[]>;
   getPriceRange: () => Promise<{min: number, max: number}>;
@@ -756,6 +769,123 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  // Add new function to fetch supplier products with pagination and filtering
+  const fetchSupplierProducts = async (
+    supplierId: string,
+    page: number = 1,
+    pageSize: number = 10,
+    filters: {
+      searchTerm?: string,
+      filterOption?: 'all' | 'matched' | 'unmatched',
+      costRange?: { min: number, max: number },
+      matchMethodFilter?: string | null,
+      sortField?: string,
+      sortOrder?: 'asc' | 'desc'
+    } = {}
+  ) => {
+    try {
+      console.log(`Fetching supplier products for supplier ${supplierId}, page ${page}, size ${pageSize}`);
+      
+      // Calculate start and end for pagination
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize - 1;
+      
+      // Build query
+      let query = supabase
+        .from('supplier_products')
+        .select(`
+          id,
+          supplier_id,
+          product_id,
+          cost,
+          moq,
+          lead_time,
+          payment_terms,
+          ean,
+          match_method,
+          product_name,
+          mpn,
+          created_at,
+          updated_at,
+          suppliers (
+            id,
+            name
+          )
+        `, { count: 'exact' })
+        .eq('supplier_id', supplierId);
+      
+      // Apply filter for matched/unmatched products
+      if (filters.filterOption === 'matched') {
+        query = query.not('product_id', 'is', null);
+      } else if (filters.filterOption === 'unmatched') {
+        query = query.is('product_id', null);
+      }
+      
+      // Apply search term filter
+      if (filters.searchTerm) {
+        query = query.or(
+          `product_name.ilike.%${filters.searchTerm}%,ean.ilike.%${filters.searchTerm}%,mpn.ilike.%${filters.searchTerm}%`
+        );
+      }
+      
+      // Apply cost range filter
+      if (filters.costRange) {
+        query = query
+          .gte('cost', filters.costRange.min)
+          .lte('cost', filters.costRange.max);
+      }
+      
+      // Apply match method filter
+      if (filters.matchMethodFilter) {
+        query = query.eq('match_method', filters.matchMethodFilter);
+      }
+      
+      // Apply sorting
+      if (filters.sortField) {
+        let sortColumn: string;
+        
+        switch (filters.sortField) {
+          case 'name':
+            sortColumn = 'product_name';
+            break;
+          case 'cost':
+            sortColumn = 'cost';
+            break;
+          // For other fields like price, profit and margin we need client-side sorting
+          // since they depend on joined data
+          default:
+            sortColumn = 'created_at';
+            break;
+        }
+        
+        query = query.order(sortColumn, { 
+          ascending: filters.sortOrder === 'asc' 
+        });
+      } else {
+        // Default sort
+        query = query.order('created_at', { ascending: false });
+      }
+      
+      // Apply pagination
+      query = query.range(start, end);
+      
+      // Execute the query
+      const { data, error, count } = await query;
+      
+      if (error) throw error;
+      
+      console.log(`Fetched ${data?.length || 0} supplier products (total count: ${count})`);
+      
+      return {
+        data: data as SupplierProduct[] || [],
+        count: count || 0
+      };
+    } catch (err) {
+      console.error('Error fetching supplier products:', err);
+      throw err instanceof Error ? err : new Error('Failed to fetch supplier products');
+    }
+  };
+
   // Mark data as initialized after first load
   useEffect(() => {
     if (!productsInitialLoading && !suppliersInitialLoading && products.length > 0 && suppliers.length > 0) {
@@ -792,6 +922,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getBestSupplierForProduct,
         refreshData,
         fetchProducts: fetchProductsFromDb,
+        fetchSupplierProducts,
         getBrands: getBrandsFromDb,
         getCategories: getCategoriesFromDb,
         getPriceRange: getPriceRangeFromDb

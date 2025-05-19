@@ -23,6 +23,8 @@ urlpatterns = [
     # Supplier Products
     path('supplier-products/', views.supplier_product_list, name='supplier_product_list'),
     path('supplier-products/<uuid:pk>/', views.supplier_product_detail, name='supplier_product_detail'),
+    path('supplier-product-stats/<uuid:supplier_id>/', views.supplier_product_stats, name='supplier_product_stats'),
+    path('supplier-product-methods/<uuid:supplier_id>/', views.supplier_product_methods, name='supplier_product_methods'),
     
     # Import endpoints - add direct endpoints at the root for compatibility
     path('upload/supplier/', csrf_exempt(views.upload_supplier_data), name='upload_supplier_data'),

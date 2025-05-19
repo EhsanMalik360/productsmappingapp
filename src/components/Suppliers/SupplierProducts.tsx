@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, ExternalLink, Link, Info, Search, Filter, X, ArrowDownAZ, DollarSign, TrendingUp, Tag, ChevronLeft, ChevronRight, RefreshCcw } from 'lucide-react';
 import Card from '../UI/Card';
@@ -18,7 +18,7 @@ type SortOrder = 'asc' | 'desc';
 
 const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const navigate = useNavigate();
-  const { supplierProducts, products, loading } = useAppContext();
+  const { products, fetchSupplierProducts } = useAppContext();
   const [filterOption, setFilterOption] = useState<FilterOption>('all');
   const [selectedUnmatchedProduct, setSelectedUnmatchedProduct] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -29,71 +29,110 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const [matchMethodFilter, setMatchMethodFilter] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [isLoading, setIsLoading] = useState(true);
+  const [supplierProductsData, setSupplierProductsData] = useState<any[]>([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [costStats, setCostStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
+  const [matchMethods, setMatchMethods] = useState<string[]>([]);
+  const [matchStats, setMatchStats] = useState<{ total: number, matched: number, unmatched: number }>({
+    total: 0,
+    matched: 0,
+    unmatched: 0
+  });
+  const [hasInitializedFilters, setHasInitializedFilters] = useState(false);
   
-  // New states for progressive loading
-  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
-  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
-  const [isLoadingFilters, setIsLoadingFilters] = useState(true);
-  const [isLoadingStats, setIsLoadingStats] = useState(true);
-
-  // Get all supplier products
-  const allSupplierProducts = useMemo(() => {
-    const filtered = supplierProducts.filter(sp => sp.supplier_id === supplierId);
-    
-    // If we have any products, consider initial data loaded
-    if (filtered.length > 0 && !initialDataLoaded) {
-      setInitialDataLoaded(true);
+  // Fetch data when component mounts or parameters change
+  const loadData = useCallback(async () => {
+    try {
+      setIsLoading(true);
       
-      // Stagger loading states for better UX
-      setTimeout(() => setIsLoadingProducts(false), 50);
-      setTimeout(() => setIsLoadingStats(false), 100);
-      setTimeout(() => setIsLoadingFilters(false), 150);
+      // Fetch data with server-side pagination
+      const result = await fetchSupplierProducts(
+        supplierId,
+        currentPage,
+        itemsPerPage,
+        {
+          searchTerm,
+          filterOption,
+          costRange,
+          matchMethodFilter,
+          sortField,
+          sortOrder
+        }
+      );
+      
+      setSupplierProductsData(result.data);
+      setTotalCount(result.count);
+      
+      // If we haven't loaded filter stats yet, fetch them
+      if (!hasInitializedFilters) {
+        await loadFilterStats();
+      }
+      
+    } catch (error) {
+      console.error('Error loading supplier products:', error);
+    } finally {
+      setIsLoading(false);
     }
-    
-    return filtered;
-  }, [supplierProducts, supplierId, initialDataLoaded]);
-  
-  // Get cost range for all products
-  const costStats = useMemo(() => {
-    if (allSupplierProducts.length === 0) return { min: 0, max: 100 };
-    
-    const costs = allSupplierProducts.map(p => p.cost);
-    return {
-      min: Math.floor(Math.min(...costs)),
-      max: Math.ceil(Math.max(...costs, 10)) // Ensure at least 10 for the slider
-    };
-  }, [allSupplierProducts]);
+  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters]);
 
-  // Initialize cost filter with full range when stats are loaded
+  // Load filter statistics (match stats, cost range, match methods)
+  const loadFilterStats = useCallback(async () => {
+    try {
+      // Fetch total count stats for matched/unmatched
+      const matchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'matched' });
+      const unmatchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'unmatched' });
+      const totalResult = await fetchSupplierProducts(supplierId, 1, 1);
+      
+      setMatchStats({
+        total: totalResult.count,
+        matched: matchedResult.count,
+        unmatched: unmatchedResult.count
+      });
+      
+      // Fetch min/max cost (we'll need a special query for this)
+      const { data: costData, error: costError } = await fetch(`/api/supplier-product-stats/${supplierId}`)
+        .then(res => res.json());
+        
+      if (!costError && costData) {
+        setCostStats({
+          min: costData.minCost || 0,
+          max: costData.maxCost || 1000
+        });
+        
+        // Initialize cost range filter with the full range
+        setCostRange({
+          min: costData.minCost || 0,
+          max: costData.maxCost || 1000
+        });
+      }
+      
+      // Fetch unique match methods
+      const { data: methodsData } = await fetch(`/api/supplier-product-methods/${supplierId}`)
+        .then(res => res.json());
+        
+      if (methodsData && methodsData.matchMethods) {
+        setMatchMethods(methodsData.matchMethods);
+      }
+      
+      setHasInitializedFilters(true);
+    } catch (error) {
+      console.error('Error loading filter stats:', error);
+    }
+  }, [supplierId, fetchSupplierProducts]);
+
+  // Load data when component mounts or when parameters change
   useEffect(() => {
-    if (!isLoadingStats) {
-      setCostRange(costStats);
-    }
-  }, [isLoadingStats, costStats]);
+    loadData();
+  }, [loadData]);
 
-  // Apply filtering based on matched/unmatched status
-  const filteredByMatchStatus = useMemo(() => {
-    if (filterOption === 'matched') {
-      return allSupplierProducts.filter(sp => sp.product_id !== null);
-    } else if (filterOption === 'unmatched') {
-      return allSupplierProducts.filter(sp => sp.product_id === null);
-    }
-    return allSupplierProducts;
-  }, [allSupplierProducts, filterOption]);
-
-  // Progress loading indicator based on data availability
-  useEffect(() => {
-    if (products.length > 0 && allSupplierProducts.length > 0) {
-      setIsLoadingProducts(false);
-    }
-  }, [products, allSupplierProducts]);
-
-  // Get product details for all filtered products - but don't block rendering
+  // Join with product data for additional information
   const productsWithDetails = useMemo(() => {
-    // Don't process if still loading initial products data
-    if (isLoadingProducts) return [];
+    if (!Array.isArray(supplierProductsData) || !products || !Array.isArray(products)) {
+      return [];
+    }
     
-    return filteredByMatchStatus.map(sp => {
+    return supplierProductsData.map(sp => {
       // For matched products, include product details and calculate profit metrics
       if (sp.product_id) {
         const product = products.find(p => p.id === sp.product_id);
@@ -104,9 +143,9 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
           return {
             ...sp,
             product,
-            productName: product.title || '-',
-            productEan: product.ean || '-',
-            productMpn: product.mpn || '-',
+            productName: product.title || sp.product_name || '-',
+            productEan: product.ean || sp.ean || '-',
+            productMpn: product.mpn || sp.mpn || '-',
             profitPerUnit,
             profitMargin
           };
@@ -124,93 +163,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         profitMargin: 0
       };
     });
-  }, [filteredByMatchStatus, products, isLoadingProducts]);
-
-  // Apply additional filters and search - but only when data and filters are ready
-  const filteredProducts = useMemo(() => {
-    if (isLoadingFilters || isLoadingProducts) return productsWithDetails;
-    
-    return productsWithDetails.filter(item => {
-      // Text search
-      const matchesSearch = searchTerm === '' || 
-        item.productName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        item.productEan.includes(searchTerm) || 
-        (item.mpn && item.mpn.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (item.productMpn && item.productMpn.toLowerCase().includes(searchTerm.toLowerCase()));
-      
-      // Cost range filter
-      const matchesCost = 
-        item.cost >= costRange.min && 
-        item.cost <= costRange.max;
-      
-      // Match method filter
-      const matchesMethod = matchMethodFilter === null || 
-        item.match_method === matchMethodFilter;
-      
-      return matchesSearch && matchesCost && matchesMethod;
-    });
-  }, [productsWithDetails, searchTerm, costRange, matchMethodFilter, isLoadingFilters, isLoadingProducts]);
-
-  // Apply sorting - but don't block on this
-  const sortedProducts = useMemo(() => {
-    if (!sortField || isLoadingFilters) return filteredProducts;
-
-    return [...filteredProducts].sort((a, b) => {
-      let comparison = 0;
-
-      switch (sortField) {
-        case 'name':
-          comparison = a.productName.localeCompare(b.productName);
-          break;
-        case 'cost':
-          comparison = a.cost - b.cost;
-          break;
-        case 'price':
-          const aPrice = a.product ? a.product.salePrice : 0;
-          const bPrice = b.product ? b.product.salePrice : 0;
-          comparison = aPrice - bPrice;
-          break;
-        case 'profit':
-          comparison = a.profitPerUnit - b.profitPerUnit;
-          break;
-        case 'margin':
-          comparison = a.profitMargin - b.profitMargin;
-          break;
-        default:
-          break;
-      }
-      
-      return sortOrder === 'asc' ? comparison : -comparison;
-    });
-  }, [filteredProducts, sortField, sortOrder, isLoadingFilters]);
-  
-  // Apply pagination
-  const totalPages = Math.ceil(sortedProducts.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const paginatedProducts = useMemo(() => {
-    return sortedProducts.slice(startIndex, startIndex + itemsPerPage);
-  }, [sortedProducts, startIndex, itemsPerPage]);
-
-  // Calculate match stats - but don't block rendering on this
-  const matchStats = useMemo(() => {
-    if (isLoadingStats) {
-      return { total: 0, matched: 0, unmatched: 0 };
-    }
-    
-    const total = allSupplierProducts.length;
-    const matched = allSupplierProducts.filter(sp => sp.product_id !== null).length;
-    const unmatched = total - matched;
-    
-    return { total, matched, unmatched };
-  }, [allSupplierProducts, isLoadingStats]);
-
-  // Get unique match methods for filtering - but don't block on this
-  const matchMethods = useMemo(() => {
-    if (isLoadingFilters) return [];
-    
-    const methods = new Set(allSupplierProducts.map(sp => sp.match_method));
-    return Array.from(methods).filter(Boolean) as string[];
-  }, [allSupplierProducts, isLoadingFilters]);
+  }, [supplierProductsData, products]);
 
   // Determine the headers based on the current filter
   const tableHeaders = useMemo(() => {
@@ -226,6 +179,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setCurrentPage(1); // Reset to first page on search
+    loadData();
   };
   
   const handleSort = (field: SortField) => {
@@ -237,11 +191,16 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       setSortField(field);
       setSortOrder('asc');
     }
+    setCurrentPage(1); // Reset to first page on sort change
   };
   
   const handleClearFilters = () => {
     setSearchTerm('');
-    setCostRange(costStats);
+    if (costStats) {
+      setCostRange(costStats);
+    } else {
+      setCostRange({min: 0, max: 1000});
+    }
     setMatchMethodFilter(null);
     setSortField('');
     setSortOrder('asc');
@@ -253,6 +212,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     if (searchTerm) count++;
     if (costRange.min !== costStats.min || costRange.max !== costStats.max) count++;
     if (matchMethodFilter !== null) count++;
+    if (sortField) count++;
     return count;
   };
 
@@ -267,7 +227,9 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     setCurrentPage(1); // Reset to first page when changing items per page
   };
   
-  // Add the missing renderPagination function
+  // Calculate total pages from server-side count
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
+  
   const renderPagination = () => {
     if (totalPages <= 1) return null;
     
@@ -275,7 +237,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       <div className="flex items-center justify-between mt-4 pt-3 border-t border-gray-200">
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-600">
-            Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, sortedProducts.length)} of {sortedProducts.length} items
+            Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, totalCount)} of {totalCount} items
           </span>
           <select 
             className="border rounded p-1 text-sm"
@@ -286,6 +248,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
             <option value="25">25 per page</option>
             <option value="50">50 per page</option>
             <option value="100">100 per page</option>
+            <option value="500">500 per page</option>
           </select>
         </div>
         
@@ -343,14 +306,14 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     );
   };
   
-  // Show faster initial loading state
-  if (loading && !initialDataLoaded) {
+  // Show loading state
+  if (isLoading && productsWithDetails.length === 0) {
     return (
       <Card className="mb-4">
         <div className="flex justify-between items-center mb-4">
           <div>
             <h3 className="text-lg font-semibold">Supplier Products</h3>
-            <span className="text-sm text-gray-500">Loading initial data...</span>
+            <span className="text-sm text-gray-500">Loading data...</span>
           </div>
           <div className="flex items-center">
             <div className="animate-spin mr-2 h-5 w-5 text-blue-600">
@@ -396,11 +359,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
           >
             All Products
             <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full w-5 h-5 flex items-center justify-center text-xs">
-              {isLoadingStats ? (
-                <span className="h-3 w-3 animate-pulse bg-gray-200 rounded-full"></span>
-              ) : (
-                matchStats.total
-              )}
+              {matchStats.total}
             </span>
           </Button>
           <Button 
@@ -410,11 +369,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
           >
             Matched
             <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full w-5 h-5 flex items-center justify-center text-xs">
-              {isLoadingStats ? (
-                <span className="h-3 w-3 animate-pulse bg-gray-200 rounded-full"></span>
-              ) : (
-                matchStats.matched
-              )}
+              {matchStats.matched}
             </span>
           </Button>
           <Button 
@@ -424,11 +379,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
           >
             Unmatched
             <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full w-5 h-5 flex items-center justify-center text-xs">
-              {isLoadingStats ? (
-                <span className="h-3 w-3 animate-pulse bg-gray-200 rounded-full"></span>
-              ) : (
-                matchStats.unmatched
-              )}
+              {matchStats.unmatched}
             </span>
           </Button>
         </div>
@@ -443,6 +394,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
               onChange={(e) => setSearchTerm(e.target.value)}
             />
             <Search size={18} className="absolute left-3 top-2.5 text-gray-400" />
+            <button type="submit" className="hidden">Search</button>
           </form>
           
           <Button 
@@ -464,110 +416,102 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       {/* Show filters only when requested */}
       {showFilters && (
         <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-          {isLoadingFilters ? (
-            <div className="animate-pulse space-y-3">
-              <div className="h-8 bg-gray-200 rounded w-1/2"></div>
-              <div className="h-10 bg-gray-200 rounded"></div>
-              <div className="h-8 bg-gray-200 rounded w-full"></div>
-            </div>
-          ) : (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Cost Range</label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      className="w-24 border p-2 rounded"
-                      value={costRange.min}
-                      onChange={(e) => setCostRange({...costRange, min: Number(e.target.value)})}
-                      min={0}
-                    />
-                    <span className="text-gray-600">to</span>
-                    <input
-                      type="number"
-                      className="w-24 border p-2 rounded"
-                      value={costRange.max}
-                      onChange={(e) => setCostRange({...costRange, max: Number(e.target.value)})}
-                      min={costRange.min}
-                    />
-                  </div>
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cost Range</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    className="w-24 border p-2 rounded"
+                    value={costRange.min}
+                    onChange={(e) => setCostRange({...costRange, min: Number(e.target.value)})}
+                    min={0}
+                  />
+                  <span className="text-gray-600">to</span>
+                  <input
+                    type="number"
+                    className="w-24 border p-2 rounded"
+                    value={costRange.max}
+                    onChange={(e) => setCostRange({...costRange, max: Number(e.target.value)})}
+                    min={costRange.min}
+                  />
                 </div>
-                
-                {matchMethods.length > 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Match Method</label>
-                    <select 
-                      className="w-full border p-2 rounded"
-                      value={matchMethodFilter || ''}
-                      onChange={(e) => setMatchMethodFilter(e.target.value === '' ? null : e.target.value)}
-                    >
-                      <option value="">All Methods</option>
-                      {matchMethods.map(method => (
-                        <option key={method} value={method}>{method.charAt(0).toUpperCase() + method.slice(1)}</option>
-                      ))}
-                    </select>
-                  </div>
-                )}
               </div>
               
-              <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
-                <div className="text-sm font-medium">Sort By:</div>
-                <div className="flex gap-2">
-                  <Button 
-                    variant={sortField === 'name' ? 'primary' : 'secondary'} 
-                    className="flex items-center text-xs px-2 py-1"
-                    onClick={() => handleSort('name')}
+              {matchMethods.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Match Method</label>
+                  <select 
+                    className="w-full border p-2 rounded"
+                    value={matchMethodFilter || ''}
+                    onChange={(e) => setMatchMethodFilter(e.target.value === '' ? null : e.target.value)}
                   >
-                    <ArrowDownAZ size={14} className="mr-1" /> 
-                    Name
-                    {sortField === 'name' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                  </Button>
-                  <Button 
-                    variant={sortField === 'cost' ? 'primary' : 'secondary'} 
-                    className="flex items-center text-xs px-2 py-1"
-                    onClick={() => handleSort('cost')}
-                  >
-                    <DollarSign size={14} className="mr-1" /> 
-                    Cost
-                    {sortField === 'cost' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                  </Button>
-                  <Button 
-                    variant={sortField === 'price' ? 'primary' : 'secondary'} 
-                    className="flex items-center text-xs px-2 py-1"
-                    onClick={() => handleSort('price')}
-                  >
-                    <Tag size={14} className="mr-1" /> 
-                    Price
-                    {sortField === 'price' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                  </Button>
-                  <Button 
-                    variant={sortField === 'profit' ? 'primary' : 'secondary'} 
-                    className="flex items-center text-xs px-2 py-1"
-                    onClick={() => handleSort('profit')}
-                  >
-                    <TrendingUp size={14} className="mr-1" /> 
-                    Profit
-                    {sortField === 'profit' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                  </Button>
-                  {getActiveFilterCount() > 0 && (
-                    <Button 
-                      variant="secondary" 
-                      className="flex items-center text-xs px-2 py-1 ml-2 border-red-300 text-red-700 hover:bg-red-50"
-                      onClick={handleClearFilters}
-                    >
-                      <X size={14} className="mr-1" /> Clear All
-                    </Button>
-                  )}
+                    <option value="">All Methods</option>
+                    {matchMethods.map(method => (
+                      <option key={method} value={method}>{method.charAt(0).toUpperCase() + method.slice(1)}</option>
+                    ))}
+                  </select>
                 </div>
+              )}
+            </div>
+            
+            <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
+              <div className="text-sm font-medium">Sort By:</div>
+              <div className="flex gap-2">
+                <Button 
+                  variant={sortField === 'name' ? 'primary' : 'secondary'} 
+                  className="flex items-center text-xs px-2 py-1"
+                  onClick={() => handleSort('name')}
+                >
+                  <ArrowDownAZ size={14} className="mr-1" /> 
+                  Name
+                  {sortField === 'name' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                </Button>
+                <Button 
+                  variant={sortField === 'cost' ? 'primary' : 'secondary'} 
+                  className="flex items-center text-xs px-2 py-1"
+                  onClick={() => handleSort('cost')}
+                >
+                  <DollarSign size={14} className="mr-1" /> 
+                  Cost
+                  {sortField === 'cost' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                </Button>
+                <Button 
+                  variant={sortField === 'price' ? 'primary' : 'secondary'} 
+                  className="flex items-center text-xs px-2 py-1"
+                  onClick={() => handleSort('price')}
+                >
+                  <Tag size={14} className="mr-1" /> 
+                  Price
+                  {sortField === 'price' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                </Button>
+                <Button 
+                  variant={sortField === 'profit' ? 'primary' : 'secondary'} 
+                  className="flex items-center text-xs px-2 py-1"
+                  onClick={() => handleSort('profit')}
+                >
+                  <TrendingUp size={14} className="mr-1" /> 
+                  Profit
+                  {sortField === 'profit' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                </Button>
+                {getActiveFilterCount() > 0 && (
+                  <Button 
+                    variant="secondary" 
+                    className="flex items-center text-xs px-2 py-1 ml-2 border-red-300 text-red-700 hover:bg-red-50"
+                    onClick={handleClearFilters}
+                  >
+                    <X size={14} className="mr-1" /> Clear All
+                  </Button>
+                )}
               </div>
-            </>
-          )}
+            </div>
+          </>
         </div>
       )}
       
-      {/* Show table content as soon as we have products */}
-      {isLoadingProducts ? (
+      {/* Show table content */}
+      {isLoading && productsWithDetails.length === 0 ? (
         <div className="animate-pulse space-y-3">
           {[...Array(3)].map((_, i) => (
             <div key={i} className="flex justify-between items-center border-t py-3">
@@ -589,7 +533,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
             </div>
           ))}
         </div>
-      ) : sortedProducts.length === 0 ? (
+      ) : productsWithDetails.length === 0 ? (
         <EmptyState
           message={`No ${filterOption} products found matching your criteria`}
           suggestion={
@@ -605,7 +549,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       ) : (
         <>
           <Table headers={tableHeaders}>
-            {paginatedProducts.map((item: any) => (
+            {productsWithDetails.map((item: any) => (
               <React.Fragment key={item.id}>
                 <tr className={`border-t ${selectedUnmatchedProduct === item.id ? 'bg-blue-50' : ''} hover:bg-gray-50`}>
                   <td className="px-4 py-3 font-medium">
