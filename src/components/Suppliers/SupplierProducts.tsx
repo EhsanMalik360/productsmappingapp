@@ -197,7 +197,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const handleClearFilters = () => {
     setSearchTerm('');
     if (costStats) {
-      setCostRange(costStats);
+    setCostRange(costStats);
     } else {
       setCostRange({min: 0, max: 1000});
     }
@@ -416,97 +416,97 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       {/* Show filters only when requested */}
       {showFilters && (
         <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
-          <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Cost Range</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="number"
-                    className="w-24 border p-2 rounded"
-                    value={costRange.min}
-                    onChange={(e) => setCostRange({...costRange, min: Number(e.target.value)})}
-                    min={0}
-                  />
-                  <span className="text-gray-600">to</span>
-                  <input
-                    type="number"
-                    className="w-24 border p-2 rounded"
-                    value={costRange.max}
-                    onChange={(e) => setCostRange({...costRange, max: Number(e.target.value)})}
-                    min={costRange.min}
-                  />
-                </div>
-              </div>
-              
-              {matchMethods.length > 0 && (
+            <>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Match Method</label>
-                  <select 
-                    className="w-full border p-2 rounded"
-                    value={matchMethodFilter || ''}
-                    onChange={(e) => setMatchMethodFilter(e.target.value === '' ? null : e.target.value)}
-                  >
-                    <option value="">All Methods</option>
-                    {matchMethods.map(method => (
-                      <option key={method} value={method}>{method.charAt(0).toUpperCase() + method.slice(1)}</option>
-                    ))}
-                  </select>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Cost Range</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      className="w-24 border p-2 rounded"
+                      value={costRange.min}
+                      onChange={(e) => setCostRange({...costRange, min: Number(e.target.value)})}
+                      min={0}
+                    />
+                    <span className="text-gray-600">to</span>
+                    <input
+                      type="number"
+                      className="w-24 border p-2 rounded"
+                      value={costRange.max}
+                      onChange={(e) => setCostRange({...costRange, max: Number(e.target.value)})}
+                      min={costRange.min}
+                    />
+                  </div>
                 </div>
-              )}
-            </div>
-            
-            <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
-              <div className="text-sm font-medium">Sort By:</div>
-              <div className="flex gap-2">
-                <Button 
-                  variant={sortField === 'name' ? 'primary' : 'secondary'} 
-                  className="flex items-center text-xs px-2 py-1"
-                  onClick={() => handleSort('name')}
-                >
-                  <ArrowDownAZ size={14} className="mr-1" /> 
-                  Name
-                  {sortField === 'name' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                </Button>
-                <Button 
-                  variant={sortField === 'cost' ? 'primary' : 'secondary'} 
-                  className="flex items-center text-xs px-2 py-1"
-                  onClick={() => handleSort('cost')}
-                >
-                  <DollarSign size={14} className="mr-1" /> 
-                  Cost
-                  {sortField === 'cost' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                </Button>
-                <Button 
-                  variant={sortField === 'price' ? 'primary' : 'secondary'} 
-                  className="flex items-center text-xs px-2 py-1"
-                  onClick={() => handleSort('price')}
-                >
-                  <Tag size={14} className="mr-1" /> 
-                  Price
-                  {sortField === 'price' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                </Button>
-                <Button 
-                  variant={sortField === 'profit' ? 'primary' : 'secondary'} 
-                  className="flex items-center text-xs px-2 py-1"
-                  onClick={() => handleSort('profit')}
-                >
-                  <TrendingUp size={14} className="mr-1" /> 
-                  Profit
-                  {sortField === 'profit' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                </Button>
-                {getActiveFilterCount() > 0 && (
-                  <Button 
-                    variant="secondary" 
-                    className="flex items-center text-xs px-2 py-1 ml-2 border-red-300 text-red-700 hover:bg-red-50"
-                    onClick={handleClearFilters}
-                  >
-                    <X size={14} className="mr-1" /> Clear All
-                  </Button>
+                
+                {matchMethods.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Match Method</label>
+                    <select 
+                      className="w-full border p-2 rounded"
+                      value={matchMethodFilter || ''}
+                      onChange={(e) => setMatchMethodFilter(e.target.value === '' ? null : e.target.value)}
+                    >
+                      <option value="">All Methods</option>
+                      {matchMethods.map(method => (
+                        <option key={method} value={method}>{method.charAt(0).toUpperCase() + method.slice(1)}</option>
+                      ))}
+                    </select>
+                  </div>
                 )}
               </div>
-            </div>
-          </>
+              
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-gray-200">
+                <div className="text-sm font-medium">Sort By:</div>
+                <div className="flex gap-2">
+                  <Button 
+                    variant={sortField === 'name' ? 'primary' : 'secondary'} 
+                    className="flex items-center text-xs px-2 py-1"
+                    onClick={() => handleSort('name')}
+                  >
+                    <ArrowDownAZ size={14} className="mr-1" /> 
+                    Name
+                    {sortField === 'name' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                  </Button>
+                  <Button 
+                    variant={sortField === 'cost' ? 'primary' : 'secondary'} 
+                    className="flex items-center text-xs px-2 py-1"
+                    onClick={() => handleSort('cost')}
+                  >
+                    <DollarSign size={14} className="mr-1" /> 
+                    Cost
+                    {sortField === 'cost' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                  </Button>
+                  <Button 
+                    variant={sortField === 'price' ? 'primary' : 'secondary'} 
+                    className="flex items-center text-xs px-2 py-1"
+                    onClick={() => handleSort('price')}
+                  >
+                    <Tag size={14} className="mr-1" /> 
+                    Price
+                    {sortField === 'price' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                  </Button>
+                  <Button 
+                    variant={sortField === 'profit' ? 'primary' : 'secondary'} 
+                    className="flex items-center text-xs px-2 py-1"
+                    onClick={() => handleSort('profit')}
+                  >
+                    <TrendingUp size={14} className="mr-1" /> 
+                    Profit
+                    {sortField === 'profit' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                  </Button>
+                  {getActiveFilterCount() > 0 && (
+                    <Button 
+                      variant="secondary" 
+                      className="flex items-center text-xs px-2 py-1 ml-2 border-red-300 text-red-700 hover:bg-red-50"
+                      onClick={handleClearFilters}
+                    >
+                      <X size={14} className="mr-1" /> Clear All
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </>
         </div>
       )}
       

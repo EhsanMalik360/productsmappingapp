@@ -20,7 +20,8 @@ const SupplierDetail: React.FC = () => {
     refreshData,
     getEntityAttributes,
     setAttributeValue,
-    updateSupplier
+    updateSupplier,
+    fetchSupplierProducts
   } = useAppContext();
   
   // State for component
@@ -40,6 +41,15 @@ const SupplierDetail: React.FC = () => {
   const [statsLoading, setStatsLoading] = useState(false);
   const [attributesLoading, setAttributesLoading] = useState(false);
   const [productsLoading, setProductsLoading] = useState(false);
+  
+  // Add state for product statistics from server
+  const [productStats, setProductStats] = useState({
+    totalProducts: 0,
+    matchedProducts: 0,
+    unmatchedProducts: 0,
+    avgCost: 0
+  });
+  const [loadingStats, setLoadingStats] = useState(true);
 
   // Ensure ID is properly formatted - remove any UUID format issues
   const normalizedId = useMemo(() => {
@@ -47,6 +57,61 @@ const SupplierDetail: React.FC = () => {
     // Return the full ID without any processing that might truncate it
     return String(id); // Convert to string to ensure it's a string type
   }, [id]);
+
+  // Load product statistics from server
+  const loadProductStats = useCallback(async () => {
+    if (!normalizedId) return;
+    
+    try {
+      setLoadingStats(true);
+      
+      // Get total count
+      const totalResult = await fetchSupplierProducts(normalizedId, 1, 1);
+      
+      // Get matched count
+      const matchedResult = await fetchSupplierProducts(normalizedId, 1, 1, { filterOption: 'matched' });
+      
+      // Calculate statistics
+      const totalProducts = totalResult.count;
+      const matchedProducts = matchedResult.count;
+      const unmatchedProducts = totalProducts - matchedProducts;
+      
+      // For average cost, we need a separate endpoint or a sample
+      // For now, use the data we have locally or fetch a small sample
+      let avgCost = 0;
+      
+      // Try to use the cost stats endpoint if available
+      try {
+        const { data: costData } = await fetch(`/api/supplier-product-stats/${normalizedId}`)
+          .then(res => res.json());
+          
+        if (costData) {
+          // If we have min and max cost, use their average as an approximation
+          avgCost = (costData.minCost + costData.maxCost) / 2;
+        }
+      } catch (e) {
+        console.error('Error fetching cost stats:', e);
+        
+        // Fallback to calculating from available data
+        const sampleProducts = supplierProducts.filter(sp => sp.supplier_id === normalizedId);
+        if (sampleProducts.length > 0) {
+          avgCost = sampleProducts.reduce((sum, sp) => sum + sp.cost, 0) / sampleProducts.length;
+        }
+      }
+      
+      setProductStats({
+        totalProducts,
+        matchedProducts,
+        unmatchedProducts,
+        avgCost
+      });
+      
+    } catch (error) {
+      console.error('Error loading product stats:', error);
+    } finally {
+      setLoadingStats(false);
+    }
+  }, [normalizedId, fetchSupplierProducts, supplierProducts]);
 
   // Memoize the fetchLatestData function to prevent it from changing on every render
   const fetchLatestData = useCallback(async () => {
@@ -66,13 +131,17 @@ const SupplierDetail: React.FC = () => {
       }
       
       setDataFetched(true);
+      
+      // Load product statistics
+      await loadProductStats();
+      
     } catch (error) {
       console.error('Error refreshing data in SupplierDetail:', error);
       setErrorMessage('Failed to load supplier data. Please try again.');
     } finally {
       setIsRefreshing(false);
     }
-  }, [normalizedId, refreshData, suppliers]);
+  }, [normalizedId, refreshData, suppliers, loadProductStats]);
 
   // Refresh data when component mounts to ensure we have the latest supplier products
   useEffect(() => {
@@ -119,10 +188,10 @@ const SupplierDetail: React.FC = () => {
   // Get supplier data
   const supplier = suppliers.find(s => s.id === normalizedId);
   
-  // Get supplier products for statistics calculation
+  // Get supplier products for display only (not for statistics calculation)
   const supplierProductsList = supplierProducts.filter(sp => sp.supplier_id === normalizedId);
   
-  // Join with product data for statistics
+  // Join with product data for display
   const productsWithDetails = useMemo(() => {
     if (!supplierProductsList || !products || !Array.isArray(supplierProductsList) || !Array.isArray(products)) {
       return [];
@@ -248,69 +317,57 @@ const SupplierDetail: React.FC = () => {
   }
   
   // Calculate statistics
-  const totalProducts = supplierProductsList.length;
-  const matchedProducts = supplierProductsList.filter(sp => sp.product_id).length;
-  const avgCost = supplierProductsList.length > 0 
-    ? supplierProductsList.reduce((sum, sp) => sum + sp.cost, 0) / supplierProductsList.length
+  // Use values from server for accurate counts
+  const { totalProducts, matchedProducts, unmatchedProducts, avgCost } = productStats;
+  
+  // Calculate profit margin based on the products we have loaded (for display only)
+  const profitableProducts = productsWithDetails.filter(p => p && typeof p.profitMargin === 'number' && p.profitMargin > 0);
+  const avgProfitMargin = profitableProducts.length > 0
+    ? profitableProducts.reduce((sum, p) => sum + (p ? p.profitMargin : 0), 0) / profitableProducts.length
     : 0;
-
-  // Calculate average profit margin
-  const avgProfitMargin = productsWithDetails.length > 0 
-    ? productsWithDetails.reduce((sum, item) => sum + (item?.profitMargin || 0), 0) / productsWithDetails.length
-    : 0;
-
-  // Get custom attributes for this supplier
-  const customAttributes = useMemo(() => {
-    if (!supplier || !supplier.id || typeof getEntityAttributes !== 'function') return [];
-    try {
-      return getEntityAttributes(supplier.id, 'supplier') || [];
-    } catch (error) {
-      console.error('Error getting entity attributes:', error);
-      return [];
-    }
-  }, [supplier, getEntityAttributes]);
-
-  // Start rendering the UI with a progressive loading approach
+  
   return (
     <div className="p-6">
-      {/* Header - always show */}
+      {/* Header with navigation and actions */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center">
           <Button 
-            variant="secondary" 
-            className="mr-3"
-            onClick={() => navigate('/suppliers')}
+            onClick={() => navigate('/suppliers')} 
+            variant="secondary"
+            className="mr-4 flex items-center"
           >
             <ArrowLeft size={16} className="mr-2" /> Back to Suppliers
           </Button>
           
-          {!headerLoaded ? (
-            <div className="h-8 bg-gray-200 rounded animate-pulse w-48"></div>
-          ) : isEditing ? (
-            <input
-              type="text"
-              value={editedSupplier?.name || ''}
-              onChange={(e) => handleEditChange('name', e.target.value)}
-              className="text-2xl font-bold border border-blue-300 rounded px-2 py-1 w-64"
-              placeholder="Supplier Name"
-            />
-          ) : (
-            <h1 className="text-2xl font-bold">{supplier?.name || "Loading..."}</h1>
-          )}
+          <h1 className="text-2xl font-bold">
+            {isEditing ? (
+              <input
+                type="text"
+                value={editedSupplier?.name || ''}
+                onChange={(e) => handleEditChange('name', e.target.value)}
+                className="border rounded px-2 py-1 w-64"
+              />
+            ) : (
+              supplier?.name || 'Loading...'
+            )}
+          </h1>
         </div>
         
-        <div className="flex space-x-2">
-          {loading || isRefreshing || isSaving ? (
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <div className="animate-spin h-4 w-4 text-blue-600 mr-1">
-                <RefreshCcw size={16} />
-              </div>
-              <span>
-                {isSaving ? "Saving..." : isRefreshing ? "Refreshing..." : "Loading..."}
-              </span>
-            </div>
-          ) : isEditing ? (
+        <div className="flex items-center gap-2">
+          {isEditing ? (
             <>
+              <Button 
+                variant="primary" 
+                onClick={handleSave}
+                className="flex items-center"
+                disabled={isSaving}
+              >
+                {isSaving ? 'Saving...' : (
+                  <>
+                    <Save size={16} className="mr-2" /> Save
+                  </>
+                )}
+              </Button>
               <Button 
                 variant="secondary" 
                 onClick={handleCancelEdit}
@@ -318,19 +375,13 @@ const SupplierDetail: React.FC = () => {
               >
                 <X size={16} className="mr-2" /> Cancel
               </Button>
-              <Button 
-                onClick={handleSave}
-                className="flex items-center"
-              >
-                <Save size={16} className="mr-2" /> Save
-              </Button>
             </>
           ) : (
             <>
               <Button 
                 variant="secondary" 
-                onClick={() => setIsEditing(true)} 
-                className="flex items-center" 
+                onClick={() => setIsEditing(true)}
+                className="flex items-center"
               >
                 <Edit size={16} className="mr-2" /> Edit
               </Button>
@@ -338,243 +389,94 @@ const SupplierDetail: React.FC = () => {
                 variant="secondary" 
                 onClick={handleRefresh}
                 className="flex items-center"
+                disabled={isRefreshing}
               >
-                <RefreshCcw size={16} className="mr-2" /> Refresh
+                {isRefreshing ? 'Refreshing...' : (
+                  <>
+                    <RefreshCcw size={16} className="mr-2" /> Refresh
+                  </>
+                )}
               </Button>
             </>
           )}
         </div>
       </div>
       
-      {/* Overview Card */}
-      <Card className="mb-6">
-        <h2 className="text-xl font-semibold mb-4">Supplier Overview</h2>
+      {/* Supplier Statistics */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+        <Card className="shadow-sm">
+          <h3 className="text-lg font-semibold mb-2">Total Products</h3>
+          <div className="flex items-end gap-2">
+            <span className="text-3xl font-bold">
+              {loadingStats ? '...' : totalProducts.toLocaleString()}
+            </span>
+          </div>
+        </Card>
         
-        {statsLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-            {[...Array(4)].map((_, i) => (
-              <div key={i} className="bg-gray-100 p-4 rounded-lg animate-pulse">
-                <div className="h-4 bg-gray-200 rounded w-20 mb-2"></div>
-                <div className="h-8 bg-gray-200 rounded w-16"></div>
-              </div>
-            ))}
-              </div>
-            ) : (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-            <div className="bg-blue-50 p-4 rounded-lg">
-              <div className="text-sm text-blue-700 mb-1">Total Products</div>
-              <div className="text-2xl font-bold">{totalProducts}</div>
-        </div>
+        <Card className="shadow-sm">
+          <h3 className="text-lg font-semibold mb-2">Matched Products</h3>
+          <div className="flex items-end gap-2">
+            <span className="text-3xl font-bold text-blue-600">
+              {loadingStats ? '...' : matchedProducts.toLocaleString()}
+            </span>
+            <span className="text-sm text-gray-500 mb-1">
+              {loadingStats ? '' : `(${Math.round((matchedProducts / totalProducts) * 100) || 0}%)`}
+            </span>
+          </div>
+        </Card>
         
-            <div className="bg-green-50 p-4 rounded-lg">
-              <div className="text-sm text-green-700 mb-1">Matched Products</div>
-              <div className="text-2xl font-bold">{matchedProducts}</div>
-              <div className="text-sm text-green-700">
-                ({totalProducts > 0 ? Math.round((matchedProducts / totalProducts) * 100) : 0}%)
-        </div>
+        <Card className="shadow-sm">
+          <h3 className="text-lg font-semibold mb-2">Average Cost</h3>
+          <div className="flex items-end gap-2">
+            <span className="text-3xl font-bold text-green-600">
+              ${loadingStats ? '...' : avgCost.toFixed(2)}
+            </span>
+          </div>
+        </Card>
+        
+        <Card className="shadow-sm">
+          <h3 className="text-lg font-semibold mb-2">Avg. Profit Margin</h3>
+          <div className="flex items-end gap-2">
+            <span className={`text-3xl font-bold ${avgProfitMargin > 0 ? 'text-green-600' : 'text-red-600'}`}>
+              {avgProfitMargin.toFixed(1)}%
+            </span>
+          </div>
+        </Card>
       </div>
       
-            <div className="bg-amber-50 p-4 rounded-lg">
-              <div className="text-sm text-amber-700 mb-1">Average Cost</div>
-              <div className="text-2xl font-bold">${avgCost.toFixed(2)}</div>
-            </div>
-            
-            <div className="bg-purple-50 p-4 rounded-lg">
-              <div className="text-sm text-purple-700 mb-1">Avg Profit Margin</div>
-              <div className="text-2xl font-bold">{avgProfitMargin.toFixed(1)}%</div>
-            </div>
-        </div>
-        )}
-        
-        {/* Custom Attributes Section */}
-        {customAttributes.length > 0 && (
-          <div className="border-t border-gray-200 pt-4 mt-2">
-            <h3 className="text-lg font-medium mb-3">Custom Attributes</h3>
-            
-            {attributesLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {[...Array(3)].map((_, i) => (
-                  <div key={i} className="border rounded-lg p-3 relative bg-gray-50 animate-pulse">
-                    <div className="h-4 bg-gray-200 rounded w-24 mb-2"></div>
-                    <div className="h-6 bg-gray-200 rounded w-full"></div>
-                  </div>
-                ))}
+      {/* Supplier Custom Attributes */}
+      {supplier && (
+        <Card className="mb-6 shadow-sm">
+          <h3 className="text-lg font-semibold mb-4">Supplier Details</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {getEntityAttributes(supplier.id, 'supplier').map(({ attribute, value }) => (
+              <div key={attribute.id}>
+                <h4 className="text-sm font-medium text-gray-700 mb-1">{attribute.name}</h4>
+                <div className="border rounded-md p-2 bg-gray-50">
+                  {isEditing ? (
+                    <input
+                      type="text"
+                      value={value || ''}
+                      onChange={(e) => {
+                        // Update attribute value
+                        setAttributeValue(attribute.id, supplier.id, e.target.value);
+                      }}
+                      className="w-full px-2 py-1 border rounded"
+                    />
+                  ) : (
+                    <p className="text-gray-800">{value || '-'}</p>
+                  )}
+                </div>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {customAttributes.map(({ attribute, value }) => {
-                  const displayValue = value === null || value === undefined 
-                    ? "Not set" 
-                    : attribute.type === 'Yes/No' 
-                      ? value ? 'Yes' : 'No'
-                      : value.toString();
-                      
-                    const handleValueChange = async (newValue: any) => {
-                      try {
-                      // Convert the value to the appropriate type
-                      let typedValue = newValue;
-                      if (attribute.type === 'Number') {
-                        typedValue = parseFloat(newValue);
-                      } else if (attribute.type === 'Yes/No') {
-                        typedValue = newValue === 'true' || newValue === true;
-                      }
-                      
-                      if (supplier) {
-                        await setAttributeValue(attribute.id, supplier.id, typedValue);
-                        toast.success(`Updated ${attribute.name}`);
-                      }
-                    } catch (error) {
-                      console.error('Error updating attribute:', error);
-                      toast.error('Failed to update attribute');
-                    }
-                  };
-                  
-                  return (
-                    <div key={attribute.id} className="border rounded-lg p-3 relative bg-gray-50">
-                      <div className="text-sm font-medium text-gray-700 mb-1">{attribute.name}</div>
-                      
-                      {isEditing ? (
-                        <>
-                          {attribute.type === 'Text' && (
-                            <input
-                              type="text"
-                              className="w-full border rounded p-1.5"
-                              value={value === null ? '' : value.toString()}
-                              onChange={(e) => handleValueChange(e.target.value)}
-                            />
-                          )}
-                          
-                          {attribute.type === 'Number' && (
-                            <input
-                              type="number"
-                              className="w-full border rounded p-1.5"
-                              value={value === null ? '' : value.toString()}
-                              onChange={(e) => handleValueChange(e.target.value)}
-                            />
-                          )}
-                          
-                          {attribute.type === 'Date' && (
-                            <input
-                              type="date"
-                              className="w-full border rounded p-1.5"
-                              value={value === null ? '' : value.toString()}
-                              onChange={(e) => handleValueChange(e.target.value)}
-                            />
-                          )}
-                          
-                          {attribute.type === 'Yes/No' && (
-                            <select
-                              className="w-full border rounded p-1.5"
-                              value={value === null ? '' : value ? 'true' : 'false'}
-                              onChange={(e) => handleValueChange(e.target.value === 'true')}
-                            >
-                              <option value="true">Yes</option>
-                              <option value="false">No</option>
-                            </select>
-                          )}
-                          
-                          {attribute.type === 'Selection' && (
-                            <input
-                              type="text"
-                              className="w-full border rounded p-1.5"
-                              value={value === null ? '' : value.toString()}
-                              onChange={(e) => handleValueChange(e.target.value)}
-                            />
-                          )}
-                        </>
-                      ) : (
-                        <div className="font-medium">{displayValue}</div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
-      
-      {/* Complete Supplier Data Section - Moved above Supplier Products Section */}
-      {!productsLoading && supplier && (
-        <Card className="mb-6">
-          <h3 className="text-lg font-medium mb-2">Supplier Data</h3>
-          
-          <div className="bg-gray-50 rounded border border-gray-200 overflow-x-auto">
-            <table className="min-w-full text-xs">
-              <tbody>
-                <tr className="border-b border-gray-200">
-                  <td className="px-2 py-1.5 font-medium">Name</td>
-                  <td className="px-2 py-1.5">{supplier?.name}</td>
-                </tr>
-                <tr className="border-b border-gray-200">
-                  <td className="px-2 py-1.5 font-medium">ID</td>
-                  <td className="px-2 py-1.5">{supplier?.id}</td>
-                </tr>
-                <tr className="border-b border-gray-200">
-                  <td className="px-2 py-1.5 font-medium">Total Products</td>
-                  <td className="px-2 py-1.5">{totalProducts}</td>
-                </tr>
-                <tr className="border-b border-gray-200">
-                  <td className="px-2 py-1.5 font-medium">Matched Products</td>
-                  <td className="px-2 py-1.5">{matchedProducts}</td>
-                </tr>
-                <tr className="border-b border-gray-200">
-                  <td className="px-2 py-1.5 font-medium">Average Cost</td>
-                  <td className="px-2 py-1.5">${avgCost.toFixed(2)}</td>
-                </tr>
-                
-                {/* Map all custom attributes */}
-                {customAttributes && customAttributes.length > 0 && customAttributes.map(({ attribute, value }) => {
-                  if (!attribute) return null;
-                  
-                  let displayValue: string;
-                  
-                  try {
-                    switch (attribute.type) {
-                      case 'Number':
-                        displayValue = typeof value === 'number' ? value.toFixed(2) : 'N/A';
-                        break;
-                      case 'Date':
-                        displayValue = value ? new Date(value).toLocaleDateString() : 'N/A';
-                        break;
-                      case 'Yes/No':
-                        displayValue = value === true ? 'Yes' : value === false ? 'No' : 'N/A';
-                        break;
-                      default:
-                        displayValue = value ? String(value) : 'N/A';
-                    }
-                  } catch (error) {
-                    console.error("Error formatting attribute value:", error);
-                    displayValue = 'Error';
-                    }
-                    
-                    return (
-                    <tr key={attribute.id} className="border-b border-gray-200">
-                      <td className="px-2 py-1.5 font-medium">{attribute.name}</td>
-                      <td className="px-2 py-1.5">{displayValue}</td>
-                    </tr>
-                    );
-                  })}
-              </tbody>
-            </table>
+            ))}
           </div>
         </Card>
       )}
       
-      {/* Supplier Products Section */}
-      {productsLoading ? (
-        <Card>
-          <div className="h-7 bg-gray-200 rounded animate-pulse w-40 mb-4"></div>
-          <div className="animate-pulse space-y-4">
-            <div className="h-10 bg-gray-200 rounded"></div>
-            <div className="h-10 bg-gray-200 rounded"></div>
-            <div className="h-10 bg-gray-200 rounded"></div>
-          </div>
-        </Card>
-      ) : (
-        supplier && <SupplierProducts supplierId={supplier.id} />
-      )}
+      {/* Supplier Products */}
+      <SupplierProducts supplierId={normalizedId} />
       
+      {/* Edit Supplier Modal */}
       {isModalOpen && supplier && (
         <SupplierModal
           isOpen={isModalOpen}
