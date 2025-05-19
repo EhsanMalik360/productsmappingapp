@@ -312,7 +312,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       </div>
     );
   };
-
+  
   // Main render with professional UI
   return (
     <Card className="mb-4">

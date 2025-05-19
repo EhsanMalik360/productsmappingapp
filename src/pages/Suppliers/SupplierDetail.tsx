@@ -63,8 +63,7 @@ const SupplierDetail: React.FC = () => {
     if (!normalizedId) return;
     
     try {
-      // Don't reset existing stats while loading to avoid flickering
-      // Only set loading to true if we don't already have stats
+      // Set loading state only if we don't have any data yet
       if (productStats.totalProducts === 0) {
         setLoadingStats(true);
       }
@@ -81,7 +80,6 @@ const SupplierDetail: React.FC = () => {
       const unmatchedProducts = totalProducts - matchedProducts;
       
       // For average cost, we need a separate endpoint or a sample
-      // For now, use the data we have locally or fetch a small sample
       let avgCost = 0;
       
       // Try to use the cost stats endpoint if available
@@ -413,7 +411,9 @@ const SupplierDetail: React.FC = () => {
           <h3 className="text-lg font-semibold mb-2">Total Products</h3>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-bold">
-              {loadingStats ? '\u00A0' : totalProducts.toLocaleString()}
+              {loadingStats && productStats.totalProducts === 0 ? 
+                <span className="text-gray-300">—</span> : 
+                totalProducts.toLocaleString()}
             </span>
           </div>
         </Card>
@@ -422,10 +422,13 @@ const SupplierDetail: React.FC = () => {
           <h3 className="text-lg font-semibold mb-2">Matched Products</h3>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-bold text-blue-600">
-              {loadingStats ? '\u00A0' : matchedProducts.toLocaleString()}
+              {loadingStats && productStats.matchedProducts === 0 ? 
+                <span className="text-gray-300">—</span> : 
+                matchedProducts.toLocaleString()}
             </span>
             <span className="text-sm text-gray-500 mb-1">
-              {loadingStats ? '' : `(${Math.round((matchedProducts / totalProducts) * 100) || 0}%)`}
+              {loadingStats && productStats.matchedProducts === 0 ? '' : 
+                `(${Math.round((matchedProducts / totalProducts) * 100) || 0}%)`}
             </span>
           </div>
         </Card>
@@ -434,7 +437,9 @@ const SupplierDetail: React.FC = () => {
           <h3 className="text-lg font-semibold mb-2">Average Cost</h3>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-bold text-green-600">
-              {loadingStats ? '\u00A0' : `$${avgCost.toFixed(2)}`}
+              {loadingStats && productStats.avgCost === 0 ? 
+                <span className="text-gray-300">—</span> : 
+                `$${avgCost.toFixed(2)}`}
             </span>
           </div>
         </Card>

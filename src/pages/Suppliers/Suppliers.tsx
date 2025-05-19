@@ -81,7 +81,7 @@ const Suppliers: React.FC = () => {
     
     return bestValueCount;
   };
-  
+
   // Get count of products for a supplier - server-side approach
   const getProductCount = useCallback(async (supplierId: string): Promise<number> => {
     // Check if we already have stats for this supplier in our map
@@ -318,7 +318,7 @@ const Suppliers: React.FC = () => {
       sp.supplier_id === supplierId && sp.product_id !== null
     );
   };
-  
+
   // Apply sorting
   const sortedSuppliers = useMemo(() => {
     if (!sortField) return filteredSuppliers;
@@ -677,18 +677,18 @@ const Suppliers: React.FC = () => {
                     </td>
                     <td className="px-4 py-4">
                       {!isStatLoaded && loadingStats 
-                        ? <span className="text-gray-400">\u00A0</span> 
-                        : stats.productCount}
+                        ? <span className="text-gray-500">—</span> 
+                        : stats.productCount.toLocaleString()}
                     </td>
                     <td className="px-4 py-4">
                       {!isStatLoaded && loadingStats 
-                        ? <span className="text-gray-400">\u00A0</span> 
+                        ? <span className="text-gray-500">—</span> 
                         : `$${stats.avgCost.toFixed(2)}`}
                     </td>
                     <td className="px-4 py-4">
                       {!isStatLoaded && loadingStats 
-                        ? <span className="text-gray-400">\u00A0</span> 
-                        : stats.bestValueCount}
+                        ? <span className="text-gray-500">—</span> 
+                        : stats.bestValueCount.toLocaleString()}
                     </td>
                     <td className="px-4 py-4 text-right space-x-2">
                       <Link to={`/suppliers/${supplier.id}`}>
