@@ -882,7 +882,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
     } catch (err) {
       console.error('Error fetching supplier products:', err);
-      throw err instanceof Error ? err : new Error('Failed to fetch supplier products');
+      // Always return a predictable response structure, even on error
+      // This helps prevent UI flicker and errors in components using this data
+      return {
+        data: [] as SupplierProduct[],
+        count: 0,
+        error: err instanceof Error ? err : new Error('Failed to fetch supplier products')
+      };
     }
   };
 

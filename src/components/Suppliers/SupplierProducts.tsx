@@ -29,7 +29,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const [matchMethodFilter, setMatchMethodFilter] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
   const [supplierProductsData, setSupplierProductsData] = useState<any[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [costStats, setCostStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
@@ -40,12 +40,16 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     unmatched: 0
   });
   const [hasInitializedFilters, setHasInitializedFilters] = useState(false);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   
   // Fetch data when component mounts or parameters change
   const loadData = useCallback(async () => {
     try {
-      setIsLoading(true);
-      
+      // Only show loading state for subsequent loads, not initial load
+      if (initialLoadComplete) {
+        setIsLoading(true);
+      }
+
       // Fetch data with server-side pagination
       const result = await fetchSupplierProducts(
         supplierId,
@@ -63,19 +67,22 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       
       setSupplierProductsData(result.data);
       setTotalCount(result.count);
-      
+    
       // If we haven't loaded filter stats yet, fetch them
       if (!hasInitializedFilters) {
         await loadFilterStats();
       }
+      
+      // Mark initial load as complete
+      setInitialLoadComplete(true);
       
     } catch (error) {
       console.error('Error loading supplier products:', error);
     } finally {
       setIsLoading(false);
     }
-  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters]);
-
+  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters, initialLoadComplete]);
+  
   // Load filter statistics (match stats, cost range, match methods)
   const loadFilterStats = useCallback(async () => {
     try {
@@ -99,7 +106,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
           min: costData.minCost || 0,
           max: costData.maxCost || 1000
         });
-        
+
         // Initialize cost range filter with the full range
         setCostRange({
           min: costData.minCost || 0,
@@ -305,49 +312,8 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       </div>
     );
   };
-  
-  // Show loading state
-  if (isLoading && productsWithDetails.length === 0) {
-    return (
-      <Card className="mb-4">
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h3 className="text-lg font-semibold">Supplier Products</h3>
-            <span className="text-sm text-gray-500">Loading data...</span>
-          </div>
-          <div className="flex items-center">
-            <div className="animate-spin mr-2 h-5 w-5 text-blue-600">
-              <RefreshCcw size={20} />
-            </div>
-          </div>
-        </div>
-        
-        <div className="animate-pulse space-y-3">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="flex justify-between items-center border-t py-3">
-              <div className="w-1/3">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-    );
-  }
-  
-  // Main render with progressive loading
+
+  // Main render with professional UI
   return (
     <Card className="mb-4">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
@@ -511,29 +477,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       )}
       
       {/* Show table content */}
-      {isLoading && productsWithDetails.length === 0 ? (
-        <div className="animate-pulse space-y-3">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="flex justify-between items-center border-t py-3">
-              <div className="w-1/3">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : productsWithDetails.length === 0 ? (
+      {productsWithDetails.length === 0 ? (
         <EmptyState
           message={`No ${filterOption} products found matching your criteria`}
           suggestion={

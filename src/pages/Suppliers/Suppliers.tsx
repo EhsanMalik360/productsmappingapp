@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { PlusCircle, Search, RefreshCcw, Trash2, Eye, Edit, Filter, X, ArrowDownAZ, DollarSign, Package, ShoppingCart, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import { useAppContext, Supplier } from '../../context/AppContext';
@@ -18,7 +18,7 @@ type SortField = 'name' | 'products' | 'cost' | 'bestValue' | '';
 type SortOrder = 'asc' | 'desc';
 
 const Suppliers: React.FC = () => {
-  const { suppliers, supplierProducts, loading, initialLoading, refreshData, deleteSupplier } = useAppContext();
+  const { suppliers, supplierProducts, loading, initialLoading, refreshData, deleteSupplier, fetchSupplierProducts } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -32,91 +32,8 @@ const Suppliers: React.FC = () => {
   const [hasMatchedProducts, setHasMatchedProducts] = useState<boolean | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
-  
-  // Get count of products for a supplier - moved up to avoid circular reference
-  const getProductCount = (supplierId: string): number => {
-    return supplierProducts.filter(sp => sp.supplier_id === supplierId).length;
-  };
-  
-  // Get product count range for all suppliers
-  const productCountStats = useMemo(() => {
-    if (suppliers.length === 0) return { min: 0, max: 100 };
-    
-    const counts = suppliers.map(s => getProductCount(s.id));
-    return {
-      min: 0,
-      max: Math.max(...counts, 10) // Ensure at least 10 for the slider
-    };
-  }, [suppliers, supplierProducts]);
-
-  // Init product count filter with stats
-  useEffect(() => {
-    setProductCountFilter(productCountStats);
-  }, [productCountStats]);
-  
-  const handleRefresh = async () => {
-    try {
-      setIsRefreshing(true);
-      await refreshData();
-    } catch (error) {
-      console.error('Error refreshing data:', error);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-  
-  const openAddModal = () => {
-    setCurrentSupplier(null);
-    setIsModalOpen(true);
-  };
-  
-  const openEditModal = (supplier: Supplier) => {
-    setCurrentSupplier(supplier);
-    setIsModalOpen(true);
-  };
-  
-  const closeModal = () => {
-    setIsModalOpen(false);
-  };
-  
-  const handleDelete = async (supplier: Supplier) => {
-    // Check if supplier has associated products
-    const productCount = getProductCount(supplier.id);
-    if (productCount > 0) {
-      setDeleteError(`Cannot delete "${supplier.name}" because it has ${productCount} associated products.`);
-      return;
-    }
-    
-    try {
-      setIsDeleting(true);
-      await deleteSupplier(supplier.id);
-      setDeleteError(null);
-    } catch (error) {
-      console.error('Error deleting supplier:', error);
-      setDeleteError('Failed to delete supplier. Please try again.');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-  
-  // Clear error after 5 seconds
-  useEffect(() => {
-    if (deleteError) {
-      const timer = setTimeout(() => {
-        setDeleteError(null);
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [deleteError]);
-  
-  // Calculate supplier statistics
-  const getSupplierStats = (supplierId: string): SupplierStats => {
-    return {
-      productCount: getProductCount(supplierId),
-      avgCost: calculateAverageCost(supplierId),
-      bestValueCount: calculateBestValueCount(supplierId)
-    };
-  };
+  const [supplierStatsMap, setSupplierStatsMap] = useState<Map<string, SupplierStats>>(new Map());
+  const [loadingStats, setLoadingStats] = useState(false);
   
   // Calculate average cost for a supplier's products
   const calculateAverageCost = (supplierId: string): number => {
@@ -164,15 +81,218 @@ const Suppliers: React.FC = () => {
     
     return bestValueCount;
   };
+  
+  // Get count of products for a supplier - server-side approach
+  const getProductCount = useCallback(async (supplierId: string): Promise<number> => {
+    // Check if we already have stats for this supplier in our map
+    if (supplierStatsMap.has(supplierId)) {
+      return supplierStatsMap.get(supplierId)?.productCount || 0;
+    }
+    
+    try {
+      // Get total count from server
+      const result = await fetchSupplierProducts(supplierId, 1, 1);
+      return result.count || 0;
+    } catch (error) {
+      console.error(`Error fetching product count for supplier ${supplierId}:`, error);
+      // Fallback to client-side count
+      return supplierProducts.filter(sp => sp.supplier_id === supplierId).length;
+    }
+  }, [supplierStatsMap, fetchSupplierProducts, supplierProducts]);
+  
+  // Load accurate stats for all suppliers
+  const loadSupplierStats = useCallback(async () => {
+    if (!suppliers || suppliers.length === 0) return;
+    
+    setLoadingStats(true);
+    
+    try {
+      const statsMap = new Map<string, SupplierStats>();
+      
+      // Process suppliers in batches to avoid too many simultaneous requests
+      const batchSize = 5;
+      for (let i = 0; i < suppliers.length; i += batchSize) {
+        const batch = suppliers.slice(i, i + batchSize);
+        
+        // Create an array of promises for this batch
+        const batchPromises = batch.map(async (supplier) => {
+          try {
+            // Get total count
+            const totalResult = await fetchSupplierProducts(supplier.id, 1, 1);
+            
+            // Get matched count
+            const matchedResult = await fetchSupplierProducts(supplier.id, 1, 1, { filterOption: 'matched' });
+            
+            // Calculate average cost (approximation)
+            const { data: costData } = await fetch(`/api/supplier-product-stats/${supplier.id}`)
+              .then(res => res.json())
+              .catch(() => ({ data: null }));
+            
+            const avgCost = costData ? (costData.minCost + costData.maxCost) / 2 : 0;
+            
+            // Calculate best value count - this is more complex and might need a server endpoint
+            // For now, we'll continue using client-side calculation
+            const bestValue = calculateBestValueCount(supplier.id);
+            
+            // Create stats object
+            const stats: SupplierStats = {
+              productCount: totalResult.count || 0,
+              avgCost: avgCost || 0,
+              bestValueCount: bestValue
+            };
+            
+            // Add to map
+            statsMap.set(supplier.id, stats);
+          } catch (error) {
+            console.error(`Error loading stats for supplier ${supplier.id}:`, error);
+            
+            // Fallback to client-side stats
+            statsMap.set(supplier.id, {
+              productCount: supplierProducts.filter(sp => sp.supplier_id === supplier.id).length,
+              avgCost: calculateAverageCost(supplier.id),
+              bestValueCount: calculateBestValueCount(supplier.id)
+            });
+          }
+        });
+        
+        // Wait for all promises in this batch to complete
+        await Promise.all(batchPromises);
+      }
+      
+      // Update state with the complete map
+      setSupplierStatsMap(statsMap);
+      
+      // Update product count filter range based on accurate counts
+      if (statsMap.size > 0) {
+        const counts = Array.from(statsMap.values()).map(stats => stats.productCount);
+        const maxCount = Math.max(...counts, 10); // Ensure at least 10 for the slider
+        
+        setProductCountFilter({
+          min: 0,
+          max: maxCount
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error loading supplier stats:', error);
+    } finally {
+      setLoadingStats(false);
+    }
+  }, [suppliers, fetchSupplierProducts, supplierProducts, calculateBestValueCount, calculateAverageCost]);
+  
+  // Load stats when component mounts or suppliers change
+  useEffect(() => {
+    if (!loadingStats && suppliers.length > 0) {
+      loadSupplierStats();
+    }
+  }, [suppliers, loadSupplierStats, loadingStats]);
+  
+  // Get product count range for all suppliers
+  const productCountStats = useMemo(() => {
+    if (supplierStatsMap.size > 0) {
+      // Use accurate counts from server
+      const counts = Array.from(supplierStatsMap.values()).map(stats => stats.productCount);
+      return {
+        min: 0,
+        max: Math.max(...counts, 10) // Ensure at least 10 for the slider
+      };
+    } else if (suppliers.length === 0) {
+      return { min: 0, max: 100 };
+    } else {
+      // Fallback to client-side counts
+      const clientSideCounts = suppliers.map(s => supplierProducts.filter(sp => sp.supplier_id === s.id).length);
+      return {
+        min: 0,
+        max: Math.max(...clientSideCounts, 10) // Ensure at least 10 for the slider
+      };
+    }
+  }, [supplierStatsMap, suppliers, supplierProducts]);
 
-  // Check if supplier has matched products
-  const hasMatches = (supplierId: string): boolean => {
-    return supplierProducts.some(sp => 
-      sp.supplier_id === supplierId && sp.product_id !== null
-    );
+  // Init product count filter with stats
+  useEffect(() => {
+    setProductCountFilter(productCountStats);
+  }, [productCountStats]);
+  
+  const handleRefresh = async () => {
+    try {
+      setIsRefreshing(true);
+      await refreshData();
+      
+      // Reload supplier stats after refresh
+      await loadSupplierStats();
+    } catch (error) {
+      console.error('Error refreshing data:', error);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
   
-  // Filter suppliers based on search and filters
+  const openAddModal = () => {
+    setCurrentSupplier(null);
+    setIsModalOpen(true);
+  };
+  
+  const openEditModal = (supplier: Supplier) => {
+    setCurrentSupplier(supplier);
+    setIsModalOpen(true);
+  };
+  
+  const closeModal = () => {
+    setIsModalOpen(false);
+    
+    // Refresh stats after modal closes
+    loadSupplierStats();
+  };
+  
+  const handleDelete = async (supplier: Supplier) => {
+    // Check if supplier has associated products
+    const productCount = supplierStatsMap.has(supplier.id) 
+      ? supplierStatsMap.get(supplier.id)?.productCount || 0
+      : supplierProducts.filter(sp => sp.supplier_id === supplier.id).length;
+      
+    if (productCount > 0) {
+      setDeleteError(`Cannot delete "${supplier.name}" because it has ${productCount} associated products.`);
+      return;
+    }
+    
+    try {
+      setIsDeleting(true);
+      await deleteSupplier(supplier.id);
+      setDeleteError(null);
+    } catch (error) {
+      console.error('Error deleting supplier:', error);
+      setDeleteError('Failed to delete supplier. Please try again.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+  
+  // Clear error after 5 seconds
+  useEffect(() => {
+    if (deleteError) {
+      const timer = setTimeout(() => {
+        setDeleteError(null);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [deleteError]);
+  
+  // Get supplier statistics - use cached server stats when available
+  const getSupplierStats = (supplierId: string): SupplierStats => {
+    // If we have server-side stats, use those
+    if (supplierStatsMap.has(supplierId)) {
+      return supplierStatsMap.get(supplierId)!;
+    }
+    
+    // Fallback to client-side calculation
+    return {
+      productCount: supplierProducts.filter(sp => sp.supplier_id === supplierId).length,
+      avgCost: calculateAverageCost(supplierId),
+      bestValueCount: calculateBestValueCount(supplierId)
+    };
+  };
+  
+  // Filter suppliers based on search and filters - update to handle async product count
   const filteredSuppliers = useMemo(() => {
     return suppliers.filter(supplier => {
       // Search filter
@@ -192,6 +312,13 @@ const Suppliers: React.FC = () => {
     });
   }, [suppliers, searchTerm, productCountFilter, hasMatchedProducts, supplierProducts]);
 
+  // Check if supplier has matched products
+  const hasMatches = (supplierId: string): boolean => {
+    return supplierProducts.some(sp => 
+      sp.supplier_id === supplierId && sp.product_id !== null
+    );
+  };
+  
   // Apply sorting
   const sortedSuppliers = useMemo(() => {
     if (!sortField) return filteredSuppliers;
