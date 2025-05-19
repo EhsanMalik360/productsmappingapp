@@ -57,7 +57,7 @@ const SupplierDetail: React.FC = () => {
   const [statsLoading, setStatsLoading] = useState(false);
   const [attributesLoading, setAttributesLoading] = useState(false);
   const [productsLoading, setProductsLoading] = useState(false);
-  
+
   // Initialize product stats from cache if available
   const cachedStats = normalizedId ? statsCache.get(normalizedId) : undefined;
   const [productStats, setProductStats] = useState({
@@ -387,7 +387,7 @@ const SupplierDetail: React.FC = () => {
         <div className="flex items-center">
           <Button 
             onClick={() => navigate('/suppliers')} 
-            variant="secondary"
+            variant="secondary" 
             className="mr-4 flex items-center"
           >
             <ArrowLeft size={16} className="mr-2" /> Back to Suppliers
@@ -395,15 +395,15 @@ const SupplierDetail: React.FC = () => {
           
           <h1 className="text-2xl font-bold">
             {isEditing ? (
-              <input
-                type="text"
-                value={editedSupplier?.name || ''}
-                onChange={(e) => handleEditChange('name', e.target.value)}
+            <input
+              type="text"
+              value={editedSupplier?.name || ''}
+              onChange={(e) => handleEditChange('name', e.target.value)}
                 className="border rounded px-2 py-1 w-64"
-              />
-            ) : (
+            />
+          ) : (
               supplier?.name || 'Loading...'
-            )}
+          )}
           </h1>
         </div>
         
@@ -434,8 +434,8 @@ const SupplierDetail: React.FC = () => {
             <>
               <Button 
                 variant="secondary" 
-                onClick={() => setIsEditing(true)}
-                className="flex items-center"
+                onClick={() => setIsEditing(true)} 
+                className="flex items-center" 
               >
                 <Edit size={16} className="mr-2" /> Edit
               </Button>
@@ -447,7 +447,7 @@ const SupplierDetail: React.FC = () => {
               >
                 {isRefreshing ? 'Refreshing...' : (
                   <>
-                    <RefreshCcw size={16} className="mr-2" /> Refresh
+                <RefreshCcw size={16} className="mr-2" /> Refresh
                   </>
                 )}
               </Button>
@@ -483,7 +483,7 @@ const SupplierDetail: React.FC = () => {
                 `(${Math.round((productStats.matchedProducts / productStats.totalProducts) * 100) || 0}%)`}
             </span>
             {loadingStats && <span className="text-xs text-gray-400">(updating...)</span>}
-          </div>
+              </div>
         </Card>
         
         <Card className="shadow-sm">
@@ -495,7 +495,7 @@ const SupplierDetail: React.FC = () => {
                 `$${productStats.avgCost.toFixed(2)}`}
             </span>
             {loadingStats && <span className="text-xs text-gray-400">(updating...)</span>}
-          </div>
+              </div>
         </Card>
         
         <Card className="shadow-sm">
@@ -504,7 +504,7 @@ const SupplierDetail: React.FC = () => {
             <span className={`text-3xl font-bold ${avgProfitMargin > 0 ? 'text-green-600' : 'text-red-600'}`}>
               {avgProfitMargin.toFixed(1)}%
             </span>
-          </div>
+        </div>
         </Card>
       </div>
       
@@ -512,14 +512,14 @@ const SupplierDetail: React.FC = () => {
       {supplier && (
         <Card className="mb-6 shadow-sm">
           <h3 className="text-lg font-semibold mb-4">Supplier Details</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {getEntityAttributes(supplier.id, 'supplier').map(({ attribute, value }) => (
               <div key={attribute.id}>
                 <h4 className="text-sm font-medium text-gray-700 mb-1">{attribute.name}</h4>
                 <div className="border rounded-md p-2 bg-gray-50">
-                  {isEditing ? (
-                    <input
-                      type="text"
+                      {isEditing ? (
+                            <input
+                              type="text"
                       value={value || ''}
                       onChange={(e) => {
                         // Update attribute value
@@ -529,8 +529,8 @@ const SupplierDetail: React.FC = () => {
                     />
                   ) : (
                     <p className="text-gray-800">{value || '-'}</p>
-                  )}
-                </div>
+                      )}
+                    </div>
               </div>
             ))}
           </div>

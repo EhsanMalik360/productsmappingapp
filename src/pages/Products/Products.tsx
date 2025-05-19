@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Table from '../../components/UI/Table';
@@ -26,17 +26,97 @@ const Products: React.FC = () => {
   const [brands, setBrands] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [priceStats, setPriceStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
+  const [dataLoaded, setDataLoaded] = useState(false);
+  const [isNavigating, setIsNavigating] = useState(false);
   
-  // Load data when component mounts
+  // Load data with debounce to prevent multiple API calls
+  const loadData = useCallback(async () => {
+    // Skip loading if we're currently navigating between pages
+    if (isNavigating) {
+      console.log('Skipping data load during navigation');
+      return;
+    }
+    
+    try {
+      console.log('Loading products data...');
+      const filters = {
+        searchTerm,
+        brand: selectedBrand,
+        category: selectedCategory,
+        priceRange,
+        hasSuppliers,
+        sortField,
+        sortOrder
+      };
+      
+      const result = await fetchProducts(currentPage, itemsPerPage, filters);
+      console.log(`Loaded ${result.data.length} products`);
+      setDataLoaded(true);
+    } catch (error) {
+      console.error('Error loading products:', error);
+    }
+  }, [
+    currentPage,
+    itemsPerPage, 
+    searchTerm, 
+    selectedBrand, 
+    selectedCategory, 
+    priceRange, 
+    hasSuppliers,
+    sortField,
+    sortOrder,
+    fetchProducts,
+    isNavigating
+  ]);
+  
+  // Create a debounced version of loadData with useEffect
+  useEffect(() => {
+    // Skip initial load to prevent double-loading
+    if (!dataLoaded) return;
+    
+    // Use a small delay to batch rapid changes
+    const timer = setTimeout(() => {
+      loadData();
+    }, 300);
+    
+    return () => clearTimeout(timer);
+  }, [
+    currentPage,
+    itemsPerPage, 
+    searchTerm, 
+    selectedBrand, 
+    selectedCategory, 
+    priceRange, 
+    hasSuppliers,
+    sortField,
+    sortOrder,
+    loadData,
+    dataLoaded
+  ]);
+  
+  // Initial data load
   useEffect(() => {
     loadData();
     loadMetadata();
   }, []);
   
-  // Load data when page changes or filters change
+  // Track navigation state
   useEffect(() => {
-    loadData();
-  }, [currentPage, itemsPerPage, searchTerm, selectedBrand, selectedCategory, priceRange, hasSuppliers, sortField, sortOrder]);
+    // This runs when component mounts - initial navigation start
+    setIsNavigating(true);
+    
+    // After a short delay, assume navigation is complete
+    const timer = setTimeout(() => {
+      setIsNavigating(false);
+    }, 500);
+    
+    // Cleanup
+    return () => {
+      clearTimeout(timer);
+      // When component unmounts (navigating away), set flag to true
+      setIsNavigating(true);
+    };
+  }, []);
   
   // Load metadata (brands, categories, price range)
   const loadMetadata = async () => {
@@ -55,22 +135,6 @@ const Products: React.FC = () => {
       setPriceRange(priceRangeData);
     } catch (error) {
       console.error('Error loading metadata:', error);
-    }
-  };
-  
-  const loadData = async () => {
-    try {
-      await fetchProducts(currentPage, itemsPerPage, {
-        searchTerm,
-        brand: selectedBrand,
-        category: selectedCategory,
-        priceRange,
-        hasSuppliers,
-        sortField,
-        sortOrder
-      });
-    } catch (error) {
-      console.error('Error loading products:', error);
     }
   };
   

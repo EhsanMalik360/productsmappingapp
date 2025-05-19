@@ -97,36 +97,69 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         unmatched: unmatchedResult.count
       });
       
-      // Fetch min/max cost (we'll need a special query for this)
-      const { data: costData, error: costError } = await fetch(`/api/supplier-product-stats/${supplierId}`)
-        .then(res => res.json());
-        
-      if (!costError && costData) {
-        setCostStats({
-          min: costData.minCost || 0,
-          max: costData.maxCost || 1000
-        });
+      // Fetch min/max cost with improved error handling
+      try {
+        const response = await fetch(`/api/supplier-product-stats/${supplierId}`)
+          .then(res => {
+            if (!res.ok) {
+              throw new Error(`API returned ${res.status}: ${res.statusText}`);
+            }
+            return res.json();
+          });
+          
+        if (response && response.data) {
+          setCostStats({
+            min: response.data.minCost || 0,
+            max: response.data.maxCost || 1000
+          });
 
-        // Initialize cost range filter with the full range
+          // Initialize cost range filter with the full range
+          setCostRange({
+            min: response.data.minCost || 0,
+            max: response.data.maxCost || 1000
+          });
+        }
+      } catch (costError) {
+        console.error('Error fetching cost stats:', costError);
+        // Use fallback values if API fails
+        const fallbackMax = Math.max(...supplierProductsData.map(sp => sp.cost || 0), 1000);
+        setCostStats({
+          min: 0,
+          max: fallbackMax
+        });
         setCostRange({
-          min: costData.minCost || 0,
-          max: costData.maxCost || 1000
+          min: 0, 
+          max: fallbackMax
         });
       }
       
-      // Fetch unique match methods
-      const { data: methodsData } = await fetch(`/api/supplier-product-methods/${supplierId}`)
-        .then(res => res.json());
-        
-      if (methodsData && methodsData.matchMethods) {
-        setMatchMethods(methodsData.matchMethods);
+      // Fetch unique match methods with improved error handling
+      try {
+        const response = await fetch(`/api/supplier-product-methods/${supplierId}`)
+          .then(res => {
+            if (!res.ok) {
+              throw new Error(`API returned ${res.status}: ${res.statusText}`);
+            }
+            return res.json();
+          });
+          
+        if (response && response.data && response.data.matchMethods) {
+          setMatchMethods(response.data.matchMethods);
+        }
+      } catch (methodsError) {
+        console.error('Error fetching match methods:', methodsError);
+        // Use empty array as fallback
+        setMatchMethods([]);
       }
       
       setHasInitializedFilters(true);
     } catch (error) {
       console.error('Error loading filter stats:', error);
+      // Ensure we still mark filters as initialized even on error
+      // to prevent endless retry loops
+      setHasInitializedFilters(true);
     }
-  }, [supplierId, fetchSupplierProducts]);
+  }, [supplierId, fetchSupplierProducts, supplierProductsData]);
 
   // Load data when component mounts or when parameters change
   useEffect(() => {
