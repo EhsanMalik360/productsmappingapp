@@ -9,6 +9,15 @@ import SupplierModal from './SupplierModal';
 import SupplierProducts from '../../components/Suppliers/SupplierProducts';
 import toast from 'react-hot-toast';
 
+// Create a statistics cache to store values between renders
+const statsCache = new Map<string, {
+  totalProducts: number;
+  matchedProducts: number;
+  unmatchedProducts: number;
+  avgCost: number;
+  timestamp: number;
+}>();
+
 const SupplierDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -23,6 +32,13 @@ const SupplierDetail: React.FC = () => {
     updateSupplier,
     fetchSupplierProducts
   } = useAppContext();
+  
+  // Ensure ID is properly formatted - remove any UUID format issues
+  const normalizedId = useMemo(() => {
+    if (!id) return '';
+    // Return the full ID without any processing that might truncate it
+    return String(id); // Convert to string to ensure it's a string type
+  }, [id]);
   
   // State for component
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -42,29 +58,23 @@ const SupplierDetail: React.FC = () => {
   const [attributesLoading, setAttributesLoading] = useState(false);
   const [productsLoading, setProductsLoading] = useState(false);
   
-  // Add state for product statistics from server
+  // Initialize product stats from cache if available
+  const cachedStats = normalizedId ? statsCache.get(normalizedId) : undefined;
   const [productStats, setProductStats] = useState({
-    totalProducts: 0,
-    matchedProducts: 0,
-    unmatchedProducts: 0,
-    avgCost: 0
+    totalProducts: cachedStats?.totalProducts || 0,
+    matchedProducts: cachedStats?.matchedProducts || 0,
+    unmatchedProducts: cachedStats?.unmatchedProducts || 0,
+    avgCost: cachedStats?.avgCost || 0
   });
-  const [loadingStats, setLoadingStats] = useState(true);
-
-  // Ensure ID is properly formatted - remove any UUID format issues
-  const normalizedId = useMemo(() => {
-    if (!id) return '';
-    // Return the full ID without any processing that might truncate it
-    return String(id); // Convert to string to ensure it's a string type
-  }, [id]);
+  const [loadingStats, setLoadingStats] = useState(!cachedStats);
 
   // Load product statistics from server
   const loadProductStats = useCallback(async () => {
     if (!normalizedId) return;
     
     try {
-      // Set loading state only if we don't have any data yet
-      if (productStats.totalProducts === 0) {
+      // Set loading state only if we don't have cached data
+      if (!statsCache.has(normalizedId)) {
         setLoadingStats(true);
       }
       
@@ -101,12 +111,24 @@ const SupplierDetail: React.FC = () => {
         }
       }
       
-      // Only update stats once we have all the data to prevent partial updates
-      setProductStats({
+      // Prepare new stats object
+      const newStats = {
         totalProducts,
         matchedProducts,
         unmatchedProducts,
-        avgCost
+        avgCost,
+        timestamp: Date.now()
+      };
+      
+      // Update the cache
+      statsCache.set(normalizedId, newStats);
+      
+      // Update state
+      setProductStats({
+        totalProducts: newStats.totalProducts,
+        matchedProducts: newStats.matchedProducts,
+        unmatchedProducts: newStats.unmatchedProducts,
+        avgCost: newStats.avgCost
       });
       
     } catch (error) {
@@ -115,6 +137,34 @@ const SupplierDetail: React.FC = () => {
       setLoadingStats(false);
     }
   }, [normalizedId, fetchSupplierProducts, supplierProducts]);
+
+  // Immediately use cached values if available, then load fresh data
+  useEffect(() => {
+    if (normalizedId) {
+      // If we have cached data, use it immediately
+      const cachedData = statsCache.get(normalizedId);
+      if (cachedData) {
+        // Check if cache is still fresh (less than 30 min old)
+        const isFresh = Date.now() - cachedData.timestamp < 30 * 60 * 1000;
+        
+        // Update state with cached data
+        setProductStats({
+          totalProducts: cachedData.totalProducts,
+          matchedProducts: cachedData.matchedProducts,
+          unmatchedProducts: cachedData.unmatchedProducts,
+          avgCost: cachedData.avgCost
+        });
+        
+        // Only set loading to false if the cache is fresh
+        if (isFresh) {
+          setLoadingStats(false);
+        }
+      }
+      
+      // Always load fresh data in the background
+      loadProductStats();
+    }
+  }, [normalizedId, loadProductStats]);
 
   // Memoize the fetchLatestData function to prevent it from changing on every render
   const fetchLatestData = useCallback(async () => {
@@ -319,10 +369,6 @@ const SupplierDetail: React.FC = () => {
     );
   }
   
-  // Calculate statistics
-  // Use values from server for accurate counts
-  const { totalProducts, matchedProducts, unmatchedProducts, avgCost } = productStats;
-  
   // Calculate profit margin based on the products we have loaded (for display only)
   const profitableProducts = productsWithDetails.filter(p => p && typeof p.profitMargin === 'number' && p.profitMargin > 0);
   const avgProfitMargin = profitableProducts.length > 0
@@ -411,10 +457,11 @@ const SupplierDetail: React.FC = () => {
           <h3 className="text-lg font-semibold mb-2">Total Products</h3>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-bold">
-              {loadingStats && productStats.totalProducts === 0 ? 
+              {productStats.totalProducts === 0 ? 
                 <span className="text-gray-300">—</span> : 
-                totalProducts.toLocaleString()}
+                productStats.totalProducts.toLocaleString()}
             </span>
+            {loadingStats && <span className="text-xs text-gray-400">(updating...)</span>}
           </div>
         </Card>
         
@@ -422,14 +469,15 @@ const SupplierDetail: React.FC = () => {
           <h3 className="text-lg font-semibold mb-2">Matched Products</h3>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-bold text-blue-600">
-              {loadingStats && productStats.matchedProducts === 0 ? 
+              {productStats.matchedProducts === 0 ? 
                 <span className="text-gray-300">—</span> : 
-                matchedProducts.toLocaleString()}
+                productStats.matchedProducts.toLocaleString()}
             </span>
             <span className="text-sm text-gray-500 mb-1">
-              {loadingStats && productStats.matchedProducts === 0 ? '' : 
-                `(${Math.round((matchedProducts / totalProducts) * 100) || 0}%)`}
+              {productStats.totalProducts === 0 ? '' : 
+                `(${Math.round((productStats.matchedProducts / productStats.totalProducts) * 100) || 0}%)`}
             </span>
+            {loadingStats && <span className="text-xs text-gray-400">(updating...)</span>}
           </div>
         </Card>
         
@@ -437,10 +485,11 @@ const SupplierDetail: React.FC = () => {
           <h3 className="text-lg font-semibold mb-2">Average Cost</h3>
           <div className="flex items-end gap-2">
             <span className="text-3xl font-bold text-green-600">
-              {loadingStats && productStats.avgCost === 0 ? 
+              {productStats.avgCost === 0 ? 
                 <span className="text-gray-300">—</span> : 
-                `$${avgCost.toFixed(2)}`}
+                `$${productStats.avgCost.toFixed(2)}`}
             </span>
+            {loadingStats && <span className="text-xs text-gray-400">(updating...)</span>}
           </div>
         </Card>
         

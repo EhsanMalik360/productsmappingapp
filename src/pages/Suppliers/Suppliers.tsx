@@ -14,6 +14,15 @@ interface SupplierStats {
   bestValueCount: number;
 }
 
+// Create a global cache for supplier statistics
+const suppliersStatsGlobalCache = new Map<string, {
+  stats: SupplierStats;
+  timestamp: number;
+}>();
+
+// Cache expiration time in milliseconds (30 minutes)
+const CACHE_EXPIRATION = 30 * 60 * 1000;
+
 type SortField = 'name' | 'products' | 'cost' | 'bestValue' | '';
 type SortOrder = 'asc' | 'desc';
 
@@ -82,32 +91,36 @@ const Suppliers: React.FC = () => {
     return bestValueCount;
   };
 
-  // Get count of products for a supplier - server-side approach
-  const getProductCount = useCallback(async (supplierId: string): Promise<number> => {
-    // Check if we already have stats for this supplier in our map
-    if (supplierStatsMap.has(supplierId)) {
-      return supplierStatsMap.get(supplierId)?.productCount || 0;
-    }
-    
-    try {
-      // Get total count from server
-      const result = await fetchSupplierProducts(supplierId, 1, 1);
-      return result.count || 0;
-    } catch (error) {
-      console.error(`Error fetching product count for supplier ${supplierId}:`, error);
-      // Fallback to client-side count
-      return supplierProducts.filter(sp => sp.supplier_id === supplierId).length;
-    }
-  }, [supplierStatsMap, fetchSupplierProducts, supplierProducts]);
-  
-  // Load accurate stats for all suppliers
+  // Load supplier stats - enhanced with caching
   const loadSupplierStats = useCallback(async () => {
     if (!suppliers || suppliers.length === 0) return;
     
+    // Initialize with cached data immediately
+    const initialStatsMap = new Map<string, SupplierStats>();
+    
+    // Apply any cached stats we already have first
+    suppliers.forEach(supplier => {
+      const cachedEntry = suppliersStatsGlobalCache.get(supplier.id);
+      
+      if (cachedEntry) {
+        const isFresh = Date.now() - cachedEntry.timestamp < CACHE_EXPIRATION;
+        
+        if (isFresh) {
+          initialStatsMap.set(supplier.id, cachedEntry.stats);
+        }
+      }
+    });
+    
+    // Update state immediately with cached data first
+    if (initialStatsMap.size > 0) {
+      setSupplierStatsMap(initialStatsMap);
+    }
+    
+    // Start loading fresh data in the background
     setLoadingStats(true);
     
     try {
-      const statsMap = new Map<string, SupplierStats>();
+      const statsMap = new Map<string, SupplierStats>(initialStatsMap);
       
       // Process suppliers in batches to avoid too many simultaneous requests
       const batchSize = 5;
@@ -117,6 +130,12 @@ const Suppliers: React.FC = () => {
         // Create an array of promises for this batch
         const batchPromises = batch.map(async (supplier) => {
           try {
+            // Skip if we have fresh cached data
+            const cachedEntry = suppliersStatsGlobalCache.get(supplier.id);
+            if (cachedEntry && (Date.now() - cachedEntry.timestamp < CACHE_EXPIRATION)) {
+              return;
+            }
+            
             // Get total count
             const totalResult = await fetchSupplierProducts(supplier.id, 1, 1);
             
@@ -141,36 +160,48 @@ const Suppliers: React.FC = () => {
               bestValueCount: bestValue
             };
             
-            // Add to map
+            // Add to maps (both current state and global cache)
             statsMap.set(supplier.id, stats);
+            suppliersStatsGlobalCache.set(supplier.id, {
+              stats,
+              timestamp: Date.now()
+            });
           } catch (error) {
             console.error(`Error loading stats for supplier ${supplier.id}:`, error);
             
-            // Fallback to client-side stats
-            statsMap.set(supplier.id, {
-              productCount: supplierProducts.filter(sp => sp.supplier_id === supplier.id).length,
-              avgCost: calculateAverageCost(supplier.id),
-              bestValueCount: calculateBestValueCount(supplier.id)
-            });
+            // Fallback to client-side stats if not already in the map
+            if (!statsMap.has(supplier.id)) {
+              const fallbackStats = {
+                productCount: supplierProducts.filter(sp => sp.supplier_id === supplier.id).length,
+                avgCost: calculateAverageCost(supplier.id),
+                bestValueCount: calculateBestValueCount(supplier.id)
+              };
+              
+              statsMap.set(supplier.id, fallbackStats);
+              suppliersStatsGlobalCache.set(supplier.id, {
+                stats: fallbackStats,
+                timestamp: Date.now()
+              });
+            }
           }
         });
         
         // Wait for all promises in this batch to complete
         await Promise.all(batchPromises);
+        
+        // Update state with the batch results
+        setSupplierStatsMap(new Map(statsMap));
       }
-      
-      // Update state with the complete map
-      setSupplierStatsMap(statsMap);
       
       // Update product count filter range based on accurate counts
       if (statsMap.size > 0) {
         const counts = Array.from(statsMap.values()).map(stats => stats.productCount);
         const maxCount = Math.max(...counts, 10); // Ensure at least 10 for the slider
         
-        setProductCountFilter({
-          min: 0,
-          max: maxCount
-        });
+        setProductCountFilter(prevFilter => ({
+          ...prevFilter,
+          max: Math.max(prevFilter.max, maxCount)
+        }));
       }
       
     } catch (error) {
@@ -180,12 +211,12 @@ const Suppliers: React.FC = () => {
     }
   }, [suppliers, fetchSupplierProducts, supplierProducts, calculateBestValueCount, calculateAverageCost]);
   
-  // Load stats when component mounts or suppliers change
+  // Initialize from cache and load stats on mount and when suppliers change
   useEffect(() => {
-    if (!loadingStats && suppliers.length > 0) {
+    if (suppliers.length > 0) {
       loadSupplierStats();
     }
-  }, [suppliers, loadSupplierStats, loadingStats]);
+  }, [suppliers, loadSupplierStats]);
   
   // Get product count range for all suppliers
   const productCountStats = useMemo(() => {
@@ -278,10 +309,16 @@ const Suppliers: React.FC = () => {
   }, [deleteError]);
   
   // Get supplier statistics - use cached server stats when available
-  const getSupplierStats = (supplierId: string): SupplierStats => {
+  const getSupplierStats = useCallback((supplierId: string): SupplierStats => {
     // If we have server-side stats, use those
     if (supplierStatsMap.has(supplierId)) {
       return supplierStatsMap.get(supplierId)!;
+    }
+    
+    // Check global cache
+    const cachedEntry = suppliersStatsGlobalCache.get(supplierId);
+    if (cachedEntry && (Date.now() - cachedEntry.timestamp < CACHE_EXPIRATION)) {
+      return cachedEntry.stats;
     }
     
     // Fallback to client-side calculation
@@ -290,7 +327,7 @@ const Suppliers: React.FC = () => {
       avgCost: calculateAverageCost(supplierId),
       bestValueCount: calculateBestValueCount(supplierId)
     };
-  };
+  }, [supplierStatsMap, supplierProducts, calculateAverageCost, calculateBestValueCount]);
   
   // Filter suppliers based on search and filters - update to handle async product count
   const filteredSuppliers = useMemo(() => {
@@ -675,21 +712,18 @@ const Suppliers: React.FC = () => {
                         {supplier.name}
                       </Link>
                     </td>
-                    <td className="px-4 py-4">
-                      {!isStatLoaded && loadingStats 
-                        ? <span className="text-gray-500">—</span> 
-                        : stats.productCount.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-4">
-                      {!isStatLoaded && loadingStats 
-                        ? <span className="text-gray-500">—</span> 
-                        : `$${stats.avgCost.toFixed(2)}`}
-                    </td>
-                    <td className="px-4 py-4">
-                      {!isStatLoaded && loadingStats 
-                        ? <span className="text-gray-500">—</span> 
-                        : stats.bestValueCount.toLocaleString()}
-                    </td>
+                                      <td className="px-4 py-4">
+                    {stats.productCount.toLocaleString()}
+                    {loadingStats && !isStatLoaded && <span className="text-xs text-gray-400 ml-1">(updating...)</span>}
+                  </td>
+                  <td className="px-4 py-4">
+                    ${stats.avgCost.toFixed(2)}
+                    {loadingStats && !isStatLoaded && <span className="text-xs text-gray-400 ml-1">(updating...)</span>}
+                  </td>
+                  <td className="px-4 py-4">
+                    {stats.bestValueCount.toLocaleString()}
+                    {loadingStats && !isStatLoaded && <span className="text-xs text-gray-400 ml-1">(updating...)</span>}
+                  </td>
                     <td className="px-4 py-4 text-right space-x-2">
                       <Link to={`/suppliers/${supplier.id}`}>
                         <Button variant="secondary" className="text-blue-600 text-sm">
