@@ -67,12 +67,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    let isMounted = true;
+    
+    // Safety timeout to prevent infinite loading
+    const timeoutId = setTimeout(() => {
+      if (isMounted && loading) {
+        console.warn('Session check timed out after 10 seconds, forcing loading state to false');
+        setLoading(false);
+      }
+    }, 10000);
+    
     // Check active session on page load
     const getSession = async () => {
       try {
         console.log('Checking for existing session...');
-        const { data, error } = await supabase.auth.getSession();
-        console.log('getSession result:', data, error);
+        
+        // Add a timeout to the getSession request
+        const sessionPromise = supabase.auth.getSession();
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Session fetch timed out')), 5000)
+        );
+        
+        const { data, error } = await Promise.race([sessionPromise, timeoutPromise]) as any;
+        
+        if (!isMounted) return;
         
         if (error) {
           console.error('Error getting session:', error);
@@ -86,7 +104,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           
           // Fetch user profile with role
           const profile = await fetchUserProfile(data.session.user.id);
-          setUserProfile(profile);
+          if (isMounted) {
+            setUserProfile(profile);
+          }
         } else {
           console.log('No active session found');
         }
@@ -94,7 +114,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('Unexpected error in getSession:', err);
       } finally {
         // Always set loading to false to prevent infinite loading
-        setLoading(false);
+        if (isMounted) {
+          setLoading(false);
+        }
       }
     };
 
@@ -108,11 +130,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         async (event, session) => {
           console.log('Auth state changed:', event);
           
+          if (!isMounted) return;
+          
           if (session) {
             setUser(session.user);
             
             // Fetch user profile with role
             const profile = await fetchUserProfile(session.user.id);
+            
+            if (!isMounted) return;
             
             // If user is inactive, sign them out immediately
             if (profile && profile.is_active === false) {
@@ -138,8 +164,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     }
 
-    // Cleanup subscription
+    // Cleanup subscription and prevent state updates after unmount
     return () => {
+      isMounted = false;
+      clearTimeout(timeoutId);
       if (subscription) {
         subscription.unsubscribe();
       }
