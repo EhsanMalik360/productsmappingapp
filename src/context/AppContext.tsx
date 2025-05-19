@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
 import { useProducts, useSuppliers } from '../hooks/useSupabase';
 import { supabase } from '../lib/supabase';
 
@@ -121,9 +121,6 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 // Provider component
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Add a state to track if a major data refresh is in progress
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  
   // Add a state to keep track of whether initial data has been loaded
   const [dataInitialized, setDataInitialized] = useState<boolean>(false);
   
@@ -150,43 +147,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     deleteSupplier: deleteSupplierFromDb,
     refreshSuppliers 
   } = useSuppliers(dataInitialized);
-
-  // Add a global cache for supplier product data
-  const supplierProductsCache = useRef<{[key: string]: {data: any, timestamp: number, count: number}}>({});
-  
-  // Track active API requests to prevent multiple simultaneous calls
-  const [pendingRequests, setPendingRequests] = useState<{[key: string]: boolean}>({});
-
-  // Throttle API calls to prevent overloading
-  const throttleApiCall = useCallback(async (key: string, apiCallFn: () => Promise<any>) => {
-    // If this specific API call is already in progress, return empty result
-    if (pendingRequests[key]) {
-      console.log(`Skipping duplicate API call: ${key}`);
-      return null;
-    }
-    
-    try {
-      // Mark this API call as in progress
-      setPendingRequests(prev => ({...prev, [key]: true}));
-      
-      // Execute the API call
-      return await apiCallFn();
-    } finally {
-      // Mark this API call as complete
-      setPendingRequests(prev => ({...prev, [key]: false}));
-    }
-  }, [pendingRequests]);
-
-  // Store supplier stats to avoid repeated API calls
-  const supplierStatsMap = useRef<{[supplierId: string]: {
-    min: number, 
-    max: number, 
-    matchMethods: string[], 
-    total: number, 
-    matched: number, 
-    unmatched: number,
-    timestamp: number
-  }}>({});
 
   // Convert DB products to app format
   const products = useMemo(() => dbProducts.map(dbProduct => ({
@@ -730,103 +690,87 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, productSuppliers[0]);
   };
 
-  // Add improved refreshData function with debouncing and error handling
-  const refreshData = useCallback(async () => {
-    // If already refreshing, don't start another refresh
-    if (isRefreshing) {
-      console.log('Data refresh already in progress, skipping...');
-      return;
-    }
-    
-    console.log('Starting data refresh...');
-    setIsRefreshing(true);
-    
+  // Refresh all data
+  const refreshData = async () => {
     try {
-      const refreshPromises = [];
+      await Promise.all([
+        fetchProductsFromDb(),
+        refreshSuppliers()
+      ]);
       
-      // Add promises for products and suppliers
-      if (fetchProductsFromDb) {
-        refreshPromises.push(fetchProductsFromDb());
-      }
-      
-      if (refreshSuppliers) {
-        refreshPromises.push(refreshSuppliers());
-      }
-      
-      // Wait for all refresh promises to complete
-      await Promise.all(refreshPromises);
-      
-      // Refresh supplier products
-      try {
-        const { data: supplierProductsData, error: supplierProductsError } = await supabase
-          .from('supplier_products')
-          .select(`
+      // Refresh supplier products with enhanced field selection
+      const { data: supplierProductsData, error: supplierProductsError } = await supabase
+        .from('supplier_products')
+        .select(`
+          id,
+          supplier_id,
+          product_id,
+          cost,
+          moq,
+          lead_time,
+          payment_terms,
+          ean,
+          match_method,
+          product_name,
+          mpn,
+          created_at,
+          updated_at,
+          suppliers (
             id,
-            supplier_id,
-            product_id,
-            cost,
-            moq,
-            lead_time,
-            payment_terms,
-            match_method,
-            ean,
-            mpn,
-            product_name,
-            supplier_stock,
-            created_at,
-            updated_at,
-            suppliers (
-              id,
-              name
-            )
-          `);
+            name
+          )
+        `);
 
-        if (supplierProductsError) throw supplierProductsError;
-        
-        console.log('Refreshed supplier products data:', supplierProductsData ? supplierProductsData.length : 0, 'records');
-        
-        // Cast the data to the correct type to fix TypeScript error
-        setSupplierProducts(supplierProductsData as unknown as SupplierProduct[] || []);
-        
-        // Refresh custom attributes
-        const { data: attributesData, error: attributesError } = await supabase
-          .from('custom_attributes')
-          .select('*');
-
-        if (attributesError) throw attributesError;
-        
-        const formattedAttributes = (attributesData || []).map(attr => ({
-          id: attr.id,
-          name: attr.name,
-          type: attr.type as 'Text' | 'Number' | 'Date' | 'Yes/No' | 'Selection',
-          defaultValue: attr.default_value,
-          required: attr.required,
-          forType: attr.for_type as 'product' | 'supplier',
-          hasColumnMapping: attr.has_column_mapping || false
-        }));
-        
-        setCustomAttributes(formattedAttributes);
-        
-        // We don't need to refresh attribute values from custom_attribute_values table anymore
-        // since we're storing them directly in their respective tables
-        // This just maintains the local state for UI consistency
-        setAttributeValues([]);
-      } catch (err) {
-        console.error('Error refreshing supplier products data:', err);
-        // Continue execution even if this part fails
+      if (supplierProductsError) throw supplierProductsError;
+      
+      console.log('Refreshed supplier products data:', supplierProductsData ? supplierProductsData.length : 0, 'records');
+      // Log MPNs if there are any matches
+      const mpnMatches = supplierProductsData?.filter(sp => sp.match_method === 'mpn') || [];
+      if (mpnMatches.length > 0) {
+        console.log(`Found ${mpnMatches.length} products matched by MPN`);
+        if (mpnMatches.length > 0 && mpnMatches.length <= 5) {
+          console.log('Sample MPN matches:', mpnMatches.slice(0, 5).map(sp => ({ 
+            product_id: sp.product_id, 
+            mpn: sp.mpn,
+            match_method: sp.match_method
+          })));
+        }
       }
       
-      console.log('Data refresh completed successfully.');
+      // Cast the data to the correct type to fix TypeScript error
+      setSupplierProducts(supplierProductsData as unknown as SupplierProduct[] || []);
+      
+      // Refresh custom attributes
+      const { data: attributesData, error: attributesError } = await supabase
+        .from('custom_attributes')
+        .select('*');
+
+      if (attributesError) throw attributesError;
+      
+      const formattedAttributes = (attributesData || []).map(attr => ({
+        id: attr.id,
+        name: attr.name,
+        type: attr.type as 'Text' | 'Number' | 'Date' | 'Yes/No' | 'Selection',
+        defaultValue: attr.default_value,
+        required: attr.required,
+        forType: attr.for_type as 'product' | 'supplier',
+        hasColumnMapping: attr.has_column_mapping || false
+      }));
+      
+      setCustomAttributes(formattedAttributes);
+      
+      // We don't need to refresh attribute values from custom_attribute_values table anymore
+      // since we're storing them directly in their respective tables
+      // This just maintains the local state for UI consistency
+      setAttributeValues([]);
     } catch (err) {
       console.error('Error refreshing data:', err);
       throw err;
-    } finally {
-      setIsRefreshing(false);
     }
-  }, [isRefreshing, fetchProductsFromDb, refreshSuppliers]);
+  };
 
-  // Add optimized fetchSupplierProducts function with request deduplication
-  const fetchSupplierProducts = useCallback(async (
+  // Add new function to fetch supplier products with pagination and filtering
+  const fetchSupplierProducts = async (
     supplierId: string,
     page: number = 1,
     pageSize: number = 10,
@@ -840,264 +784,107 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } = {}
   ) => {
     try {
-      // Ensure supplierId is a string to avoid UUID type errors in database queries
-      const safeSupplierIdString = String(supplierId);
+      console.log(`Fetching supplier products for supplier ${supplierId}, page ${page}, size ${pageSize}`);
       
-      // Generate a unique key for this specific API call to deduplicate
-      const requestKey = `supplier_products_${safeSupplierIdString}_${page}_${pageSize}_${JSON.stringify(filters)}`;
+      // Calculate start and end for pagination
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize - 1;
       
-      // Check if we have a valid cached response
-      const now = Date.now();
-      const CACHE_TTL = 30 * 1000; // 30 seconds cache TTL
-      
-      if (supplierProductsCache.current[requestKey] && 
-          (now - supplierProductsCache.current[requestKey].timestamp) < CACHE_TTL) {
-        console.log(`Using cached data for: ${requestKey}`);
-        return {
-          data: supplierProductsCache.current[requestKey].data,
-          count: supplierProductsCache.current[requestKey].count
-        };
-      }
-      
-      // For supplier stats requests (low page/pageSize), check if we have supplier stats cached
-      if (page === 1 && pageSize === 1) {
-        const statsKey = `stats_${safeSupplierIdString}`;
-        const STATS_TTL = 60 * 1000; // 1 minute cache for stats
-        
-        // If this is a filtered query for matched/unmatched products & we have stats
-        if (filters.filterOption && 
-            supplierStatsMap.current[safeSupplierIdString] && 
-            (now - supplierStatsMap.current[safeSupplierIdString].timestamp) < STATS_TTL) {
-          
-          const stats = supplierStatsMap.current[safeSupplierIdString];
-          
-          // Return cached stats counts based on filter
-          if (filters.filterOption === 'matched') {
-            console.log(`Using cached stats for matched products of supplier ${safeSupplierIdString}`);
-            
-            // Cache the result for this specific query too
-            supplierProductsCache.current[requestKey] = {
-              data: [],
-              count: stats.matched,
-              timestamp: now
-            };
-            
-            return { data: [], count: stats.matched };
-          } 
-          else if (filters.filterOption === 'unmatched') {
-            console.log(`Using cached stats for unmatched products of supplier ${safeSupplierIdString}`);
-            
-            // Cache the result for this specific query too
-            supplierProductsCache.current[requestKey] = {
-              data: [],
-              count: stats.unmatched,
-              timestamp: now
-            };
-            
-            return { data: [], count: stats.unmatched };
-          }
-          else {
-            console.log(`Using cached stats for all products of supplier ${safeSupplierIdString}`);
-            
-            // Cache the result for this specific query too
-            supplierProductsCache.current[requestKey] = {
-              data: [],
-              count: stats.total,
-              timestamp: now
-            };
-            
-            return { data: [], count: stats.total };
-          }
-        }
-      }
-      
-      // Use throttling to prevent multiple identical calls
-      const result = await throttleApiCall(requestKey, async () => {
-        console.log(`Fetching supplier products for supplier ${safeSupplierIdString}, page ${page}, size ${pageSize}`);
-        
-        // Calculate start and end for pagination
-        const start = (page - 1) * pageSize;
-        const end = start + pageSize - 1;
-        
-        // Build query
-        let query = supabase
-          .from('supplier_products')
-          .select(`
+      // Build query
+      let query = supabase
+        .from('supplier_products')
+        .select(`
+          id,
+          supplier_id,
+          product_id,
+          cost,
+          moq,
+          lead_time,
+          payment_terms,
+          ean,
+          match_method,
+          product_name,
+          mpn,
+          created_at,
+          updated_at,
+          suppliers (
             id,
-            supplier_id,
-            product_id,
-            cost,
-            moq,
-            lead_time,
-            payment_terms,
-            ean,
-            match_method,
-            product_name,
-            mpn,
-            created_at,
-            updated_at,
-            suppliers (
-              id,
-              name
-            )
-          `, { count: 'exact' })
-          .eq('supplier_id', safeSupplierIdString);
-        
-        // Apply filter for matched/unmatched products
-        if (filters.filterOption === 'matched') {
-          query = query.not('product_id', 'is', null);
-        } else if (filters.filterOption === 'unmatched') {
-          query = query.is('product_id', null);
-        }
-        
-        // Apply search term filter
-        if (filters.searchTerm) {
-          query = query.or(
-            `product_name.ilike.%${filters.searchTerm}%,ean.ilike.%${filters.searchTerm}%,mpn.ilike.%${filters.searchTerm}%`
-          );
-        }
-        
-        // Apply cost range filter
-        if (filters.costRange) {
-          const { min, max } = filters.costRange;
-          if (min > 0) {
-            query = query.gte('cost', min);
-          }
-          if (max < 1000000) {  // Arbitrary high number to avoid filtering out all high-cost items
-            query = query.lte('cost', max);
-          }
-        }
-        
-        // Apply match method filter
-        if (filters.matchMethodFilter) {
-          query = query.eq('match_method', filters.matchMethodFilter);
-        }
-        
-        // Apply sorting
-        if (filters.sortField) {
-          // Map frontend sort fields to database column names
-          const sortFieldMap: {[key: string]: string} = {
-            'name': 'product_name',
-            'cost': 'cost',
-            'price': 'price',
-            'profit': 'profit',
-            'margin': 'margin'
-          };
-          
-          const dbSortField = sortFieldMap[filters.sortField] || filters.sortField;
-          const sortOrder = filters.sortOrder || 'asc';
-          
-          query = query.order(dbSortField, { ascending: sortOrder === 'asc' });
-        } else {
-          // Default sorting by product_name
-          query = query.order('product_name', { ascending: true });
-        }
-        
-        // Apply pagination
-        query = query.range(start, end);
-        
-        // Execute query with error handling
-        const { data, error, count } = await query;
-        
-        if (error) {
-          console.error('Supabase query error:', error);
-          throw error;
-        }
-        
-        // If this is a stats query (page=1, pageSize=1), cache the stats
-        if (page === 1 && pageSize === 1) {
-          if (!filters.filterOption) {
-            // This is the "all" products query
-            if (!supplierStatsMap.current[safeSupplierIdString]) {
-              supplierStatsMap.current[safeSupplierIdString] = {
-                min: 0,
-                max: 1000,
-                matchMethods: [],
-                total: count || 0,
-                matched: 0,
-                unmatched: 0,
-                timestamp: now
-              };
-            } else {
-              // Update only the total count and timestamp
-              supplierStatsMap.current[safeSupplierIdString] = {
-                ...supplierStatsMap.current[safeSupplierIdString],
-                total: count || 0,
-                timestamp: now
-              };
-            }
-          } 
-          else if (filters.filterOption === 'matched') {
-            // Update matched count in the cache
-            if (supplierStatsMap.current[safeSupplierIdString]) {
-              supplierStatsMap.current[safeSupplierIdString].matched = count || 0;
-              supplierStatsMap.current[safeSupplierIdString].timestamp = now;
-            } else {
-              supplierStatsMap.current[safeSupplierIdString] = {
-                min: 0,
-                max: 1000,
-                matchMethods: [],
-                total: 0,
-                matched: count || 0,
-                unmatched: 0,
-                timestamp: now
-              };
-            }
-          }
-          else if (filters.filterOption === 'unmatched') {
-            // Update unmatched count in the cache
-            if (supplierStatsMap.current[safeSupplierIdString]) {
-              supplierStatsMap.current[safeSupplierIdString].unmatched = count || 0;
-              supplierStatsMap.current[safeSupplierIdString].timestamp = now;
-            } else {
-              supplierStatsMap.current[safeSupplierIdString] = {
-                min: 0,
-                max: 1000,
-                matchMethods: [],
-                total: 0,
-                matched: 0,
-                unmatched: count || 0,
-                timestamp: now
-              };
-            }
-          }
-        }
-        
-        return { 
-          data: data || [], 
-          count: count || 0
-        };
-      });
+            name
+          )
+        `, { count: 'exact' })
+        .eq('supplier_id', supplierId);
       
-      // If throttled (already in progress), return empty results
-      if (!result) {
-        return {
-          data: [] as SupplierProduct[],
-          count: 0
-        };
+      // Apply filter for matched/unmatched products
+      if (filters.filterOption === 'matched') {
+        query = query.not('product_id', 'is', null);
+      } else if (filters.filterOption === 'unmatched') {
+        query = query.is('product_id', null);
       }
       
-      // Store in cache before returning
-      supplierProductsCache.current[requestKey] = {
-        data: result.data,
-        count: result.count,
-        timestamp: now
-      };
+      // Apply search term filter
+      if (filters.searchTerm) {
+        query = query.or(
+          `product_name.ilike.%${filters.searchTerm}%,ean.ilike.%${filters.searchTerm}%,mpn.ilike.%${filters.searchTerm}%`
+        );
+      }
+      
+      // Apply cost range filter
+      if (filters.costRange) {
+        query = query
+          .gte('cost', filters.costRange.min)
+          .lte('cost', filters.costRange.max);
+      }
+      
+      // Apply match method filter
+      if (filters.matchMethodFilter) {
+        query = query.eq('match_method', filters.matchMethodFilter);
+      }
+      
+      // Apply sorting
+      if (filters.sortField) {
+        let sortColumn: string;
+        
+        switch (filters.sortField) {
+          case 'name':
+            sortColumn = 'product_name';
+            break;
+          case 'cost':
+            sortColumn = 'cost';
+            break;
+          // For other fields like price, profit and margin we need client-side sorting
+          // since they depend on joined data
+          default:
+            sortColumn = 'created_at';
+            break;
+        }
+        
+        query = query.order(sortColumn, { 
+          ascending: filters.sortOrder === 'asc' 
+        });
+      } else {
+        // Default sort
+        query = query.order('created_at', { ascending: false });
+      }
+      
+      // Apply pagination
+      query = query.range(start, end);
+      
+      // Execute the query
+      const { data, error, count } = await query;
+      
+      if (error) throw error;
+      
+      console.log(`Fetched ${data?.length || 0} supplier products (total count: ${count})`);
       
       return {
-        data: result.data as SupplierProduct[],
-        count: result.count || 0
+        data: data as SupplierProduct[] || [],
+        count: count || 0
       };
     } catch (err) {
       console.error('Error fetching supplier products:', err);
-      // Always return a predictable response structure, even on error
-      return {
-        data: [] as SupplierProduct[],
-        count: 0,
-        error: err instanceof Error ? err : new Error('Failed to fetch supplier products')
-      };
+      throw err instanceof Error ? err : new Error('Failed to fetch supplier products');
     }
-  }, [throttleApiCall]);
+  };
 
   // Mark data as initialized after first load
   useEffect(() => {
@@ -1113,7 +900,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         suppliers,
         customAttributes,
         supplierProducts,
-        loading: productsLoading || suppliersLoading || isRefreshing,
+        loading: productsLoading || suppliersLoading,
         initialLoading: (productsInitialLoading || suppliersInitialLoading) && !dataInitialized,
         error: productsError || suppliersError,
         totalProductCount,

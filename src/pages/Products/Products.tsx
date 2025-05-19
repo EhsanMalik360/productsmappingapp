@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Table from '../../components/UI/Table';
@@ -26,26 +26,41 @@ const Products: React.FC = () => {
   const [brands, setBrands] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [priceStats, setPriceStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
-  const [dataLoaded, setDataLoaded] = useState(false);
-  const [isNavigating, setIsNavigating] = useState(false);
-  const isMounted = useRef(true);
-  const activeRequests = useRef<AbortController[]>([]);
   
-  // Load data with debounce to prevent multiple API calls
-  const loadData = useCallback(async () => {
-    // Skip loading if we're currently navigating between pages
-    if (isNavigating) {
-      console.log('Skipping data load during navigation');
-      return;
-    }
-    
-    // Create abort controller for this request
-    const controller = new AbortController();
-    activeRequests.current.push(controller);
-    
+  // Load data when component mounts
+  useEffect(() => {
+    loadData();
+    loadMetadata();
+  }, []);
+  
+  // Load data when page changes or filters change
+  useEffect(() => {
+    loadData();
+  }, [currentPage, itemsPerPage, searchTerm, selectedBrand, selectedCategory, priceRange, hasSuppliers, sortField, sortOrder]);
+  
+  // Load metadata (brands, categories, price range)
+  const loadMetadata = async () => {
     try {
-      console.log('Loading products data...');
-      const filters = {
+      // Load brands
+      const brandsData = await getBrands();
+      setBrands(brandsData);
+      
+      // Load categories
+      const categoriesData = await getCategories();
+      setCategories(categoriesData);
+      
+      // Load price range
+      const priceRangeData = await getPriceRange();
+      setPriceStats(priceRangeData);
+      setPriceRange(priceRangeData);
+    } catch (error) {
+      console.error('Error loading metadata:', error);
+    }
+  };
+  
+  const loadData = async () => {
+    try {
+      await fetchProducts(currentPage, itemsPerPage, {
         searchTerm,
         brand: selectedBrand,
         category: selectedCategory,
@@ -53,134 +68,9 @@ const Products: React.FC = () => {
         hasSuppliers,
         sortField,
         sortOrder
-      };
-      
-      const result = await fetchProducts(currentPage, itemsPerPage, filters);
-      
-      // Check if component is still mounted and request wasn't aborted
-      if (isMounted.current && !controller.signal.aborted) {
-        console.log(`Loaded ${result.data.length} products`);
-        setDataLoaded(true);
-      }
-    } catch (error) {
-      // Only log if not aborted and component is mounted
-      if (isMounted.current && !controller.signal.aborted) {
-        console.error('Error loading products:', error);
-      }
-    } finally {
-      // Remove this controller from active requests
-      activeRequests.current = activeRequests.current.filter(c => c !== controller);
-    }
-  }, [
-    currentPage,
-    itemsPerPage, 
-    searchTerm, 
-    selectedBrand, 
-    selectedCategory, 
-    priceRange, 
-    hasSuppliers,
-    sortField,
-    sortOrder,
-    fetchProducts,
-    isNavigating
-  ]);
-  
-  // Track navigation state
-  useEffect(() => {
-    // This runs when component mounts - reset navigation state
-    setIsNavigating(false);
-    
-    return () => {
-      // When component unmounts (navigating away), set flag to true
-      // and cancel all active requests
-      isMounted.current = false;
-      setIsNavigating(true);
-      activeRequests.current.forEach(controller => {
-        controller.abort();
       });
-    };
-  }, []);
-  
-  // Create a debounced version of loadData with useEffect
-  useEffect(() => {
-    // Skip initial load to prevent double-loading
-    if (!dataLoaded) return;
-    
-    // Use a small delay to batch rapid changes
-    const timer = setTimeout(() => {
-      // Only load if not navigating away
-      if (!isNavigating && isMounted.current) {
-        loadData();
-      }
-    }, 300);
-    
-    return () => clearTimeout(timer);
-  }, [
-    currentPage,
-    itemsPerPage, 
-    searchTerm, 
-    selectedBrand, 
-    selectedCategory, 
-    priceRange, 
-    hasSuppliers,
-    sortField,
-    sortOrder,
-    loadData,
-    dataLoaded,
-    isNavigating
-  ]);
-  
-  // Initial data load
-  useEffect(() => {
-    // Only run if not navigating away and component is mounted
-    if (!isNavigating && isMounted.current) {
-      loadData();
-      loadMetadata();
-    }
-  }, []);
-  
-  // Load metadata (brands, categories, price range)
-  const loadMetadata = async () => {
-    // Skip if navigating or unmounted
-    if (isNavigating || !isMounted.current) return;
-    
-    // Create abort controller
-    const controller = new AbortController();
-    activeRequests.current.push(controller);
-    
-    try {
-      // Load brands
-      const brandsData = await getBrands();
-      
-      // Check if still mounted and not aborted
-      if (!isMounted.current || controller.signal.aborted) return;
-      
-      setBrands(brandsData);
-      
-      // Load categories
-      const categoriesData = await getCategories();
-      
-      // Check again
-      if (!isMounted.current || controller.signal.aborted) return;
-      
-      setCategories(categoriesData);
-      
-      // Load price range
-      const priceRangeData = await getPriceRange();
-      
-      // Final check
-      if (!isMounted.current || controller.signal.aborted) return;
-      
-      setPriceStats(priceRangeData);
-      setPriceRange(priceRangeData);
     } catch (error) {
-      // Only log if mounted and not aborted
-      if (isMounted.current && !controller.signal.aborted) {
-        console.error('Error loading metadata:', error);
-      }
-    } finally {
-      // Remove this controller
-      activeRequests.current = activeRequests.current.filter(c => c !== controller);
+      console.error('Error loading products:', error);
     }
   };
   

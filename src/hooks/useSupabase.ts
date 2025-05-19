@@ -17,9 +17,6 @@ export function useProducts(dataInitialized: boolean = false) {
   const [totalProductCount, setTotalProductCount] = useState<number>(0);
   const [hasLoadedInitial, setHasLoadedInitial] = useState<boolean>(dataInitialized);
 
-  // Cache for API responses to prevent duplicate fetches
-  const responseCache = new Map();
-
   // Load initial data when component mounts or when switching back to the tab
   useEffect(() => {
     if (dataInitialized && products.length > 0) {
@@ -33,10 +30,10 @@ export function useProducts(dataInitialized: boolean = false) {
     }
   }, [dataInitialized]);
 
-  // Fetch products with pagination and filtering
-  const fetchProducts = useCallback(async (
+  // Function to fetch products with pagination and filtering
+  async function fetchProducts(
     page: number = 1, 
-    pageSize: number = 20,
+    pageSize: number = 20, 
     filters: {
       searchTerm?: string,
       brand?: string,
@@ -46,27 +43,19 @@ export function useProducts(dataInitialized: boolean = false) {
       sortField?: string,
       sortOrder?: 'asc' | 'desc'
     } = {}
-  ) => {
+  ) {
     try {
-      // Generate cache key based on request parameters
-      const cacheKey = `products_${page}_${pageSize}_${JSON.stringify(filters)}`;
-      
-      // Return cached response if available
-      if (responseCache.has(cacheKey)) {
-        return responseCache.get(cacheKey);
-      }
-      
       setLoading(true);
       if (page === 1) {
         setInitialLoading(true);
       }
       setError(null);
       
-      // Calculate pagination range
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
+      // Calculate start and end for pagination
+      const start = (page - 1) * pageSize;
+      const end = start + pageSize - 1;
       
-      // Start building query
+      // Build query
       let query = supabase
         .from('products')
         .select('*', { count: 'exact' });
@@ -92,7 +81,7 @@ export function useProducts(dataInitialized: boolean = false) {
           .lte('buy_box_price', filters.priceRange.max);
       }
       
-      // Apply sorting
+      // Apply sort
       if (filters.sortField) {
         let sortColumn: string;
         
@@ -119,53 +108,41 @@ export function useProducts(dataInitialized: boolean = false) {
         query = query.order('created_at', { ascending: false });
       }
       
-      // Apply pagination
-      query = query.range(from, to);
+      // For hasSuppliers filter, we need a different approach since that requires joining with supplier_products
+      // We'll handle that separately if needed
       
-      // Execute query
+      // Apply pagination
+      query = query.range(start, end);
+      
+      // Execute the query
       const { data, error: fetchError, count } = await query;
       
       if (fetchError) throw fetchError;
-      
-      // Process results
-      const result = {
-        data: data || [],
-        count: count || 0
-      };
-      
-      // Cache the result
-      responseCache.set(cacheKey, result);
-      
-      // Update state
-      if (page === 1) {
-        setProducts(result.data);
-      }
       
       if (count !== undefined && count !== null) {
         setTotalProductCount(count);
         console.log(`Total filtered products: ${count}`);
       }
       
-      setLoading(false);
-      setInitialLoading(false);
-      setHasLoadedInitial(true);
+      setProducts(data || []);
       
-      return result;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error('Failed to fetch products');
-      console.error('Error fetching products:', error);
-      setError(error);
-      setLoading(false);
-      setInitialLoading(false);
-      setHasLoadedInitial(true);
+      // Special handling for hasSuppliers filter if needed (this would be done on client-side after fetching)
+      // This is a limitation as it requires an additional query or client-side filtering
       
       return {
-        data: [],
-        count: 0,
-        error
+        data: data || [],
+        count: count || 0
       };
+    } catch (err) {
+      console.error('Error fetching products:', err);
+      setError(err instanceof Error ? err : new Error('An error occurred fetching products'));
+      return { data: [], count: 0 };
+    } finally {
+      setLoading(false);
+      setInitialLoading(false);
+      setHasLoadedInitial(true);
     }
-  }, []);
+  }
 
   async function addProduct(product: Tables['products']['Insert']) {
     try {
@@ -177,11 +154,6 @@ export function useProducts(dataInitialized: boolean = false) {
 
       if (error) throw error;
       setProducts(prev => [data, ...prev]);
-      setTotalProductCount(prev => prev + 1);
-      
-      // Clear cache as data has changed
-      responseCache.clear();
-      
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to add product');
@@ -199,10 +171,6 @@ export function useProducts(dataInitialized: boolean = false) {
 
       if (error) throw error;
       setProducts(prev => prev.map(p => p.id === id ? data : p));
-      
-      // Clear cache as data has changed
-      responseCache.clear();
-      
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to update product');
@@ -218,22 +186,14 @@ export function useProducts(dataInitialized: boolean = false) {
 
       if (error) throw error;
       setProducts(prev => prev.filter(p => p.id !== id));
-      
-      // Clear cache as data has changed
-      responseCache.clear();
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to delete product');
     }
   }
 
   // Get unique brands
-  const getBrands = useCallback(async () => {
+  async function getBrands() {
     try {
-      // Check cache
-      if (responseCache.has('brands')) {
-        return responseCache.get('brands');
-      }
-      
       const { data, error } = await supabase
         .from('products')
         .select('brand')
@@ -242,26 +202,17 @@ export function useProducts(dataInitialized: boolean = false) {
       if (error) throw error;
       
       // Extract unique brands
-      const brands = [...new Set(data?.map(p => p.brand))].filter(Boolean).sort();
-      
-      // Cache result
-      responseCache.set('brands', brands);
-      
+      const brands = [...new Set(data?.map(p => p.brand))].filter(Boolean);
       return brands;
     } catch (err) {
       console.error('Error fetching brands:', err);
       return [];
     }
-  }, []);
+  }
   
   // Get unique categories
-  const getCategories = useCallback(async () => {
+  async function getCategories() {
     try {
-      // Check cache
-      if (responseCache.has('categories')) {
-        return responseCache.get('categories');
-      }
-      
       const { data, error } = await supabase
         .from('products')
         .select('category')
@@ -270,26 +221,17 @@ export function useProducts(dataInitialized: boolean = false) {
       if (error) throw error;
       
       // Extract unique categories
-      const categories = [...new Set(data?.map(p => p.category))].filter(Boolean).sort();
-      
-      // Cache result
-      responseCache.set('categories', categories);
-      
+      const categories = [...new Set(data?.map(p => p.category))].filter(Boolean);
       return categories;
     } catch (err) {
       console.error('Error fetching categories:', err);
       return [];
     }
-  }, []);
+  }
   
   // Get price range
-  const getPriceRange = useCallback(async () => {
+  async function getPriceRange() {
     try {
-      // Check cache
-      if (responseCache.has('priceRange')) {
-        return responseCache.get('priceRange');
-      }
-      
       const { data: minData, error: minError } = await supabase
         .from('products')
         .select('buy_box_price')
@@ -306,20 +248,15 @@ export function useProducts(dataInitialized: boolean = false) {
       
       if (minError || maxError) throw minError || maxError;
       
-      const min = Math.floor(minData?.buy_box_price || 0);
-      const max = Math.ceil(maxData?.buy_box_price || 1000);
-      
-      const priceRange = { min, max };
-      
-      // Cache result
-      responseCache.set('priceRange', priceRange);
-      
-      return priceRange;
+      return {
+        min: Math.floor(minData?.buy_box_price || 0),
+        max: Math.ceil(maxData?.buy_box_price || 1000)
+      };
     } catch (err) {
       console.error('Error fetching price range:', err);
       return { min: 0, max: 1000 };
     }
-  }, []);
+  }
 
   return {
     products,
@@ -345,9 +282,6 @@ export function useSuppliers(dataInitialized: boolean = false) {
   const [error, setError] = useState<Error | null>(null);
   const [totalSupplierCount, setTotalSupplierCount] = useState<number>(0);
   const [hasLoadedInitial, setHasLoadedInitial] = useState<boolean>(dataInitialized);
-
-  // Cache for API responses
-  const responseCache = new Map();
 
   useEffect(() => {
     // If we already have data and dataInitialized is true, don't reload
@@ -549,10 +483,6 @@ export function useSuppliers(dataInitialized: boolean = false) {
       if (error) throw error;
       setSuppliers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
       setInitialSuppliers(prev => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)));
-      
-      // Clear cache
-      responseCache.clear();
-      
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to add supplier');
@@ -571,10 +501,6 @@ export function useSuppliers(dataInitialized: boolean = false) {
       if (error) throw error;
       setSuppliers(prev => prev.map(s => s.id === id ? data : s));
       setInitialSuppliers(prev => prev.map(s => s.id === id ? data : s));
-      
-      // Clear cache
-      responseCache.clear();
-      
       return data;
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to update supplier');
@@ -591,18 +517,10 @@ export function useSuppliers(dataInitialized: boolean = false) {
       if (error) throw error;
       setSuppliers(prev => prev.filter(s => s.id !== id));
       setInitialSuppliers(prev => prev.filter(s => s.id !== id));
-      
-      // Clear cache
-      responseCache.clear();
     } catch (err) {
       throw err instanceof Error ? err : new Error('Failed to delete supplier');
     }
   }
-
-  // Function to refresh supplier data
-  const refreshSuppliers = useCallback(async () => {
-    return await fetchSuppliers();
-  }, [fetchSuppliers]);
 
   return {
     suppliers: initialSuppliers, // Return initialSuppliers instead of suppliers
@@ -613,7 +531,7 @@ export function useSuppliers(dataInitialized: boolean = false) {
     addSupplier,
     updateSupplier,
     deleteSupplier,
-    refreshSuppliers
+    refreshSuppliers: fetchSuppliers
   };
 }
 

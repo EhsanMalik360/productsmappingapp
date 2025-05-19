@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Package, ExternalLink, Link, Info, Search, Filter, X, ArrowDownAZ, DollarSign, TrendingUp, Tag, ChevronLeft, ChevronRight, RefreshCcw } from 'lucide-react';
 import Card from '../UI/Card';
 import Table from '../UI/Table';
@@ -18,7 +18,6 @@ type SortOrder = 'asc' | 'desc';
 
 const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const navigate = useNavigate();
-  const location = useLocation();
   const { products, fetchSupplierProducts } = useAppContext();
   const [filterOption, setFilterOption] = useState<FilterOption>('all');
   const [selectedUnmatchedProduct, setSelectedUnmatchedProduct] = useState<string | null>(null);
@@ -30,7 +29,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const [matchMethodFilter, setMatchMethodFilter] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const [supplierProductsData, setSupplierProductsData] = useState<any[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [costStats, setCostStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
@@ -41,292 +40,11 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     unmatched: 0
   });
   const [hasInitializedFilters, setHasInitializedFilters] = useState(false);
-  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   
-  // Add refs to track component mount state and pending requests
-  const isMounted = useRef(true);
-  const pendingRequests = useRef<{[key: string]: AbortController}>({});
-  const isInitialMount = useRef(true);
-  const dataLoadAttempted = useRef(false);
-  
-  // Add a cache for API responses to prevent unnecessary duplicates
-  const apiCache = useRef<{[key: string]: {data: any, timestamp: number}}>({});
-  
-  // Add navigation state tracking
-  const isNavigating = useRef(false);
-  
-  // Track location changes to detect navigation
-  useEffect(() => {
-    // On location change, mark as navigating 
-    // (to prevent state updates during navigation)
-    return () => {
-      isNavigating.current = true;
-    };
-  }, [location.pathname]);
-  
-  // Cleanup on unmount
-  useEffect(() => {
-    console.log('SupplierProducts component mounted');
-    
-    // Reset navigation state on mount
-    isNavigating.current = false;
-    
-    return () => {
-      console.log('SupplierProducts component unmounting');
-      isMounted.current = false;
-      isNavigating.current = true;
-      
-      // Cancel all pending requests on unmount
-      Object.values(pendingRequests.current).forEach(controller => {
-        controller.abort();
-      });
-      
-      // Clear cached data for this component on unmount
-      Object.keys(apiCache.current).forEach(key => {
-        if (key.includes(supplierId)) {
-          delete apiCache.current[key];
-        }
-      });
-    };
-  }, [supplierId]);
-  
-  // Helper function to create an abort controller and track request
-  const createRequest = useCallback((requestKey: string) => {
-    // Cancel existing request with the same key if any
-    if (pendingRequests.current[requestKey]) {
-      pendingRequests.current[requestKey].abort();
-    }
-    
-    const controller = new AbortController();
-    pendingRequests.current[requestKey] = controller;
-    
-    return {
-      signal: controller.signal,
-      cleanup: () => {
-        if (pendingRequests.current[requestKey] === controller) {
-          delete pendingRequests.current[requestKey];
-        }
-      }
-    };
-  }, []);
-  
-  // Load filter statistics with proper request tracking and caching
-  const loadFilterStats = useCallback(async () => {
-    // Skip if component is unmounted
-    if (!isMounted.current) return;
-    
-    // Create a unique request key
-    const requestKey = `loadFilterStats_${supplierId}`;
-    
-    // Check if we already have this request in progress
-    if (pendingRequests.current[requestKey]) {
-      console.log('Filter stats request already in progress, skipping duplicate');
-      return;
-    }
-    
-    const { signal, cleanup } = createRequest(requestKey);
-    
-    try {
-      // Convert all UUIDs to strings in requests to avoid DB type errors
-      const stringifiedSupplierId = String(supplierId);
-      
-      // Check cache for stats first
-      const cacheKey = `stats_${stringifiedSupplierId}`;
-      const now = Date.now();
-      const CACHE_TTL = 60 * 1000; // 1 minute cache
-      
-      if (apiCache.current[cacheKey] && (now - apiCache.current[cacheKey].timestamp) < CACHE_TTL) {
-        console.log('Using cached supplier stats');
-        const cachedData = apiCache.current[cacheKey].data;
-        
-        // Use cached data
-        setMatchStats(cachedData.matchStats);
-        setCostStats(cachedData.costStats);
-        setMatchMethods(cachedData.matchMethods);
-        
-        if (!hasInitializedFilters) {
-          setCostRange(cachedData.costStats);
-          setHasInitializedFilters(true);
-        }
-        
-        return;
-      }
-      
-      // Sequential fetching to prevent race conditions
-      console.log('Fetching supplier stats...');
-      
-      // First get total count
-      const totalPromise = fetchSupplierProducts(stringifiedSupplierId, 1, 1);
-      const totalResult = await totalPromise;
-      
-      // Check if request was aborted or component unmounted
-      if (signal.aborted || !isMounted.current) return;
-      
-      // Now wait for the remaining promises
-      const matchedPromise = fetchSupplierProducts(stringifiedSupplierId, 1, 1, { filterOption: 'matched' });
-      const unmatchedPromise = fetchSupplierProducts(stringifiedSupplierId, 1, 1, { filterOption: 'unmatched' });
-      
-      const [matchedResult, unmatchedResult] = await Promise.all([
-        matchedPromise,
-        unmatchedPromise
-      ]);
-      
-      // Check again if aborted or unmounted
-      if (signal.aborted || !isMounted.current) return;
-      
-      // Update match stats
-      const matchStats = {
-        total: totalResult.count || 0,
-        matched: matchedResult.count || 0,
-        unmatched: unmatchedResult.count || 0
-      };
-      
-      setMatchStats(matchStats);
-      
-      // Fetch cost stats
-      let costStats = { min: 0, max: 1000 };
-      let matchMethods: string[] = [];
-      
-      try {
-        // Set an abort signal for this fetch
-        const response = await fetch(`/api/supplier-product-stats/${stringifiedSupplierId}`, { signal })
-          .then(res => {
-            if (!res.ok) {
-              throw new Error(`API returned ${res.status}: ${res.statusText}`);
-            }
-            return res.json();
-          });
-          
-        // Check if aborted or unmounted
-        if (signal.aborted || !isMounted.current) return;
-          
-        if (response && response.data) {
-          const min = response.data.minCost || 0;
-          const max = response.data.maxCost || 1000;
-          
-          costStats = { min, max };
-          setCostStats(costStats);
-          
-          // Only set cost range once to avoid triggering rerenders
-          if (!hasInitializedFilters) {
-            setCostRange(costStats);
-          }
-        }
-      } catch (costError: any) {
-        // Only log if not aborted
-        if (!signal.aborted) {
-          console.error('Error fetching cost stats:', costError);
-          // Use fallback values if API fails
-          const fallbackMax = Math.max(...supplierProductsData.map(sp => sp.cost || 0), 1000);
-          costStats = { min: 0, max: fallbackMax };
-          
-          setCostStats(costStats);
-          // Only set cost range once to avoid triggering rerenders
-          if (!hasInitializedFilters) {
-            setCostRange(costStats);
-          }
-        }
-      }
-      
-      // Fetch match methods
-      try {
-        const response = await fetch(`/api/supplier-product-methods/${stringifiedSupplierId}`, { signal })
-          .then(res => {
-            if (!res.ok) {
-              throw new Error(`API returned ${res.status}: ${res.statusText}`);
-            }
-            return res.json();
-          });
-        
-        // Check if aborted or unmounted
-        if (signal.aborted || !isMounted.current) return;
-          
-        if (response && response.data && response.data.matchMethods) {
-          matchMethods = response.data.matchMethods;
-          setMatchMethods(matchMethods);
-        }
-      } catch (methodsError: any) {
-        // Only log if not aborted
-        if (!signal.aborted) {
-          console.error('Error fetching match methods:', methodsError);
-          setMatchMethods([]);
-        }
-      }
-      
-      // Save results to cache
-      apiCache.current[cacheKey] = {
-        data: {
-          matchStats,
-          costStats,
-          matchMethods
-        },
-        timestamp: Date.now()
-      };
-      
-      setHasInitializedFilters(true);
-    } catch (error: any) {
-      // Only log if not aborted
-      if (!signal.aborted) {
-        console.error('Error loading filter stats:', error);
-        // Still mark filters as initialized to prevent endless retry loops
-        setHasInitializedFilters(true);
-      }
-    } finally {
-      cleanup();
-    }
-  }, [supplierId, fetchSupplierProducts, supplierProductsData, hasInitializedFilters, createRequest]);
-
   // Fetch data when component mounts or parameters change
   const loadData = useCallback(async () => {
-    // Prevent loading if component is unmounted
-    if (!isMounted.current) return;
-    
-    // Create a unique key for this request to prevent duplicates
-    const requestKey = `loadData_${supplierId}_${currentPage}_${itemsPerPage}_${searchTerm}_${filterOption}_${JSON.stringify(costRange)}_${matchMethodFilter}_${sortField}_${sortOrder}`;
-    
-    // Check if we already have this request in progress
-    if (pendingRequests.current[requestKey]) {
-      console.log('Data load request already in progress, skipping duplicate');
-      return;
-    }
-    
-    // Setup request tracking and abort controller
-    const { signal, cleanup } = createRequest(requestKey);
-    
     try {
-      // Only show loading state for subsequent loads, not initial load
-      if (initialLoadComplete) {
-        setIsLoading(true);
-      }
-
-      console.log('Fetching supplier products data...');
-      
-      // Check cache for data first
-      const cacheKey = `products_${supplierId}_${currentPage}_${itemsPerPage}_${searchTerm}_${filterOption}_${JSON.stringify(costRange)}_${matchMethodFilter}_${sortField}_${sortOrder}`;
-      const now = Date.now();
-      const CACHE_TTL = 30 * 1000; // 30 second cache
-      
-      if (apiCache.current[cacheKey] && (now - apiCache.current[cacheKey].timestamp) < CACHE_TTL) {
-        console.log('Using cached supplier products data');
-        const cachedData = apiCache.current[cacheKey].data;
-        
-        // Don't update state if component unmounted or request was cancelled
-        if (!isMounted.current || signal.aborted) return;
-        
-        setSupplierProductsData(cachedData.data);
-        setTotalCount(cachedData.count);
-        
-        // If we haven't loaded filter stats yet, fetch them
-        if (!hasInitializedFilters) {
-          await loadFilterStats();
-        }
-        
-        // Mark initial load as complete
-        setInitialLoadComplete(true);
-        dataLoadAttempted.current = true;
-        
-        return;
-      }
+      setIsLoading(true);
 
       // Fetch data with server-side pagination
       const result = await fetchSupplierProducts(
@@ -343,15 +61,6 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         }
       );
       
-      // Don't update state if component unmounted or request was cancelled
-      if (!isMounted.current || signal.aborted) return;
-      
-      // Save to cache
-      apiCache.current[cacheKey] = {
-        data: result,
-        timestamp: Date.now()
-      };
-      
       setSupplierProductsData(result.data);
       setTotalCount(result.count);
     
@@ -360,133 +69,64 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         await loadFilterStats();
       }
       
-      // Mark initial load as complete
-      setInitialLoadComplete(true);
-      dataLoadAttempted.current = true;
-      
     } catch (error) {
-      // Only log errors if not caused by abort
-      if (!signal.aborted) {
-        console.error('Error loading supplier products:', error);
-      }
+      console.error('Error loading supplier products:', error);
     } finally {
-      // Clean up this request
-      cleanup();
+      setIsLoading(false);
+    }
+  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters]);
+  
+  // Load filter statistics (match stats, cost range, match methods)
+  const loadFilterStats = useCallback(async () => {
+    try {
+      // Fetch total count stats for matched/unmatched
+      const matchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'matched' });
+      const unmatchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'unmatched' });
+      const totalResult = await fetchSupplierProducts(supplierId, 1, 1);
       
-      // Only update loading state if still mounted and not aborted
-      if (isMounted.current && !signal.aborted) {
-        setIsLoading(false);
+      setMatchStats({
+        total: totalResult.count,
+        matched: matchedResult.count,
+        unmatched: unmatchedResult.count
+      });
+      
+      // Fetch min/max cost (we'll need a special query for this)
+      const { data: costData, error: costError } = await fetch(`/api/supplier-product-stats/${supplierId}`)
+        .then(res => res.json());
+        
+      if (!costError && costData) {
+        setCostStats({
+          min: costData.minCost || 0,
+          max: costData.maxCost || 1000
+        });
+
+        // Initialize cost range filter with the full range
+        setCostRange({
+          min: costData.minCost || 0,
+          max: costData.maxCost || 1000
+        });
       }
+      
+      // Fetch unique match methods
+      const { data: methodsData } = await fetch(`/api/supplier-product-methods/${supplierId}`)
+        .then(res => res.json());
+        
+      if (methodsData && methodsData.matchMethods) {
+        setMatchMethods(methodsData.matchMethods);
+      }
+      
+      setHasInitializedFilters(true);
+    } catch (error) {
+      console.error('Error loading filter stats:', error);
     }
-  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters, initialLoadComplete, createRequest, loadFilterStats]);
+  }, [supplierId, fetchSupplierProducts]);
 
-  // Load data when component mounts or when parameters change - with debouncing
+  // Load data when component mounts or when parameters change
   useEffect(() => {
-    // Skip the automatic load on first render, we'll handle it with the isInitialMount ref
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
-    
-    // Skip if navigating away
-    if (isNavigating.current || !isMounted.current) {
-      return;
-    }
-    
-    // Use a debounce timer to avoid excessive API calls
-    const timer = setTimeout(() => {
-      loadData();
-    }, 300); // 300ms debounce
-    
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [loadData]);
-  
-  // Initial data load - executed only once
-  useEffect(() => {
-    if (!dataLoadAttempted.current && !isNavigating.current && isMounted.current) {
-      console.log('Initial data load for supplier products');
-      loadData();
-    }
+    loadData();
   }, [loadData]);
 
-  // Function to safely set state only if component is mounted
-  const safeSetState = useCallback(<T extends any>(setter: React.Dispatch<React.SetStateAction<T>>, value: T) => {
-    if (isMounted.current && !isNavigating.current) {
-      setter(value);
-    }
-  }, []);
-
-  // Calculate total pages from server-side count
-  const totalPages = Math.ceil(totalCount / itemsPerPage);
-  
-  // Function to get count of active filters
-  const getActiveFilterCount = useCallback(() => {
-    let count = 0;
-    if (searchTerm) count++;
-    if (costRange.min !== costStats.min || costRange.max !== costStats.max) count++;
-    if (matchMethodFilter !== null) count++;
-    if (sortField) count++;
-    return count;
-  }, [searchTerm, costRange, costStats, matchMethodFilter, sortField]);
-  
-  // Handle page changes
-  const changePage = useCallback((page: number) => {
-    if (page > 0 && page <= totalPages && !isNavigating.current) {
-      setCurrentPage(page);
-    }
-  }, [totalPages]);
-
-  // Handle items per page changes
-  const handleItemsPerPageChange = useCallback((value: number) => {
-    if (!isNavigating.current) {
-      setItemsPerPage(value);
-      setCurrentPage(1); // Reset to first page when changing items per page
-    }
-  }, []);
-  
-  // Handle search with debouncing
-  const handleSearch = useCallback((e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isNavigating.current) {
-      setCurrentPage(1); // Reset to first page on search
-      loadData();
-    }
-  }, [loadData]);
-  
-  // Handle sorting with state safety
-  const handleSort = useCallback((field: SortField) => {
-    if (isNavigating.current) return;
-    
-    if (sortField === field) {
-      // Toggle sort order if same field
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      // Set new field and default to ascending
-      setSortField(field);
-      setSortOrder('asc');
-    }
-    setCurrentPage(1); // Reset to first page on sort change
-  }, [sortField, sortOrder]);
-  
-  // Handle filter clearing safely
-  const handleClearFilters = useCallback(() => {
-    if (isNavigating.current) return;
-    
-    setSearchTerm('');
-    if (costStats) {
-      setCostRange(costStats);
-    } else {
-      setCostRange({min: 0, max: 1000});
-    }
-    setMatchMethodFilter(null);
-    setSortField('');
-    setSortOrder('asc');
-    setCurrentPage(1);
-  }, [costStats]);
-  
-  // Join with product data for additional information - use memo to avoid recalculations
+  // Join with product data for additional information
   const productsWithDetails = useMemo(() => {
     if (!Array.isArray(supplierProductsData) || !products || !Array.isArray(products)) {
       return [];
@@ -535,6 +175,60 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const handleViewUnmatchedProduct = (productId: string) => {
     setSelectedUnmatchedProduct(productId === selectedUnmatchedProduct ? null : productId);
   };
+  
+  const handleSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCurrentPage(1); // Reset to first page on search
+    loadData();
+  };
+  
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      // Toggle sort order if same field
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      // Set new field and default to ascending
+      setSortField(field);
+      setSortOrder('asc');
+    }
+    setCurrentPage(1); // Reset to first page on sort change
+  };
+  
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    if (costStats) {
+    setCostRange(costStats);
+    } else {
+      setCostRange({min: 0, max: 1000});
+    }
+    setMatchMethodFilter(null);
+    setSortField('');
+    setSortOrder('asc');
+    setCurrentPage(1);
+  };
+  
+  const getActiveFilterCount = () => {
+    let count = 0;
+    if (searchTerm) count++;
+    if (costRange.min !== costStats.min || costRange.max !== costStats.max) count++;
+    if (matchMethodFilter !== null) count++;
+    if (sortField) count++;
+    return count;
+  };
+
+  const changePage = (page: number) => {
+    if (page > 0 && page <= totalPages) {
+      setCurrentPage(page);
+    }
+  };
+
+  const handleItemsPerPageChange = (value: number) => {
+    setItemsPerPage(value);
+    setCurrentPage(1); // Reset to first page when changing items per page
+  };
+  
+  // Calculate total pages from server-side count
+  const totalPages = Math.ceil(totalCount / itemsPerPage);
   
   const renderPagination = () => {
     if (totalPages <= 1) return null;
@@ -612,7 +306,48 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     );
   };
   
-  // Main render with professional UI
+  // Show loading state
+  if (isLoading && productsWithDetails.length === 0) {
+    return (
+      <Card className="mb-4">
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h3 className="text-lg font-semibold">Supplier Products</h3>
+            <span className="text-sm text-gray-500">Loading data...</span>
+          </div>
+          <div className="flex items-center">
+            <div className="animate-spin mr-2 h-5 w-5 text-blue-600">
+              <RefreshCcw size={20} />
+            </div>
+          </div>
+        </div>
+        
+        <div className="animate-pulse space-y-3">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="flex justify-between items-center border-t py-3">
+              <div className="w-1/3">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+              <div className="w-1/6">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+              <div className="w-1/6">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+              <div className="w-1/6">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+              <div className="w-1/6">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    );
+  }
+  
+  // Main render with progressive loading
   return (
     <Card className="mb-4">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
@@ -776,7 +511,29 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       )}
       
       {/* Show table content */}
-      {productsWithDetails.length === 0 ? (
+      {isLoading && productsWithDetails.length === 0 ? (
+        <div className="animate-pulse space-y-3">
+          {[...Array(3)].map((_, i) => (
+            <div key={i} className="flex justify-between items-center border-t py-3">
+              <div className="w-1/3">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+              <div className="w-1/6">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+              <div className="w-1/6">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+              <div className="w-1/6">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+              <div className="w-1/6">
+                <div className="h-5 bg-gray-200 rounded"></div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : productsWithDetails.length === 0 ? (
         <EmptyState
           message={`No ${filterOption} products found matching your criteria`}
           suggestion={
