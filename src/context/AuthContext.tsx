@@ -72,6 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         console.log('Checking for existing session...');
         const { data, error } = await supabase.auth.getSession();
+        console.log('getSession result:', data, error);
         
         if (error) {
           console.error('Error getting session:', error);
