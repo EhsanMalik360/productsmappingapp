@@ -69,51 +69,79 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     // Check active session on page load
     const getSession = async () => {
-      const { data, error } = await supabase.auth.getSession();
-      
-      if (!error && data.session) {
-        setUser(data.session.user);
+      try {
+        console.log('Checking for existing session...');
+        const { data, error } = await supabase.auth.getSession();
         
-        // Fetch user profile with role
-        const profile = await fetchUserProfile(data.session.user.id);
-        setUserProfile(profile);
+        if (error) {
+          console.error('Error getting session:', error);
+          setLoading(false);
+          return;
+        }
+        
+        if (data && data.session) {
+          console.log('Session found, setting user');
+          setUser(data.session.user);
+          
+          // Fetch user profile with role
+          const profile = await fetchUserProfile(data.session.user.id);
+          setUserProfile(profile);
+        } else {
+          console.log('No active session found');
+        }
+      } catch (err) {
+        console.error('Unexpected error in getSession:', err);
+      } finally {
+        // Always set loading to false to prevent infinite loading
+        setLoading(false);
       }
-      
-      setLoading(false);
     };
 
     getSession();
 
     // Set up auth state listener
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (session) {
-          setUser(session.user);
+    let subscription: { unsubscribe: () => void } | null = null;
+    
+    try {
+      const authStateResponse = supabase.auth.onAuthStateChange(
+        async (event, session) => {
+          console.log('Auth state changed:', event);
           
-          // Fetch user profile with role
-          const profile = await fetchUserProfile(session.user.id);
-          
-          // If user is inactive, sign them out immediately
-          if (profile && profile.is_active === false) {
-            console.log('Inactive user detected, signing out');
-            await supabase.auth.signOut();
-            toast.error('Your account has been deactivated. Please contact an administrator.');
+          if (session) {
+            setUser(session.user);
+            
+            // Fetch user profile with role
+            const profile = await fetchUserProfile(session.user.id);
+            
+            // If user is inactive, sign them out immediately
+            if (profile && profile.is_active === false) {
+              console.log('Inactive user detected, signing out');
+              await supabase.auth.signOut();
+              toast.error('Your account has been deactivated. Please contact an administrator.');
+              setUser(null);
+              setUserProfile(null);
+            } else {
+              setUserProfile(profile);
+            }
+          } else {
             setUser(null);
             setUserProfile(null);
-          } else {
-            setUserProfile(profile);
           }
-        } else {
-          setUser(null);
-          setUserProfile(null);
+          setLoading(false);
         }
-        setLoading(false);
-      }
-    );
+      );
+      
+      subscription = authStateResponse.data.subscription;
+    } catch (err) {
+      console.error('Error setting up auth state listener:', err);
+      setLoading(false);
+    }
 
     // Cleanup subscription
     return () => {
-      subscription.unsubscribe();
+      if (subscription) {
+        subscription.unsubscribe();
+      }
     };
   }, []);
 
