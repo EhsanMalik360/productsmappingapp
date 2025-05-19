@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useProducts, useSuppliers } from '../hooks/useSupabase';
 import { supabase } from '../lib/supabase';
 
@@ -151,6 +151,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     refreshSuppliers 
   } = useSuppliers(dataInitialized);
 
+  // Add a global cache for supplier product data
+  const supplierProductsCache = useRef<{[key: string]: {data: any, timestamp: number, count: number}}>({});
+  
   // Track active API requests to prevent multiple simultaneous calls
   const [pendingRequests, setPendingRequests] = useState<{[key: string]: boolean}>({});
 
@@ -173,6 +176,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setPendingRequests(prev => ({...prev, [key]: false}));
     }
   }, [pendingRequests]);
+
+  // Store supplier stats to avoid repeated API calls
+  const supplierStatsMap = useRef<{[supplierId: string]: {
+    min: number, 
+    max: number, 
+    matchMethods: string[], 
+    total: number, 
+    matched: number, 
+    unmatched: number,
+    timestamp: number
+  }}>({});
 
   // Convert DB products to app format
   const products = useMemo(() => dbProducts.map(dbProduct => ({
@@ -832,6 +846,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Generate a unique key for this specific API call to deduplicate
       const requestKey = `supplier_products_${safeSupplierIdString}_${page}_${pageSize}_${JSON.stringify(filters)}`;
       
+      // Check if we have a valid cached response
+      const now = Date.now();
+      const CACHE_TTL = 30 * 1000; // 30 seconds cache TTL
+      
+      if (supplierProductsCache.current[requestKey] && 
+          (now - supplierProductsCache.current[requestKey].timestamp) < CACHE_TTL) {
+        console.log(`Using cached data for: ${requestKey}`);
+        return {
+          data: supplierProductsCache.current[requestKey].data,
+          count: supplierProductsCache.current[requestKey].count
+        };
+      }
+      
+      // For supplier stats requests (low page/pageSize), check if we have supplier stats cached
+      if (page === 1 && pageSize === 1) {
+        const statsKey = `stats_${safeSupplierIdString}`;
+        const STATS_TTL = 60 * 1000; // 1 minute cache for stats
+        
+        // If this is a filtered query for matched/unmatched products & we have stats
+        if (filters.filterOption && 
+            supplierStatsMap.current[safeSupplierIdString] && 
+            (now - supplierStatsMap.current[safeSupplierIdString].timestamp) < STATS_TTL) {
+          
+          const stats = supplierStatsMap.current[safeSupplierIdString];
+          
+          // Return cached stats counts based on filter
+          if (filters.filterOption === 'matched') {
+            console.log(`Using cached stats for matched products of supplier ${safeSupplierIdString}`);
+            
+            // Cache the result for this specific query too
+            supplierProductsCache.current[requestKey] = {
+              data: [],
+              count: stats.matched,
+              timestamp: now
+            };
+            
+            return { data: [], count: stats.matched };
+          } 
+          else if (filters.filterOption === 'unmatched') {
+            console.log(`Using cached stats for unmatched products of supplier ${safeSupplierIdString}`);
+            
+            // Cache the result for this specific query too
+            supplierProductsCache.current[requestKey] = {
+              data: [],
+              count: stats.unmatched,
+              timestamp: now
+            };
+            
+            return { data: [], count: stats.unmatched };
+          }
+          else {
+            console.log(`Using cached stats for all products of supplier ${safeSupplierIdString}`);
+            
+            // Cache the result for this specific query too
+            supplierProductsCache.current[requestKey] = {
+              data: [],
+              count: stats.total,
+              timestamp: now
+            };
+            
+            return { data: [], count: stats.total };
+          }
+        }
+      }
+      
       // Use throttling to prevent multiple identical calls
       const result = await throttleApiCall(requestKey, async () => {
         console.log(`Fetching supplier products for supplier ${safeSupplierIdString}, page ${page}, size ${pageSize}`);
@@ -925,6 +1004,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           throw error;
         }
         
+        // If this is a stats query (page=1, pageSize=1), cache the stats
+        if (page === 1 && pageSize === 1) {
+          if (!filters.filterOption) {
+            // This is the "all" products query
+            if (!supplierStatsMap.current[safeSupplierIdString]) {
+              supplierStatsMap.current[safeSupplierIdString] = {
+                min: 0,
+                max: 1000,
+                matchMethods: [],
+                total: count || 0,
+                matched: 0,
+                unmatched: 0,
+                timestamp: now
+              };
+            } else {
+              // Update only the total count and timestamp
+              supplierStatsMap.current[safeSupplierIdString] = {
+                ...supplierStatsMap.current[safeSupplierIdString],
+                total: count || 0,
+                timestamp: now
+              };
+            }
+          } 
+          else if (filters.filterOption === 'matched') {
+            // Update matched count in the cache
+            if (supplierStatsMap.current[safeSupplierIdString]) {
+              supplierStatsMap.current[safeSupplierIdString].matched = count || 0;
+              supplierStatsMap.current[safeSupplierIdString].timestamp = now;
+            } else {
+              supplierStatsMap.current[safeSupplierIdString] = {
+                min: 0,
+                max: 1000,
+                matchMethods: [],
+                total: 0,
+                matched: count || 0,
+                unmatched: 0,
+                timestamp: now
+              };
+            }
+          }
+          else if (filters.filterOption === 'unmatched') {
+            // Update unmatched count in the cache
+            if (supplierStatsMap.current[safeSupplierIdString]) {
+              supplierStatsMap.current[safeSupplierIdString].unmatched = count || 0;
+              supplierStatsMap.current[safeSupplierIdString].timestamp = now;
+            } else {
+              supplierStatsMap.current[safeSupplierIdString] = {
+                min: 0,
+                max: 1000,
+                matchMethods: [],
+                total: 0,
+                matched: 0,
+                unmatched: count || 0,
+                timestamp: now
+              };
+            }
+          }
+        }
+        
         return { 
           data: data || [], 
           count: count || 0
@@ -938,6 +1076,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           count: 0
         };
       }
+      
+      // Store in cache before returning
+      supplierProductsCache.current[requestKey] = {
+        data: result.data,
+        count: result.count,
+        timestamp: now
+      };
       
       return {
         data: result.data as SupplierProduct[],
