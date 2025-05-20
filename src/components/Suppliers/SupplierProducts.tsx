@@ -26,6 +26,8 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const [sortField, setSortField] = useState<SortField>('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [costRange, setCostRange] = useState<{min: number, max: number}>({min: 0, max: 1000});
+  // Track if the user has manually changed the cost range filter
+  const [userModifiedCostRange, setUserModifiedCostRange] = useState(false);
   const [matchMethodFilter, setMatchMethodFilter] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
@@ -46,19 +48,26 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     try {
       setIsLoading(true);
 
+      // Create filter params - only include cost range if user has modified it
+      const filterParams: any = {
+        searchTerm,
+        filterOption,
+        matchMethodFilter,
+        sortField,
+        sortOrder
+      };
+      
+      // Only apply cost range filter if the user has explicitly set it
+      if (userModifiedCostRange) {
+        filterParams.costRange = costRange;
+      }
+
       // Fetch data with server-side pagination
       const result = await fetchSupplierProducts(
         supplierId,
         currentPage,
         itemsPerPage,
-        {
-          searchTerm,
-          filterOption,
-          costRange,
-          matchMethodFilter,
-          sortField,
-          sortOrder
-        }
+        filterParams
       );
       
       setSupplierProductsData(result.data);
@@ -74,7 +83,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters]);
+  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, userModifiedCostRange, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters]);
   
   // Load filter statistics (match stats, cost range, match methods)
   const loadFilterStats = useCallback(async () => {
@@ -95,16 +104,18 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         .then(res => res.json());
         
       if (!costError && costData) {
-        setCostStats({
+        const newCostStats = {
           min: costData.minCost || 0,
           max: costData.maxCost || 1000
-        });
+        };
+        
+        setCostStats(newCostStats);
 
-        // Initialize cost range filter with the full range
-        setCostRange({
-          min: costData.minCost || 0,
-          max: costData.maxCost || 1000
-        });
+        // Only initialize the cost range control with these values, but don't apply 
+        // as a filter until user interaction
+        if (!userModifiedCostRange) {
+          setCostRange(newCostStats);
+        }
       }
       
       // Fetch unique match methods
@@ -197,10 +208,12 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const handleClearFilters = () => {
     setSearchTerm('');
     if (costStats) {
-    setCostRange(costStats);
+      setCostRange(costStats);
     } else {
       setCostRange({min: 0, max: 1000});
     }
+    // Reset the userModifiedCostRange flag when clearing filters
+    setUserModifiedCostRange(false);
     setMatchMethodFilter(null);
     setSortField('');
     setSortOrder('asc');
@@ -210,7 +223,8 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const getActiveFilterCount = () => {
     let count = 0;
     if (searchTerm) count++;
-    if (costRange.min !== costStats.min || costRange.max !== costStats.max) count++;
+    // Only count cost range filter if user has modified it
+    if (userModifiedCostRange && (costRange.min !== costStats.min || costRange.max !== costStats.max)) count++;
     if (matchMethodFilter !== null) count++;
     if (sortField) count++;
     return count;
@@ -229,6 +243,16 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   
   // Calculate total pages from server-side count
   const totalPages = Math.ceil(totalCount / itemsPerPage);
+  
+  // Format large numbers for better display
+  const formatNumber = (num: number): string => {
+    if (num >= 1000000) {
+      return (num / 1000000).toFixed(1) + 'M';
+    } else if (num >= 1000) {
+      return (num / 1000).toFixed(1) + 'K';
+    }
+    return num.toString();
+  };
   
   const renderPagination = () => {
     if (totalPages <= 1) return null;
@@ -351,35 +375,35 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   return (
     <Card className="mb-4">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button 
             variant={filterOption === 'all' ? 'primary' : 'secondary'}
-            className="flex items-center text-xs px-3 py-1.5"
+            className="flex items-center justify-between text-xs px-3 py-1.5 min-w-[120px]"
             onClick={() => { setFilterOption('all'); setCurrentPage(1); }}
           >
-            All Products
-            <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full w-5 h-5 flex items-center justify-center text-xs">
-              {matchStats.total}
+            <span>All Products</span>
+            <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center text-xs whitespace-nowrap">
+              {formatNumber(matchStats.total)}
             </span>
           </Button>
           <Button 
             variant={filterOption === 'matched' ? 'primary' : 'secondary'}
-            className="flex items-center text-xs px-3 py-1.5"
+            className="flex items-center justify-between text-xs px-3 py-1.5 min-w-[100px]"
             onClick={() => { setFilterOption('matched'); setCurrentPage(1); }}
           >
-            Matched
-            <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full w-5 h-5 flex items-center justify-center text-xs">
-              {matchStats.matched}
+            <span>Matched</span>
+            <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center text-xs whitespace-nowrap">
+              {formatNumber(matchStats.matched)}
             </span>
           </Button>
           <Button 
             variant={filterOption === 'unmatched' ? 'primary' : 'secondary'}
-            className="flex items-center text-xs px-3 py-1.5"
+            className="flex items-center justify-between text-xs px-3 py-1.5 min-w-[120px]"
             onClick={() => { setFilterOption('unmatched'); setCurrentPage(1); }}
           >
-            Unmatched
-            <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full w-5 h-5 flex items-center justify-center text-xs">
-              {matchStats.unmatched}
+            <span>Unmatched</span>
+            <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center text-xs whitespace-nowrap">
+              {formatNumber(matchStats.unmatched)}
             </span>
           </Button>
         </div>
@@ -399,13 +423,15 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
           
           <Button 
             variant={showFilters ? 'primary' : 'secondary'}
-            className="flex items-center"
+            className="flex items-center justify-between text-xs px-3 py-1.5 min-w-[100px]"
             onClick={() => setShowFilters(!showFilters)}
           >
-            <Filter size={16} className="mr-2" />
-            Filters
+            <span className="flex items-center">
+              <Filter size={16} className="mr-2" />
+              Filters
+            </span>
             {getActiveFilterCount() > 0 && (
-              <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full w-5 h-5 flex items-center justify-center text-xs">
+              <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center text-xs whitespace-nowrap">
                 {getActiveFilterCount()}
               </span>
             )}
@@ -425,7 +451,10 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
                       type="number"
                       className="w-24 border p-2 rounded"
                       value={costRange.min}
-                      onChange={(e) => setCostRange({...costRange, min: Number(e.target.value)})}
+                      onChange={(e) => {
+                        setCostRange({...costRange, min: Number(e.target.value)});
+                        setUserModifiedCostRange(true);
+                      }}
                       min={0}
                     />
                     <span className="text-gray-600">to</span>
@@ -433,7 +462,10 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
                       type="number"
                       className="w-24 border p-2 rounded"
                       value={costRange.max}
-                      onChange={(e) => setCostRange({...costRange, max: Number(e.target.value)})}
+                      onChange={(e) => {
+                        setCostRange({...costRange, max: Number(e.target.value)});
+                        setUserModifiedCostRange(true);
+                      }}
                       min={costRange.min}
                     />
                   </div>

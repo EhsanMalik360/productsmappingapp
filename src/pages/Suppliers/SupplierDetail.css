@@ -1,0 +1,106 @@
+/* Animations for Supplier Detail page */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+.animate-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(90deg, 
+                              rgba(226, 232, 240, 0.6) 25%, 
+                              rgba(237, 242, 247, 0.9) 50%, 
+                              rgba(226, 232, 240, 0.6) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+/* Transition helpers */
+.transition-opacity {
+  transition: opacity 0.3s ease-in-out;
+}
+
+.transition-all {
+  transition: all 0.3s ease-in-out;
+}
+
+.transition-transform {
+  transition: transform 0.3s ease-in-out;
+}
+
+/* Element specific styles */
+.card-skeleton {
+  min-height: 200px;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card {
+  min-height: 100px;
+  transition: all 0.3s ease-in-out;
+}
+
+.supplier-table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+.supplier-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Grid layout and responsiveness improvements */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+/* Prevent content jumps */
+.content-wrapper {
+  min-height: 400px;
+}
+
+/* Card container styling */
+.card-container {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-container.loading {
+  position: relative;
+}
+
+.card-container.loading::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(2px);
+  z-index: 1;
+} 

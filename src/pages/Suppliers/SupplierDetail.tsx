@@ -1,13 +1,13 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, RefreshCcw, Edit, Save, X, Loader2 } from 'lucide-react';
+import { ArrowLeft, RefreshCcw, Edit, Save, X, DollarSign, Package, TrendingUp, BarChart } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
 import Button from '../../components/UI/Button';
-import EmptyState from '../../components/Dashboard/EmptyState';
 import SupplierModal from './SupplierModal';
 import SupplierProducts from '../../components/Suppliers/SupplierProducts';
 import toast from 'react-hot-toast';
+import './SupplierDetail.css';
 
 const SupplierDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -16,7 +16,6 @@ const SupplierDetail: React.FC = () => {
     suppliers, 
     supplierProducts, 
     products, 
-    loading, 
     refreshData,
     getEntityAttributes,
     setAttributeValue,
@@ -24,143 +23,74 @@ const SupplierDetail: React.FC = () => {
     fetchSupplierProducts
   } = useAppContext();
   
-  // State for component
+  // Component state
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [supplierNotFound, setSupplierNotFound] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [dataFetched, setDataFetched] = useState(false);
   const [totalProductCount, setTotalProductCount] = useState(0);
-  const [countLoading, setCountLoading] = useState(false);
+  const [hasAccurateCount, setHasAccurateCount] = useState(false);
   
   // Edit mode states
   const [isEditing, setIsEditing] = useState(false);
   const [editedSupplier, setEditedSupplier] = useState<any>(null);
   const [isSaving, setIsSaving] = useState(false);
   
-  // Add progressive loading states - initialize as false to show content immediately
-  const [headerLoaded, setHeaderLoaded] = useState(true);
-  const [statsLoading, setStatsLoading] = useState(false);
-  const [attributesLoading, setAttributesLoading] = useState(false);
-  const [productsLoading, setProductsLoading] = useState(false);
+  // Refs for height measurement
+  const overviewRef = useRef<HTMLDivElement>(null);
+  const detailsRef = useRef<HTMLDivElement>(null);
+  const [overviewHeight, setOverviewHeight] = useState<number>(200);
+  const [detailsHeight, setDetailsHeight] = useState<number>(200);
 
-  // Ensure ID is properly formatted - remove any UUID format issues
-  const normalizedId = useMemo(() => {
-    if (!id) return '';
-    // Return the full ID without any processing that might truncate it
-    return String(id); // Convert to string to ensure it's a string type
-  }, [id]);
-
-  // Get the actual count of all supplier products from the server
-  const fetchTotalProductCount = useCallback(async () => {
-    if (!normalizedId) return;
-    
-    try {
-      // Track loading state for the count specifically
-      setCountLoading(true);
-      
-      // Fetch the total, matched, and unmatched counts from the server
-      const totalResult = await fetchSupplierProducts(normalizedId, 1, 1);
-      
-      // Update state with the accurate count
-      setTotalProductCount(totalResult.count);
-    } catch (error) {
-      console.error('Error fetching total product count:', error);
-    } finally {
-      setCountLoading(false);
-    }
-  }, [normalizedId, fetchSupplierProducts]);
-
-  // Memoize the fetchLatestData function to prevent it from changing on every render
-  const fetchLatestData = useCallback(async () => {
-    try {
-      console.log('SupplierDetail: Loading data for supplier ID:', normalizedId);
-      setIsRefreshing(true);
-      setErrorMessage(null);
-      await refreshData();
-      
-      // Fetch accurate product count
-      await fetchTotalProductCount();
-      
-      // Check if the supplier exists after data refresh
-      const supplierExists = suppliers.some(s => s.id === normalizedId);
-      setSupplierNotFound(!supplierExists);
-      
-      if (!supplierExists) {
-        console.error(`Supplier with ID ${normalizedId} not found after data refresh`);
-        setErrorMessage(`Supplier with ID ${normalizedId} not found in the database.`);
-      }
-      
-      setDataFetched(true);
-    } catch (error) {
-      console.error('Error refreshing data in SupplierDetail:', error);
-      setErrorMessage('Failed to load supplier data. Please try again.');
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [normalizedId, refreshData, suppliers, fetchTotalProductCount]);
-
-  // Refresh data when component mounts to ensure we have the latest supplier products
-  useEffect(() => {
-    let isMounted = true;
-    
-    // Only fetch data if we haven't fetched it yet or if manually refreshing
-    if (!dataFetched && normalizedId && isMounted) {
-      console.log('SupplierDetail: Starting data fetch for ID:', normalizedId);
-      fetchLatestData();
-    }
-    
-    return () => {
-      isMounted = false;
-    };
-  }, [normalizedId, fetchLatestData, dataFetched]);
-
-  // Progress loading state for faster perceived performance
-  useEffect(() => {
-    // When we get a supplier, immediately set all sections as loaded
-    const supplier = suppliers.find(s => s.id === normalizedId);
-    if (supplier) {
-      setHeaderLoaded(true);
-      setStatsLoading(false);
-      setAttributesLoading(false);
-      setProductsLoading(false);
-    }
-  }, [suppliers, normalizedId]);
-
-  // Add additional logging for debugging - only run once after data is loaded
-  useEffect(() => {
-    if (dataFetched && suppliers.length > 0) {
-      console.log('SupplierDetail: Current suppliers list:', suppliers);
-      console.log('SupplierDetail: Looking for supplier with ID:', normalizedId);
-      
-      const found = suppliers.find(s => s.id === normalizedId);
-      if (found) {
-        console.log('SupplierDetail: Found supplier:', found);
-      } else {
-        console.error('SupplierDetail: Supplier not found in suppliers list');
-      }
-    }
-  }, [dataFetched, suppliers, normalizedId]);
+  // Format ID properly
+  const normalizedId = useMemo(() => id ? String(id) : '', [id]);
 
   // Get supplier data
-  const supplier = suppliers.find(s => s.id === normalizedId);
+  const supplier = useMemo(() => 
+    suppliers.find(s => s.id === normalizedId), 
+    [suppliers, normalizedId]
+  );
   
-  // Get supplier products for statistics calculation
-  const supplierProductsList = supplierProducts.filter(sp => sp.supplier_id === normalizedId);
+  // Get supplier products
+  const supplierProductsList = useMemo(() => 
+    supplierProducts.filter(sp => sp.supplier_id === normalizedId), 
+    [supplierProducts, normalizedId]
+  );
   
-  // Join with product data for statistics
-  const productsWithDetails = useMemo(() => {
-    if (!supplierProductsList || !products || !Array.isArray(supplierProductsList) || !Array.isArray(products)) {
-      return [];
+  // Calculate statistics
+  const stats = useMemo(() => {
+    // Use client-side data for immediate display
+    const clientCount = supplierProductsList.length;
+    const matched = supplierProductsList.filter(sp => sp.product_id).length;
+    const count = totalProductCount || clientCount;
+    
+    // Set initial count if needed
+    if (clientCount > 0 && totalProductCount === 0 && !hasAccurateCount) {
+      setTotalProductCount(clientCount);
     }
     
+    return {
+      productCount: count,
+      matchedCount: matched,
+      unmatchedCount: count - matched,
+      matchedPercent: count > 0 ? Math.round((matched / count) * 100) : 0,
+      avgCost: clientCount > 0 
+        ? supplierProductsList.reduce((sum, sp) => sum + sp.cost, 0) / clientCount
+        : 0
+    };
+  }, [supplierProductsList, totalProductCount, hasAccurateCount]);
+  
+  // Calculate profit metrics
+  const productsWithDetails = useMemo(() => {
+    if (!supplierProductsList.length || !products.length) return [];
+    
     return supplierProductsList
-      .filter(sp => sp && sp.product_id) // Only consider matched products with valid product_id
+      .filter(sp => sp && sp.product_id)
       .map(sp => {
         const product = products.find(p => p && p.id === sp.product_id);
         if (!product) return null;
         
-        // Updated profit margin calculation using Buy Box Price instead of Sale Price
         const buyBoxPrice = product.buyBoxPrice || 0;
         const amazonFee = product.amazonFee || 0;
         const referralFee = product.referralFee || 0;
@@ -169,97 +99,177 @@ const SupplierDetail: React.FC = () => {
         const margin = buyBoxPrice - amazonFee - referralFee - cost;
         const profitMargin = buyBoxPrice > 0 ? (margin / buyBoxPrice) * 100 : 0;
         
-        return {
-          ...sp,
-          product,
-          margin,
-          profitMargin
-        };
+        return { ...sp, product, margin, profitMargin };
       })
-      .filter(Boolean); // Remove null values
+      .filter(Boolean); // Remove nulls
   }, [supplierProductsList, products]);
   
-  // When supplier data is loaded, initialize editedSupplier
+  // Average profit margin
+  const avgProfitMargin = useMemo(() => {
+    if (!productsWithDetails.length) return 0;
+    const sum = productsWithDetails.reduce((acc, item) => {
+      if (!item) return acc;
+      return acc + (item.profitMargin || 0);
+    }, 0);
+    return sum / productsWithDetails.length;
+  }, [productsWithDetails]);
+
+  // Custom attributes
+  const customAttributes = useMemo(() => {
+    if (!supplier?.id) return [];
+    try {
+      return getEntityAttributes(supplier.id, 'supplier') || [];
+    } catch (err) {
+      console.error('Error getting attributes:', err);
+      return [];
+    }
+  }, [supplier, getEntityAttributes]);
+  
+  // Fetch accurate product count
+  const fetchTotalProductCount = useCallback(async () => {
+    if (!normalizedId) return;
+    try {
+      const result = await fetchSupplierProducts(normalizedId, 1, 1);
+      setTotalProductCount(result.count);
+      setHasAccurateCount(true);
+    } catch (err) {
+      console.error('Error fetching count:', err);
+      setHasAccurateCount(true); // Show client-side data on error
+    }
+  }, [normalizedId, fetchSupplierProducts]);
+
+  // Load initial data
+  const fetchInitialData = useCallback(async () => {
+    if (!normalizedId || dataFetched) return;
+    
+    try {
+      setIsRefreshing(true);
+      
+      // Check if we already have the supplier
+      const existingSupplier = suppliers.find(s => s.id === normalizedId);
+      
+      if (!existingSupplier) {
+        await refreshData();
+      }
+      
+      // Get accurate count in background
+      fetchTotalProductCount();
+      
+      // Check if supplier exists
+      const supplierExists = suppliers.some(s => s.id === normalizedId) || !!existingSupplier;
+      setSupplierNotFound(!supplierExists);
+      
+      if (!supplierExists) {
+        setErrorMessage(`Supplier with ID ${normalizedId} not found.`);
+      }
+      
+      setDataFetched(true);
+    } catch (err) {
+      console.error('Error loading data:', err);
+      setErrorMessage('Failed to load supplier data.');
+      setDataFetched(true);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [normalizedId, suppliers, refreshData, fetchTotalProductCount, dataFetched]);
+
+  // Load data on mount
+  useEffect(() => {
+    fetchInitialData();
+  }, [fetchInitialData]);
+  
+  // Measure card heights to prevent layout shifts
+  useLayoutEffect(() => {
+    if (overviewRef.current) {
+      setOverviewHeight(Math.max(overviewRef.current.offsetHeight, 200));
+    }
+    
+    if (detailsRef.current) {
+      setDetailsHeight(Math.max(detailsRef.current.offsetHeight, 200));
+    }
+  }, [supplier]);
+  
+  // Initialize edit form when supplier changes
   useEffect(() => {
     if (supplier && (isEditing || !editedSupplier)) {
-      setEditedSupplier({
-        ...supplier,
-        name: supplier.name
-      });
+      setEditedSupplier({ ...supplier });
     }
   }, [supplier, isEditing, editedSupplier]);
 
+  // Form handling
   const handleEditChange = (field: string, value: any) => {
-    setEditedSupplier((prev: any) => ({
-      ...prev,
-      [field]: value
-    }));
+    setEditedSupplier((prev: Record<string, any>) => ({ ...prev, [field]: value }));
   };
 
+  // Save changes
   const handleSave = async () => {
     if (!editedSupplier) return;
     
     try {
       setIsSaving(true);
       
-      // Validate required fields
+      // Validate
       if (!editedSupplier.name) {
         toast.error('Supplier name is required');
         return;
       }
       
-      // Update the supplier
-      await updateSupplier(normalizedId, {
-        name: editedSupplier.name
-      });
-      
-      // Refresh data to get updated state
+      await updateSupplier(normalizedId, { name: editedSupplier.name });
       await refreshData();
       
       toast.success('Supplier updated successfully');
       setIsEditing(false);
-    } catch (error) {
-      console.error('Error updating supplier:', error);
+    } catch (err) {
+      console.error('Error updating:', err);
       toast.error('Failed to update supplier');
     } finally {
       setIsSaving(false);
     }
   };
 
+  // Cancel edit
   const handleCancelEdit = () => {
     if (supplier) {
-      setEditedSupplier({
-        ...supplier,
-        name: supplier.name
-      });
+      setEditedSupplier({ ...supplier });
     }
     setIsEditing(false);
   };
 
+  // Refresh data
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
-      setDataFetched(false); // Reset to trigger a fresh data fetch
-      await fetchLatestData();
-    } catch (error) {
-      console.error('Error refreshing data:', error);
+      setHasAccurateCount(false);
+      await refreshData();
+      await fetchTotalProductCount();
+    } catch (err) {
+      console.error('Error refreshing:', err);
+    } finally {
       setIsRefreshing(false);
     }
   };
   
-  const openEditModal = () => {
-    setIsModalOpen(true);
-  };
+  // Modal control
+  const closeModal = () => setIsModalOpen(false);
   
-  const closeModal = () => {
-    setIsModalOpen(false);
-  };
+  // Skeleton loaders
+  const renderStatCardSkeleton = () => (
+    <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+      {[...Array(4)].map((_, i) => (
+        <div key={i} className="bg-gray-50 p-4 rounded-lg animate-pulse">
+          <div className="h-5 bg-gray-200 rounded w-24 mb-1"></div>
+          <div className="h-8 bg-gray-200 rounded w-20 mb-1"></div>
+          {i === 1 && <div className="h-4 bg-gray-200 rounded w-16"></div>}
+        </div>
+      ))}
+    </div>
+  );
   
-  // If no supplier found and done loading, show error state
-  if (!loading && !isRefreshing && !isSaving && dataFetched && supplierNotFound) {
+  // Error state for supplier not found
+  if (!isRefreshing && dataFetched && supplierNotFound) {
     return (
       <div className="p-6">
-        <div className="bg-red-50 border border-red-300 rounded-md p-4 mb-6">
+        <div className="bg-red-50 border border-red-300 rounded-md p-4 mb-6 animate-fadeIn">
           <h2 className="text-xl font-semibold text-red-700 mb-2">Supplier Not Found</h2>
           <p className="text-red-600">{errorMessage || 'The supplier you are looking for could not be found.'}</p>
           <Button 
@@ -273,33 +283,14 @@ const SupplierDetail: React.FC = () => {
     );
   }
   
-  // Calculate statistics
-  const matchedProducts = supplierProductsList.filter(sp => sp.product_id).length;
-  const avgCost = supplierProductsList.length > 0 
-    ? supplierProductsList.reduce((sum, sp) => sum + sp.cost, 0) / supplierProductsList.length
-    : 0;
-
-  // Calculate average profit margin
-  const avgProfitMargin = productsWithDetails.length > 0 
-    ? productsWithDetails.reduce((sum, item) => sum + (item?.profitMargin || 0), 0) / productsWithDetails.length
-    : 0;
-
-  // Get custom attributes for this supplier
-  const customAttributes = useMemo(() => {
-    if (!supplier || !supplier.id || typeof getEntityAttributes !== 'function') return [];
-    try {
-      return getEntityAttributes(supplier.id, 'supplier') || [];
-    } catch (error) {
-      console.error('Error getting entity attributes:', error);
-      return [];
-    }
-  }, [supplier, getEntityAttributes]);
-
-  // Start rendering the UI with a progressive loading approach
+  // Loading state handling
+  const isLoading = isRefreshing || !dataFetched;
+  const showSkeleton = isLoading && !supplier;
+  
   return (
-    <div className="p-6">
-      {/* Header - always show */}
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 content-wrapper">
+      {/* Header Section */}
+      <div className="flex items-center justify-between mb-6 animate-fadeIn">
         <div className="flex items-center">
           <Button 
             variant="secondary" 
@@ -309,29 +300,27 @@ const SupplierDetail: React.FC = () => {
             <ArrowLeft size={16} className="mr-2" /> Back to Suppliers
           </Button>
           
-          {!headerLoaded ? (
-            <div className="h-8 bg-gray-200 rounded animate-pulse w-48"></div>
+          {showSkeleton ? (
+            <div className="h-8 bg-gray-200 rounded skeleton-shimmer w-48"></div>
           ) : isEditing ? (
             <input
               type="text"
               value={editedSupplier?.name || ''}
               onChange={(e) => handleEditChange('name', e.target.value)}
-              className="text-2xl font-bold border border-blue-300 rounded px-2 py-1 w-64"
+              className="text-2xl font-bold border border-blue-300 rounded px-2 py-1 w-64 transition-all"
               placeholder="Supplier Name"
             />
           ) : (
-            <h1 className="text-2xl font-bold">{supplier?.name || "Loading..."}</h1>
+            <h1 className="text-2xl font-bold transition-opacity">{supplier?.name || "Loading..."}</h1>
           )}
         </div>
         
         <div className="flex space-x-2">
-          {loading || isRefreshing || isSaving ? (
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <div className="animate-spin h-4 w-4 text-blue-600 mr-1">
-                <RefreshCcw size={16} />
-              </div>
+          {isRefreshing || isSaving ? (
+            <div className="flex items-center gap-2 text-sm text-gray-500 px-4 py-2 border rounded">
+              <RefreshCcw size={16} className="animate-spin" />
               <span>
-                {isSaving ? "Saving..." : isRefreshing ? "Refreshing..." : "Loading..."}
+                {isSaving ? "Saving..." : "Refreshing..."}
               </span>
             </div>
           ) : isEditing ? (
@@ -339,13 +328,13 @@ const SupplierDetail: React.FC = () => {
               <Button 
                 variant="secondary" 
                 onClick={handleCancelEdit}
-                className="flex items-center"
+                className="flex items-center transition-all"
               >
                 <X size={16} className="mr-2" /> Cancel
               </Button>
               <Button 
                 onClick={handleSave}
-                className="flex items-center"
+                className="flex items-center transition-all"
               >
                 <Save size={16} className="mr-2" /> Save
               </Button>
@@ -355,16 +344,18 @@ const SupplierDetail: React.FC = () => {
               <Button 
                 variant="secondary" 
                 onClick={() => setIsEditing(true)} 
-                className="flex items-center" 
+                className="flex items-center transition-all" 
+                disabled={showSkeleton}
               >
                 <Edit size={16} className="mr-2" /> Edit
               </Button>
               <Button 
                 variant="secondary" 
                 onClick={handleRefresh}
-                className="flex items-center"
+                className="flex items-center transition-all"
+                disabled={isRefreshing}
               >
-                <RefreshCcw size={16} className="mr-2" /> Refresh
+                <RefreshCcw size={16} className="mr-2 transition-transform hover:rotate-180" /> Refresh
               </Button>
             </>
           )}
@@ -372,48 +363,82 @@ const SupplierDetail: React.FC = () => {
       </div>
       
       {/* Overview Card */}
-      <Card className="mb-6">
+      <div ref={overviewRef} style={{ minHeight: overviewHeight }}>
+        <Card className="mb-6 card-container">
         <h2 className="text-xl font-semibold mb-4">Supplier Overview</h2>
         
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-          <div className="bg-blue-50 p-4 rounded-lg">
-            <div className="text-sm text-blue-700 mb-1">Total Products</div>
+          {showSkeleton ? renderStatCardSkeleton() : (
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6 animate-fadeIn">
+              <div className="bg-blue-50 p-4 rounded-lg stat-card">
+                <div className="text-sm text-blue-700 mb-1 flex items-center">
+                  <Package size={16} className="mr-1" /> Total Products
+                </div>
             <div className="text-2xl font-bold flex items-center">
-              {totalProductCount || supplierProductsList.length}
-              {countLoading && (
-                <Loader2 className="w-4 h-4 text-blue-500 animate-spin ml-2" />
+                  {hasAccurateCount ? (
+                    <span className="transition-all">{stats.productCount}</span>
+                  ) : (
+                    <div className="inline-block w-12 h-8 bg-blue-100 skeleton-shimmer rounded"></div>
               )}
             </div>
           </div>
       
-          <div className="bg-green-50 p-4 rounded-lg">
-            <div className="text-sm text-green-700 mb-1">Matched Products</div>
-            <div className="text-2xl font-bold">{matchedProducts}</div>
+              <div className="bg-green-50 p-4 rounded-lg stat-card">
+                <div className="text-sm text-green-700 mb-1 flex items-center">
+                  <BarChart size={16} className="mr-1" /> Matched Products
+                </div>
+                <div className="text-2xl font-bold flex items-center">
+                  {hasAccurateCount ? (
+                    <span className="transition-all">{stats.matchedCount}</span>
+                  ) : (
+                    <div className="inline-block w-12 h-8 bg-green-100 skeleton-shimmer rounded"></div>
+                  )}
+                </div>
             <div className="text-sm text-green-700">
-              ({totalProductCount > 0 ? Math.round((matchedProducts / totalProductCount) * 100) : 0}%)
+                  {hasAccurateCount ? (
+                    <span>({stats.matchedPercent}%)</span>
+                  ) : (
+                    <div className="inline-block w-14 h-4 bg-green-100 skeleton-shimmer rounded"></div>
+                  )}
             </div>
           </div>
     
-          <div className="bg-amber-50 p-4 rounded-lg">
-            <div className="text-sm text-amber-700 mb-1">Average Cost</div>
-            <div className="text-2xl font-bold">${avgCost.toFixed(2)}</div>
+              <div className="bg-amber-50 p-4 rounded-lg stat-card">
+                <div className="text-sm text-amber-700 mb-1 flex items-center">
+                  <DollarSign size={16} className="mr-1" /> Average Cost
           </div>
-          
-          <div className="bg-purple-50 p-4 rounded-lg">
-            <div className="text-sm text-purple-700 mb-1">Avg Profit Margin</div>
-            <div className="text-2xl font-bold">{avgProfitMargin.toFixed(1)}%</div>
+                <div className="text-2xl font-bold">
+                  {hasAccurateCount ? (
+                    <span className="transition-all">${stats.avgCost.toFixed(2)}</span>
+                  ) : (
+                    <div className="inline-block w-24 h-8 bg-amber-100 skeleton-shimmer rounded"></div>
+                  )}
           </div>
         </div>
+              
+              <div className="bg-purple-50 p-4 rounded-lg stat-card">
+                <div className="text-sm text-purple-700 mb-1 flex items-center">
+                  <TrendingUp size={16} className="mr-1" /> Avg Profit Margin
+                </div>
+                <div className="text-2xl font-bold">
+                  {hasAccurateCount ? (
+                    <span className="transition-all">{avgProfitMargin.toFixed(1)}%</span>
+                  ) : (
+                    <div className="inline-block w-20 h-8 bg-purple-100 skeleton-shimmer rounded"></div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         
         {/* Custom Attributes Section */}
         {customAttributes.length > 0 && (
-          <div className="border-t border-gray-200 pt-4 mt-2">
+            <div className="border-t border-gray-200 pt-4 mt-2 animate-fadeIn">
             <h3 className="text-lg font-medium mb-3">Custom Attributes</h3>
             
-            {attributesLoading ? (
+              {showSkeleton ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {[...Array(3)].map((_, i) => (
-                  <div key={i} className="border rounded-lg p-3 relative bg-gray-50 animate-pulse">
+                    <div key={i} className="border rounded-lg p-3 relative bg-gray-50 skeleton-shimmer">
                     <div className="h-4 bg-gray-200 rounded w-24 mb-2"></div>
                     <div className="h-6 bg-gray-200 rounded w-full"></div>
                   </div>
@@ -430,7 +455,7 @@ const SupplierDetail: React.FC = () => {
                       
                     const handleValueChange = async (newValue: any) => {
                       try {
-                      // Convert the value to the appropriate type
+                        // Convert value to appropriate type
                       let typedValue = newValue;
                       if (attribute.type === 'Number') {
                         typedValue = parseFloat(newValue);
@@ -442,14 +467,14 @@ const SupplierDetail: React.FC = () => {
                         await setAttributeValue(attribute.id, supplier.id, typedValue);
                         toast.success(`Updated ${attribute.name}`);
                       }
-                    } catch (error) {
-                      console.error('Error updating attribute:', error);
+                      } catch (err) {
+                        console.error('Error updating attribute:', err);
                       toast.error('Failed to update attribute');
                     }
                   };
                   
                   return (
-                    <div key={attribute.id} className="border rounded-lg p-3 relative bg-gray-50">
+                      <div key={attribute.id} className="border rounded-lg p-3 relative bg-gray-50 transition-all">
                       <div className="text-sm font-medium text-gray-700 mb-1">{attribute.name}</div>
                       
                       {isEditing ? (
@@ -512,14 +537,26 @@ const SupplierDetail: React.FC = () => {
           </div>
         )}
       </Card>
+      </div>
       
-      {/* Complete Supplier Data Section - Moved above Supplier Products Section */}
-      {!productsLoading && supplier && (
-        <Card className="mb-6">
+      {/* Supplier Data Section */}
+      {(supplier || showSkeleton) && (
+        <div ref={detailsRef} style={{ minHeight: detailsHeight }}>
+          <Card className="mb-6 card-container">
           <h3 className="text-lg font-medium mb-2">Supplier Data</h3>
           
+            {showSkeleton ? (
+              <div className="bg-gray-50 rounded border border-gray-200 overflow-x-auto p-2 skeleton-shimmer">
+                {[...Array(5)].map((_, i) => (
+                  <div key={i} className="flex border-b border-gray-200 py-2">
+                    <div className="w-1/3 h-5 bg-gray-200 rounded"></div>
+                    <div className="w-2/3 h-5 bg-gray-200 rounded ml-2"></div>
+                  </div>
+                ))}
+              </div>
+            ) : (
           <div className="bg-gray-50 rounded border border-gray-200 overflow-x-auto">
-            <table className="min-w-full text-xs">
+                <table className="min-w-full text-xs supplier-table">
               <tbody>
                 <tr className="border-b border-gray-200">
                   <td className="px-2 py-1.5 font-medium">Name</td>
@@ -531,24 +568,37 @@ const SupplierDetail: React.FC = () => {
                 </tr>
                 <tr className="border-b border-gray-200">
                   <td className="px-2 py-1.5 font-medium">Total Products</td>
-                  <td className="px-2 py-1.5 flex items-center">
-                    {totalProductCount || supplierProductsList.length}
-                    {countLoading && (
-                      <Loader2 className="w-3 h-3 text-blue-500 animate-spin ml-2" />
+                      <td className="px-2 py-1.5">
+                        {hasAccurateCount ? (
+                          <span className="transition-all">{stats.productCount}</span>
+                        ) : (
+                          <div className="inline-block w-12 h-4 bg-gray-100 skeleton-shimmer rounded"></div>
                     )}
                   </td>
                 </tr>
                 <tr className="border-b border-gray-200">
                   <td className="px-2 py-1.5 font-medium">Matched Products</td>
-                  <td className="px-2 py-1.5">{matchedProducts}</td>
+                      <td className="px-2 py-1.5">
+                        {hasAccurateCount ? (
+                          <span className="transition-all">{stats.matchedCount} ({stats.matchedPercent}%)</span>
+                        ) : (
+                          <div className="inline-block w-20 h-4 bg-gray-100 skeleton-shimmer rounded"></div>
+                        )}
+                      </td>
                 </tr>
                 <tr className="border-b border-gray-200">
                   <td className="px-2 py-1.5 font-medium">Average Cost</td>
-                  <td className="px-2 py-1.5">${avgCost.toFixed(2)}</td>
+                      <td className="px-2 py-1.5">
+                        {hasAccurateCount ? (
+                          <span className="transition-all">${stats.avgCost.toFixed(2)}</span>
+                        ) : (
+                          <div className="inline-block w-16 h-4 bg-gray-100 skeleton-shimmer rounded"></div>
+                        )}
+                      </td>
                 </tr>
                 
-                {/* Map all custom attributes */}
-                {customAttributes && customAttributes.length > 0 && customAttributes.map(({ attribute, value }) => {
+                    {/* Custom attributes */}
+                    {customAttributes.map(({ attribute, value }) => {
                   if (!attribute) return null;
                   
                   let displayValue: string;
@@ -567,8 +617,8 @@ const SupplierDetail: React.FC = () => {
                       default:
                         displayValue = value ? String(value) : 'N/A';
                     }
-                  } catch (error) {
-                    console.error("Error formatting attribute value:", error);
+                      } catch (err) {
+                        console.error("Error formatting attribute value:", err);
                     displayValue = 'Error';
                     }
                     
@@ -582,23 +632,26 @@ const SupplierDetail: React.FC = () => {
               </tbody>
             </table>
           </div>
+            )}
         </Card>
+        </div>
       )}
       
       {/* Supplier Products Section */}
-      {productsLoading ? (
-        <Card>
-          <div className="h-7 bg-gray-200 rounded animate-pulse w-40 mb-4"></div>
-          <div className="animate-pulse space-y-4">
+      {(supplier || (showSkeleton && dataFetched)) && (
+        supplier ? <SupplierProducts supplierId={supplier.id} /> : (
+          <Card className="mb-6 card-skeleton">
+            <div className="h-7 bg-gray-200 rounded skeleton-shimmer w-40 mb-4"></div>
+            <div className="skeleton-shimmer space-y-4">
             <div className="h-10 bg-gray-200 rounded"></div>
             <div className="h-10 bg-gray-200 rounded"></div>
             <div className="h-10 bg-gray-200 rounded"></div>
           </div>
         </Card>
-      ) : (
-        supplier && <SupplierProducts supplierId={supplier.id} />
+        )
       )}
       
+      {/* Edit Modal */}
       {isModalOpen && supplier && (
         <SupplierModal
           isOpen={isModalOpen}

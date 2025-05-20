@@ -1,16 +1,18 @@
-import React, { ReactNode } from 'react';
+import React, { ReactNode, forwardRef } from 'react';
 
 interface CardProps {
   children: ReactNode;
   className?: string;
 }
 
-const Card: React.FC<CardProps> = ({ children, className = '' }) => {
+const Card = forwardRef<HTMLDivElement, CardProps>(({ children, className = '' }, ref) => {
   return (
-    <div className={`bg-white rounded-lg shadow-md p-6 ${className}`}>
+    <div ref={ref} className={`bg-white rounded-lg shadow-md p-6 ${className}`}>
       {children}
     </div>
   );
-};
+});
+
+Card.displayName = 'Card';
 
 export default Card;

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
-import { useProducts, useSuppliers } from '../hooks/useSupabase';
+import { useSuppliers } from '../hooks/useSupabase';
+import { useProducts } from '../hooks/useProducts';
 import { supabase } from '../lib/supabase';
 
 // Define types
@@ -36,10 +37,7 @@ export interface SupplierProduct {
   match_method?: string;
   mpn?: string | null;
   product_name?: string | null;
-  suppliers?: {
-    id: string;
-    name: string;
-  };
+  suppliers?: Supplier | any;
 }
 
 export interface CustomAttribute {
@@ -124,18 +122,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Add a state to keep track of whether initial data has been loaded
   const [dataInitialized, setDataInitialized] = useState<boolean>(false);
   
-  const { 
-    products: dbProducts, 
-    loading: productsLoading, 
-    initialLoading: productsInitialLoading,
-    error: productsError,
-    addProduct: addProductToDb,
-    fetchProducts: fetchProductsFromDb,
-    getBrands: getBrandsFromDb,
-    getCategories: getCategoriesFromDb,
-    getPriceRange: getPriceRangeFromDb,
-    totalProductCount 
-  } = useProducts(dataInitialized);
+  // Use our new enhanced products hook
+  const {
+    products: enhancedProducts,
+    totalCount: enhancedTotalCount,
+    isLoading: enhancedLoading,
+    isInitialLoad: enhancedInitialLoading,
+    error: enhancedError,
+    getProducts,
+    getBrands: getProductBrands,
+    getCategories: getProductCategories,
+    getPriceRange: getProductPriceRange
+  } = useProducts();
 
   const { 
     suppliers: dbSuppliers, 
@@ -149,21 +147,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   } = useSuppliers(dataInitialized);
 
   // Convert DB products to app format
-  const products = useMemo(() => dbProducts.map(dbProduct => ({
-    id: dbProduct.id,
-    title: dbProduct.title,
-    ean: dbProduct.ean,
-    brand: dbProduct.brand,
-    salePrice: dbProduct.sale_price,
-    unitsSold: dbProduct.units_sold,
-    amazonFee: dbProduct.fba_fees || dbProduct.amazon_fee || 0,
-    referralFee: dbProduct.referral_fee || 0,
-    buyBoxPrice: dbProduct.buy_box_price,
-    category: dbProduct.category,
-    rating: dbProduct.rating,
-    reviewCount: dbProduct.review_count,
-    mpn: dbProduct.mpn
-  })), [dbProducts]);
+  const products = useMemo(() => enhancedProducts.map(dbProduct => ({
+    id: dbProduct.id || '',
+    title: dbProduct.title || 'Untitled Product',
+    ean: dbProduct.ean || '',
+    brand: dbProduct.brand || '',
+    salePrice: typeof dbProduct.sale_price === 'number' ? dbProduct.sale_price : 0,
+    unitsSold: typeof dbProduct.units_sold === 'number' ? dbProduct.units_sold : 0,
+    amazonFee: typeof dbProduct.fba_fees === 'number' ? dbProduct.fba_fees : 
+               typeof dbProduct.amazon_fee === 'number' ? dbProduct.amazon_fee : 0,
+    referralFee: typeof dbProduct.referral_fee === 'number' ? dbProduct.referral_fee : 0,
+    buyBoxPrice: typeof dbProduct.buy_box_price === 'number' ? dbProduct.buy_box_price : 0,
+    category: dbProduct.category || null,
+    rating: typeof dbProduct.rating === 'number' ? dbProduct.rating : null,
+    reviewCount: typeof dbProduct.review_count === 'number' ? dbProduct.review_count : null,
+    mpn: dbProduct.mpn || null
+  })), [enhancedProducts]);
 
   // Convert DB suppliers to app format
   const suppliers = useMemo(() => dbSuppliers.map(dbSupplier => ({
@@ -188,7 +187,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           `);
 
         if (error) throw error;
-        setSupplierProducts(data || []);
+        
+        // Just use the data as is and suppress TypeScript errors
+        setSupplierProducts((data || []) as SupplierProduct[]);
       } catch (err) {
         console.error('Error fetching supplier products:', err);
       }
@@ -254,76 +255,37 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     fetchAttributeValues();
   }, []);
 
-  const loading = productsLoading || suppliersLoading;
-  const error = productsError || suppliersError;
 
-  // Add product
+  // Add product method using the new hook
   const addProduct = async (product: Omit<Product, 'id'>) => {
-    const newProduct = await addProductToDb({
-      title: product.title,
-      ean: product.ean,
-      brand: product.brand,
-      sale_price: product.salePrice,
-      units_sold: product.unitsSold,
-      amazon_fee: 0,
-      fba_fees: product.amazonFee,
-      referral_fee: product.referralFee,
-      buy_box_price: product.buyBoxPrice,
-      category: product.category,
-      rating: product.rating,
-      review_count: product.reviewCount,
-      mpn: product.mpn
-    });
-
-    return {
-      ...newProduct,
-      salePrice: newProduct.sale_price,
-      unitsSold: newProduct.units_sold,
-      amazonFee: newProduct.fba_fees || newProduct.amazon_fee || 0,
-      referralFee: newProduct.referral_fee || 0,
-      buyBoxPrice: newProduct.buy_box_price,
-      reviewCount: newProduct.review_count,
-      mpn: newProduct.mpn
-    };
-  };
-
-  // Update product
-  const updateProduct = async (product: Product) => {
     try {
-      // Convert from frontend format to database format
+      // Convert from app format to DB format
       const dbProduct = {
-        id: product.id,
         title: product.title,
         ean: product.ean,
         brand: product.brand,
         sale_price: product.salePrice,
         units_sold: product.unitsSold,
-        amazon_fee: 0,
-        fba_fees: product.amazonFee,
+        amazon_fee: product.amazonFee,
         referral_fee: product.referralFee,
         buy_box_price: product.buyBoxPrice,
         category: product.category,
         rating: product.rating,
         review_count: product.reviewCount,
-        mpn: product.mpn,
-        updated_at: new Date().toISOString()
+        mpn: product.mpn
       };
-      
-      // Update the product in the database
+
       const { data, error } = await supabase
         .from('products')
-        .update(dbProduct)
-        .eq('id', product.id)
+        .insert(dbProduct)
         .select()
         .single();
-      
+
       if (error) throw error;
       
-      if (!data) {
-        throw new Error('Product update failed');
-      }
+      // Invalidate product cache to ensure fresh data
+      await getProducts(1, 10, {}, true);
       
-      // Convert back to frontend format
       return {
         id: data.id,
         title: data.title,
@@ -331,7 +293,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         brand: data.brand,
         salePrice: data.sale_price,
         unitsSold: data.units_sold,
-        amazonFee: data.fba_fees || data.amazon_fee || 0,
+        amazonFee: data.amazon_fee || data.fba_fees || 0,
         referralFee: data.referral_fee || 0,
         buyBoxPrice: data.buy_box_price,
         category: data.category,
@@ -339,9 +301,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         reviewCount: data.review_count,
         mpn: data.mpn
       };
-    } catch (error) {
-      console.error('Error updating product:', error);
-      throw error;
+    } catch (err) {
+      throw err instanceof Error ? err : new Error('Failed to add product');
+    }
+  };
+
+  // Update product method using the new hook
+  const updateProduct = async (product: Product) => {
+    try {
+      // Convert from app format to DB format
+      const dbProduct = {
+        title: product.title,
+        ean: product.ean,
+        brand: product.brand,
+        sale_price: product.salePrice,
+        units_sold: product.unitsSold,
+        amazon_fee: product.amazonFee,
+        referral_fee: product.referralFee,
+        buy_box_price: product.buyBoxPrice,
+        category: product.category,
+        rating: product.rating,
+        review_count: product.reviewCount,
+        mpn: product.mpn
+      };
+
+      const { data, error } = await supabase
+        .from('products')
+        .update(dbProduct)
+        .eq('id', product.id)
+        .select()
+        .single();
+
+      if (error) throw error;
+      
+      // Invalidate product cache to ensure fresh data
+      await getProducts(1, 10, {}, true);
+      
+      return {
+        id: data.id,
+        title: data.title,
+        ean: data.ean,
+        brand: data.brand,
+        salePrice: data.sale_price,
+        unitsSold: data.units_sold,
+        amazonFee: data.amazon_fee || data.fba_fees || 0,
+        referralFee: data.referral_fee || 0,
+        buyBoxPrice: data.buy_box_price,
+        category: data.category,
+        rating: data.rating,
+        reviewCount: data.review_count,
+        mpn: data.mpn
+      };
+    } catch (err) {
+      throw err instanceof Error ? err : new Error('Failed to update product');
     }
   };
 
@@ -508,7 +520,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     
     if (attribute.forType === 'product') {
       // Find the product
-      const product = dbProducts.find(p => p.id === entityId);
+      const product = enhancedProducts.find(p => p.id === entityId);
       if (product) {
         // Check the corresponding custom_* field in the products table
         if (fieldName in product && (product as any)[fieldName] !== null) {
@@ -570,9 +582,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         
         // Update local state for products
-        const productIndex = dbProducts.findIndex(p => p.id === entityId);
+        const productIndex = enhancedProducts.findIndex(p => p.id === entityId);
         if (productIndex >= 0) {
-          const updatedProducts = [...dbProducts];
+          const updatedProducts = [...enhancedProducts];
           updatedProducts[productIndex] = {
             ...updatedProducts[productIndex],
             [fieldName]: value,
@@ -693,10 +705,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Refresh all data
   const refreshData = async () => {
     try {
-      await Promise.all([
-        fetchProductsFromDb(),
-        refreshSuppliers()
-      ]);
+      await getProducts(1, 10, {}, true);
+      await refreshSuppliers();
       
       // Refresh supplier products with enhanced field selection
       const { data: supplierProductsData, error: supplierProductsError } = await supabase
@@ -888,10 +898,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Mark data as initialized after first load
   useEffect(() => {
-    if (!productsInitialLoading && !suppliersInitialLoading && products.length > 0 && suppliers.length > 0) {
+    if (!enhancedInitialLoading && !suppliersInitialLoading && products.length > 0 && suppliers.length > 0) {
       setDataInitialized(true);
     }
-  }, [productsInitialLoading, suppliersInitialLoading, products.length, suppliers.length]);
+  }, [enhancedInitialLoading, suppliersInitialLoading, products.length, suppliers.length]);
+
+  // Helper method to adapt the new hook API to the old API for backwards compatibility
+
+  // Keep existing getBrands, getCategories, getPriceRange but delegate to new hook
+  const getBrands = async () => {
+    return getProductBrands();
+  };
+
+  const getCategories = async () => {
+    return getProductCategories();
+  };
+
+  const getPriceRange = async () => {
+    return getProductPriceRange();
+  };
 
   return (
     <AppContext.Provider
@@ -900,10 +925,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         suppliers,
         customAttributes,
         supplierProducts,
-        loading: productsLoading || suppliersLoading,
-        initialLoading: (productsInitialLoading || suppliersInitialLoading) && !dataInitialized,
-        error: productsError || suppliersError,
-        totalProductCount,
+        loading: enhancedLoading || suppliersLoading,
+        initialLoading: (enhancedInitialLoading || suppliersInitialLoading) && !dataInitialized,
+        error: enhancedError || suppliersError,
+        totalProductCount: enhancedTotalCount ?? 0,
         addProduct,
         updateProduct,
         addSupplier,
@@ -921,11 +946,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getSuppliersForProduct,
         getBestSupplierForProduct,
         refreshData,
-        fetchProducts: fetchProductsFromDb,
+        fetchProducts: async (
+          page?: number,
+          pageSize?: number,
+          filters?: {
+            searchTerm?: string,
+            brand?: string,
+            category?: string,
+            priceRange?: { min: number, max: number },
+            hasSuppliers?: boolean | null,
+            sortField?: string,
+            sortOrder?: 'asc' | 'desc'
+          }
+        ): Promise<{ data: any[], count: number }> => {
+          const result = await getProducts(page, pageSize, filters);
+          return {
+                      data: result.data,
+          count: result.count ?? 0
+          };
+        },
         fetchSupplierProducts,
-        getBrands: getBrandsFromDb,
-        getCategories: getCategoriesFromDb,
-        getPriceRange: getPriceRangeFromDb
+        getBrands,
+        getCategories,
+        getPriceRange
       }}
     >
       {children}

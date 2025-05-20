@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import type { Database } from '../types/database';
 
@@ -16,6 +16,7 @@ export function useProducts(dataInitialized: boolean = false) {
   const [error, setError] = useState<Error | null>(null);
   const [totalProductCount, setTotalProductCount] = useState<number>(0);
   const [hasLoadedInitial, setHasLoadedInitial] = useState<boolean>(dataInitialized);
+  const [lastQueryKey, setLastQueryKey] = useState<string>('');
 
   // Load initial data when component mounts or when switching back to the tab
   useEffect(() => {
@@ -45,10 +46,18 @@ export function useProducts(dataInitialized: boolean = false) {
     } = {}
   ) {
     try {
-      setLoading(true);
-      if (page === 1) {
-        setInitialLoading(true);
+      // Create a query key to determine if this is a new query
+      const queryKey = JSON.stringify({ page, pageSize, filters });
+      
+      // Set loading state only if the query parameters have changed
+      if (queryKey !== lastQueryKey) {
+        setLoading(true);
+        if (page === 1) {
+          setInitialLoading(true);
+        }
       }
+      
+      setLastQueryKey(queryKey);
       setError(null);
       
       // Calculate start and end for pagination
@@ -124,7 +133,11 @@ export function useProducts(dataInitialized: boolean = false) {
         console.log(`Total filtered products: ${count}`);
       }
       
-      setProducts(data || []);
+      // Only update products state if the data has changed
+      // This helps prevent unnecessary renders
+      if (data) {
+        setProducts(data);
+      }
       
       // Special handling for hasSuppliers filter if needed (this would be done on client-side after fetching)
       // This is a limitation as it requires an additional query or client-side filtering

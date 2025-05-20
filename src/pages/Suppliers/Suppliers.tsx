@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef, useLayoutEffect, startTransition } from 'react';
 import { Link } from 'react-router-dom';
-import { PlusCircle, Search, RefreshCcw, Trash2, Eye, Edit, Filter, X, ArrowDownAZ, DollarSign, Package, ShoppingCart, ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
+import { PlusCircle, Search, RefreshCcw, Trash2, Eye, Edit, Filter, X, ArrowDownAZ, DollarSign, Package, ShoppingCart, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useAppContext, Supplier } from '../../context/AppContext';
 import Table from '../../components/UI/Table';
 import Button from '../../components/UI/Button';
 import Card from '../../components/UI/Card';
-import EmptyState from '../../components/Dashboard/EmptyState';
 import SupplierModal from './SupplierModal';
+
+// Add CSS for animations
+import './Suppliers.css';
 
 interface SupplierStats {
   productCount: number;
@@ -17,8 +19,33 @@ interface SupplierStats {
 type SortField = 'name' | 'products' | 'cost' | 'bestValue' | '';
 type SortOrder = 'asc' | 'desc';
 
+// Add skeleton loader for supplier rows
+const SupplierRowSkeleton = () => (
+  <tr className="border-t hover:bg-gray-50 animate-pulse">
+    <td className="px-4 py-4">
+      <div className="h-5 bg-gray-200 rounded w-40"></div>
+    </td>
+    <td className="px-4 py-4">
+      <div className="h-5 bg-gray-200 rounded w-10"></div>
+    </td>
+    <td className="px-4 py-4">
+      <div className="h-5 bg-gray-200 rounded w-20"></div>
+    </td>
+    <td className="px-4 py-4">
+      <div className="h-5 bg-gray-200 rounded w-16"></div>
+    </td>
+    <td className="px-4 py-4 text-right space-x-2">
+      <div className="flex justify-end space-x-2">
+        <div className="h-8 bg-gray-200 rounded w-16"></div>
+        <div className="h-8 bg-gray-200 rounded w-16"></div>
+        <div className="h-8 bg-gray-200 rounded w-16"></div>
+      </div>
+    </td>
+  </tr>
+);
+
 const Suppliers: React.FC = () => {
-  const { suppliers, supplierProducts, loading, initialLoading, refreshData, deleteSupplier, fetchSupplierProducts } = useAppContext();
+  const { suppliers, supplierProducts, initialLoading, refreshData, deleteSupplier, fetchSupplierProducts } = useAppContext();
   const [searchTerm, setSearchTerm] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -32,8 +59,15 @@ const Suppliers: React.FC = () => {
   const [hasMatchedProducts, setHasMatchedProducts] = useState<boolean | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
-  const [loadingCounts, setLoadingCounts] = useState(false);
+  // No longer need a loading state for counts - they update silently
+  // const [loadingCounts, setLoadingCounts] = useState(false);
   const [supplierProductCounts, setSupplierProductCounts] = useState<{[key: string]: number}>({});
+  const [hasInitialData, setHasInitialData] = useState(false);
+  const [hasAccurateCounts, setHasAccurateCounts] = useState(false);
+  
+  // Add table ref to maintain height consistency
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [tableHeight, setTableHeight] = useState<number | null>(null);
   
   // Get count of products for a supplier - using the accurate counts from the server
   const getProductCount = useCallback((supplierId: string): number => {
@@ -41,7 +75,7 @@ const Suppliers: React.FC = () => {
     if (supplierProductCounts[supplierId] !== undefined) {
       return supplierProductCounts[supplierId];
     }
-    // Otherwise fallback to client-side count temporarily
+    // Otherwise fallback to client-side count immediately
     return supplierProducts.filter(sp => sp.supplier_id === supplierId).length;
   }, [supplierProducts, supplierProductCounts]);
   
@@ -50,35 +84,55 @@ const Suppliers: React.FC = () => {
     if (suppliers.length === 0) return;
     
     try {
-      setLoadingCounts(true);
-      const counts: {[key: string]: number} = {};
+      // Create a batch request for all suppliers to get their counts at once
+      const fetchPromises = suppliers.map(supplier => 
+        fetchSupplierProducts(supplier.id, 1, 1)
+          .then(result => ({ id: supplier.id, count: result.count }))
+          .catch(error => {
+            console.error(`Error fetching count for supplier ${supplier.id}:`, error);
+            // Return the client-side count as fallback
+            return { 
+              id: supplier.id, 
+              count: supplierProducts.filter(sp => sp.supplier_id === supplier.id).length 
+            };
+          })
+      );
       
-      // Fetch counts for each supplier
-      await Promise.all(suppliers.map(async (supplier) => {
-        try {
-          const result = await fetchSupplierProducts(supplier.id, 1, 1);
-          counts[supplier.id] = result.count;
-        } catch (error) {
-          console.error(`Error fetching count for supplier ${supplier.id}:`, error);
-          // Fallback to client-side count if server request fails
-          counts[supplier.id] = supplierProducts.filter(sp => sp.supplier_id === supplier.id).length;
-        }
-      }));
+      // Wait for all fetches to complete
+      const results = await Promise.all(fetchPromises);
       
-      setSupplierProductCounts(counts);
+      // Update all counts at once in a single state update for better performance
+      const newCounts = results.reduce((counts, item) => {
+        counts[item.id] = item.count;
+        return counts;
+      }, {} as {[key: string]: number});
+      
+      setSupplierProductCounts(prev => ({...prev, ...newCounts}));
+      // Indicate that we now have accurate counts
+      setHasAccurateCounts(true);
     } catch (error) {
       console.error('Error fetching product counts:', error);
-    } finally {
-      setLoadingCounts(false);
+      // Even on error, mark as loaded to show client-side data
+      setHasAccurateCounts(true);
     }
   }, [suppliers, fetchSupplierProducts, supplierProducts]);
   
-  // Fetch counts when suppliers change
+  // Pre-populate all counts client-side as soon as data is available
   useEffect(() => {
     if (suppliers.length > 0) {
+      // Immediately calculate and show all counts from client data
+      const initialCounts = suppliers.reduce((counts, supplier) => {
+        counts[supplier.id] = supplierProducts.filter(sp => sp.supplier_id === supplier.id).length;
+        return counts;
+      }, {} as {[key: string]: number});
+      
+      // Set all counts at once in a single update
+      setSupplierProductCounts(initialCounts);
+      
+      // Then fetch accurate counts in the background without affecting display
       fetchAccurateProductCounts();
     }
-  }, [suppliers, fetchAccurateProductCounts]);
+  }, [suppliers, supplierProducts, fetchAccurateProductCounts]);
   
   // Get product count range for all suppliers - using accurate counts
   const productCountStats = useMemo(() => {
@@ -99,6 +153,7 @@ const Suppliers: React.FC = () => {
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
+      setHasAccurateCounts(false);
       await refreshData();
       // After data is refreshed, update the counts
       await fetchAccurateProductCounts();
@@ -218,6 +273,11 @@ const Suppliers: React.FC = () => {
   
   // Filter suppliers based on search and filters
   const filteredSuppliers = useMemo(() => {
+    // Set initial data flag once we have filtered data
+    if (suppliers.length > 0 && !hasInitialData) {
+      setTimeout(() => setHasInitialData(true), 300);
+    }
+    
     return suppliers.filter(supplier => {
       // Search filter
       const matchesSearch = supplier.name.toLowerCase().includes(searchTerm.toLowerCase());
@@ -234,7 +294,7 @@ const Suppliers: React.FC = () => {
       
       return matchesSearch && matchesProductCount && matchesHasMatched;
     });
-  }, [suppliers, searchTerm, productCountFilter, hasMatchedProducts, supplierProducts, getSupplierStats]);
+  }, [suppliers, searchTerm, productCountFilter, hasMatchedProducts, supplierProducts, getSupplierStats, hasInitialData]);
 
   // Apply sorting
   const sortedSuppliers = useMemo(() => {
@@ -271,12 +331,22 @@ const Suppliers: React.FC = () => {
   const startIndex = (currentPage - 1) * itemsPerPage;
   const paginatedSuppliers = sortedSuppliers.slice(startIndex, startIndex + itemsPerPage);
   
+  // Add layout effect to measure table height - now after paginatedSuppliers is declared
+  useLayoutEffect(() => {
+    if (tableRef.current && paginatedSuppliers.length > 0 && tableHeight === null) {
+      setTableHeight(Math.max(tableRef.current.offsetHeight, 400));
+    }
+  }, [paginatedSuppliers, tableHeight]);
+  
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
+    startTransition(() => {
     setCurrentPage(1); // Reset to first page on search
+    });
   };
   
   const handleSort = (field: SortField) => {
+    startTransition(() => {
     if (sortField === field) {
       // Toggle sort order if same field
       setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
@@ -285,15 +355,18 @@ const Suppliers: React.FC = () => {
       setSortField(field);
       setSortOrder('asc');
     }
+    });
   };
   
   const handleClearFilters = () => {
+    startTransition(() => {
     setSearchTerm('');
     setProductCountFilter(productCountStats);
     setHasMatchedProducts(null);
     setSortField('');
     setSortOrder('asc');
     setCurrentPage(1);
+    });
   };
   
   const getActiveFilterCount = () => {
@@ -306,35 +379,99 @@ const Suppliers: React.FC = () => {
 
   const changePage = (page: number) => {
     if (page > 0 && page <= totalPages) {
+      startTransition(() => {
       setCurrentPage(page);
+      });
     }
   };
 
   const handleItemsPerPageChange = (value: number) => {
+    startTransition(() => {
     setItemsPerPage(value);
     setCurrentPage(1); // Reset to first page when changing items per page
+    });
   };
   
-  // Show loading state based on different conditions
-  const renderLoadingState = () => {
-    // If loading initial data, show loading indicator
-    if (initialLoading) {
+  // Render supplier rows with skeletons for better loading experience
+  const renderSupplierRows = () => {
+    // Check if we have suppliers to display
+    const hasSuppliers = sortedSuppliers.length > 0;
+    const visibleSuppliers = hasSuppliers ? sortedSuppliers.slice(startIndex, startIndex + itemsPerPage) : [];
+    
+    if (hasSuppliers) {
+      return visibleSuppliers.map(supplier => {
+        const stats = getSupplierStats(supplier.id);
       return (
-        <div className="flex flex-col items-center justify-center py-8">
-          <div className="w-16 h-16 relative mb-4">
-            <div className="animate-pulse bg-blue-100 w-full h-full rounded-full"></div>
-            <Loader2 className="w-10 h-10 text-blue-600 animate-spin absolute top-3 left-3" />
-          </div>
-          <h3 className="text-xl font-semibold mb-2">Loading suppliers</h3>
-          <div className="text-gray-500 max-w-md text-center">
-            <p>Please wait while we load your supplier data...</p>
-          </div>
-        </div>
-      );
+          <tr key={supplier.id} className="border-t hover:bg-gray-50 transition-opacity duration-300">
+            <td className="px-4 py-4 font-medium">
+              <Link to={`/suppliers/${supplier.id}`} className="hover:text-blue-600 hover:underline">
+                {supplier.name}
+              </Link>
+            </td>
+            <td className="px-4 py-4">
+              {hasAccurateCounts ? (
+                <span className="transition-all duration-500 ease-in-out opacity-100">
+                  {stats.productCount}
+                </span>
+              ) : (
+                <div className="inline-block w-8 h-5 bg-gray-100 animate-pulse rounded transition-all duration-500 ease-in-out"></div>
+              )}
+            </td>
+            <td className="px-4 py-4">
+              {hasAccurateCounts ? (
+                <span className="transition-all duration-500 ease-in-out opacity-100">
+                  ${stats.avgCost.toFixed(2)}
+                </span>
+              ) : (
+                <div className="inline-block w-16 h-5 bg-gray-100 animate-pulse rounded transition-all duration-500 ease-in-out"></div>
+              )}
+            </td>
+            <td className="px-4 py-4">
+              {hasAccurateCounts ? (
+                <span className="transition-all duration-500 ease-in-out opacity-100">
+                  {stats.bestValueCount}
+                </span>
+              ) : (
+                <div className="inline-block w-10 h-5 bg-gray-100 animate-pulse rounded transition-all duration-500 ease-in-out"></div>
+              )}
+            </td>
+            <td className="px-4 py-4 text-right space-x-2">
+              <Link to={`/suppliers/${supplier.id}`}>
+                <Button variant="secondary" className="text-blue-600 text-sm">
+                  <Eye className="w-4 h-4 mr-1" /> View
+                </Button>
+              </Link>
+              <Button 
+                variant="secondary" 
+                className="text-amber-600 text-sm"
+                onClick={() => openEditModal(supplier)}
+              >
+                <Edit className="w-4 h-4 mr-1" /> Edit
+              </Button>
+              <Button 
+                variant="secondary" 
+                className="text-red-600 text-sm"
+                onClick={() => handleDelete(supplier)}
+                disabled={isDeleting || stats.productCount > 0}
+              >
+                <Trash2 className="w-4 h-4 mr-1" /> Delete
+              </Button>
+            </td>
+          </tr>
+        );
+      });
     }
     
+    // Show skeleton loaders during initial load
+    return Array(itemsPerPage).fill(0).map((_, index) => (
+      <SupplierRowSkeleton key={index} />
+    ));
+  };
+  
+  // Simplified loading state with fewer conditionals
+  const renderLoadingState = () => {
     // If no suppliers after initial load, show empty state
-    if (suppliers.length === 0) {
+    if (hasInitialData && suppliers.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-12">
           <Package className="w-12 h-12 text-gray-400 mb-4" />
@@ -353,7 +490,7 @@ const Suppliers: React.FC = () => {
     }
     
     // If filtering results in no suppliers
-    if (filteredSuppliers.length === 0) {
+    if (hasInitialData && filteredSuppliers.length === 0 && suppliers.length > 0) {
       return (
         <div className="flex flex-col items-center justify-center py-12">
           <Filter className="w-12 h-12 text-gray-400 mb-4" />
@@ -374,16 +511,7 @@ const Suppliers: React.FC = () => {
   };
 
   const renderBottomLoadingIndicator = () => {
-    if ((loading && !initialLoading && suppliers.length > 0) || loadingCounts) {
-      return (
-        <div className="bg-blue-50 border-t border-blue-100 px-4 py-2 mt-2">
-          <div className="flex items-center text-sm text-blue-700">
-            <Loader2 className="w-3 h-3 text-blue-500 animate-spin mr-2" />
-            <span>{loadingCounts ? 'Loading accurate product counts...' : 'Loading additional data in background...'}</span>
-          </div>
-        </div>
-      );
-    }
+    // Always return null to remove the loading indicator completely
     return null;
   };
 
@@ -404,16 +532,16 @@ const Suppliers: React.FC = () => {
               variant="secondary" 
               onClick={handleRefresh}
               disabled={isRefreshing}
-              className="flex items-center"
+              className="flex items-center transition-all duration-300"
             >
               {isRefreshing ? (
                 <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" /> 
+                  <RefreshCcw className="w-4 h-4 mr-2 animate-spin" /> 
                   Refreshing...
                 </>
               ) : (
                 <>
-                  <RefreshCcw className="w-4 h-4 mr-2" /> 
+                  <RefreshCcw className="w-4 h-4 mr-2 transition-transform duration-300 hover:rotate-180" /> 
                   Refresh
                 </>
               )}
@@ -431,33 +559,58 @@ const Suppliers: React.FC = () => {
         {/* Search and filter controls */}
         <div className="mb-6">
           <div className="flex justify-between items-center mb-2">
-            <form onSubmit={handleSearch} className="flex w-full md:w-auto">
+            <form onSubmit={handleSearch} className="flex w-full md:w-auto relative">
               <input
                 type="text"
                 placeholder="Search suppliers..."
-                className="border pl-3 pr-3 py-2 rounded w-full md:w-64"
+                className="border pl-9 pr-3 py-2 rounded w-full md:w-64 transition-all duration-200 focus:ring-2 focus:ring-blue-300"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
+              <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+              {searchTerm && (
+                <button 
+                  type="button" 
+                  className="absolute right-[72px] top-2.5 text-gray-400 hover:text-gray-700"
+                  onClick={() => startTransition(() => setSearchTerm(''))}
+                >
+                  <X size={16} />
+                </button>
+              )}
               <Button type="submit" className="ml-2">
-                <Search className="w-4 h-4 mr-2" />
                 Search
               </Button>
             </form>
             
+            <div className="flex items-center">
+              <div className="mr-2 text-sm text-gray-600">
+                {!initialLoading && (
+                  <span>
+                    Total: {hasAccurateCounts ? (
+                      <span className="font-medium transition-all duration-500 ease-in-out opacity-100">
+                        {filteredSuppliers.length}
+                      </span>
+                    ) : (
+                      <span className="inline-block w-10 h-5 bg-gray-100 animate-pulse rounded align-text-bottom transition-all duration-500 ease-in-out"></span>
+                    )}
+                  </span>
+                )}
+              </div>
             <Button 
               variant={showFilters ? "primary" : "secondary"}
               onClick={() => setShowFilters(!showFilters)}
-              className="flex items-center"
+                className="flex items-center transition-all duration-200"
             >
               <Filter className="w-4 h-4 mr-2" />
               {showFilters ? "Hide Filters" : "Show Filters"}
+                {getActiveFilterCount() > 0 && ` (${getActiveFilterCount()})`}
             </Button>
+            </div>
           </div>
           
           {/* Filter controls */}
           {showFilters && (
-            <div className="bg-gray-50 p-4 rounded border mb-4">
+            <div className="bg-gray-50 p-4 rounded border mb-4 animate-slideDown">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium mb-1">
@@ -575,55 +728,22 @@ const Suppliers: React.FC = () => {
         {/* Loading states */}
         {renderLoadingState()}
         
-        {/* Supplier table */}
-        {!initialLoading && filteredSuppliers.length > 0 && (
-          <>
+        {/* Supplier table with consistent height */}
+        <div 
+          ref={tableRef} 
+          className="overflow-x-auto"
+          style={{ 
+            minHeight: tableHeight ? `${tableHeight}px` : undefined 
+          }}
+        >
+          {/* Only render table if we have data or should show skeletons */}
+          {(!hasInitialData || filteredSuppliers.length > 0) && (
             <Table
               headers={['Name', 'Products', 'Avg. Cost', 'Best Value', 'Actions']}
             >
-              {paginatedSuppliers.map(supplier => {
-                const stats = getSupplierStats(supplier.id);
-                return (
-                  <tr key={supplier.id} className="border-t hover:bg-gray-50">
-                    <td className="px-4 py-4 font-medium">
-                      <Link to={`/suppliers/${supplier.id}`} className="hover:text-blue-600 hover:underline">
-                        {supplier.name}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-4">
-                      {stats.productCount}
-                      {loadingCounts && !supplierProductCounts[supplier.id] && (
-                        <Loader2 className="w-3 h-3 text-blue-500 animate-spin ml-2 inline" />
-                      )}
-                    </td>
-                    <td className="px-4 py-4">${stats.avgCost.toFixed(2)}</td>
-                    <td className="px-4 py-4">{stats.bestValueCount}</td>
-                    <td className="px-4 py-4 text-right space-x-2">
-                      <Link to={`/suppliers/${supplier.id}`}>
-                        <Button variant="secondary" className="text-blue-600 text-sm">
-                          <Eye className="w-4 h-4 mr-1" /> View
-                        </Button>
-                      </Link>
-                      <Button 
-                        variant="secondary" 
-                        className="text-amber-600 text-sm"
-                        onClick={() => openEditModal(supplier)}
-                      >
-                        <Edit className="w-4 h-4 mr-1" /> Edit
-                      </Button>
-                      <Button 
-                        variant="secondary" 
-                        className="text-red-600 text-sm"
-                        onClick={() => handleDelete(supplier)}
-                        disabled={isDeleting || stats.productCount > 0}
-                      >
-                        <Trash2 className="w-4 h-4 mr-1" /> Delete
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {renderSupplierRows()}
             </Table>
+          )}
             
             {/* Background loading indicator */}
             {renderBottomLoadingIndicator()}
@@ -631,7 +751,11 @@ const Suppliers: React.FC = () => {
             {/* Pagination */}
             <div className="flex justify-between items-center mt-4">
               <div className="text-sm text-gray-500">
+              {suppliers.length > 0 && (
+                <span>
                 Showing {startIndex + 1} to {Math.min(startIndex + itemsPerPage, filteredSuppliers.length)} of {filteredSuppliers.length} suppliers
+                </span>
+              )}
               </div>
               <div className="flex items-center space-x-1">
                 <Button
@@ -666,8 +790,7 @@ const Suppliers: React.FC = () => {
                 </select>
               </div>
             </div>
-          </>
-        )}
+        </div>
       </Card>
       
       {/* Supplier modal */}

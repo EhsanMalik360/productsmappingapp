@@ -1,16 +1,62 @@
-import React, { useState, useEffect } from 'react';
-import { useAppContext } from '../../context/AppContext';
+import React, { useState, useEffect, useRef, useCallback, useLayoutEffect, startTransition } from 'react';
 import Card from '../../components/UI/Card';
 import Table from '../../components/UI/Table';
 import Button from '../../components/UI/Button';
 import ProductRow from '../../components/Products/ProductRow';
-import { Search, Filter, ChevronLeft, ChevronRight, RefreshCcw, X, ArrowDownAZ, ArrowDownUp, Briefcase, DollarSign, Database, Loader2 } from 'lucide-react';
+import { Search, Filter, ChevronLeft, ChevronRight, RefreshCcw, X, ArrowDownAZ, ArrowDownUp, Briefcase, DollarSign, Loader2 } from 'lucide-react';
+import { useProducts, ProductFilters } from '../../hooks/useProducts';
 
 type SortField = 'price' | 'units' | 'profit' | 'brand' | '';
 type SortOrder = 'asc' | 'desc';
 
+// Enhanced skeleton loader for product rows that looks more like real data
+const ProductRowSkeleton = () => (
+  <tr className="border-b animate-pulse transition-opacity duration-500 ease-in-out">
+    <td className="px-4 py-3">
+      <div className="flex flex-col">
+        <div className="h-5 bg-gray-200 rounded w-full mb-1 transition-all duration-500"></div>
+        <div className="h-4 bg-gray-100 rounded w-2/3 transition-all duration-700"></div>
+      </div>
+    </td>
+    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-4/5 transition-all duration-600"></div></td>
+    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-2/3 transition-all duration-800"></div></td>
+    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-500"></div></td>
+    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-700"></div></td>
+    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-600"></div></td>
+    <td className="px-4 py-3">
+      <div className="flex flex-col space-y-1">
+        <div className="supplier-badge bg-gray-200 h-6 w-16 rounded-full transition-all duration-500"></div>
+        <div className="bg-gray-100 h-5 w-20 rounded-full transition-all duration-700"></div>
+      </div>
+    </td>
+    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-800"></div></td>
+    <td className="px-4 py-3">
+      <div className="font-medium h-5 bg-gray-200 rounded w-1/3 mb-1 transition-all duration-500"></div>
+      <div className="h-2 bg-gradient-to-r from-gray-300 via-gray-200 to-gray-300 rounded opacity-60 transition-all duration-700"></div>
+    </td>
+    <td className="px-4 py-3">
+      <div className="flex items-center">
+        <div className="h-5 w-5 bg-gray-200 rounded-full mr-1 transition-all duration-600"></div>
+        <div className="h-5 bg-gray-200 rounded w-12 transition-all duration-800"></div>
+      </div>
+    </td>
+  </tr>
+);
+
 const Products: React.FC = () => {
-  const { products, loading, initialLoading, error, totalProductCount, fetchProducts, getBrands, getCategories, getPriceRange } = useAppContext();
+  // Use our products hook
+  const {
+    products,
+    totalCount,
+    hasAccurateCount,
+    getProducts,
+    invalidateCache,
+    getBrands,
+    getCategories,
+    getPriceRange
+  } = useProducts();
+
+  // UI state
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedBrand, setSelectedBrand] = useState<string>('');
@@ -21,87 +67,164 @@ const Products: React.FC = () => {
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [showFilters, setShowFilters] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null);
+  const [, setLastRefreshed] = useState<Date | null>(null);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
   const [brands, setBrands] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [priceStats, setPriceStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
+  // Track if we've done initial data loading with accurate count
+  const [isInitialDataLoaded, setIsInitialDataLoaded] = useState(false);
   
-  // Load data when component mounts
+  // Table ref to maintain consistent height
+  const tableRef = useRef<HTMLDivElement>(null);
+  const [tableHeight, setTableHeight] = useState<number | null>(null);
+  
+  // Keep track of applied filters for caching
+  const getActiveFilters = useCallback((): ProductFilters => {
+    return {
+      searchTerm,
+      brand: selectedBrand,
+      category: selectedCategory,
+      priceRange,
+      hasSuppliers,
+      sortField,
+      sortOrder
+    };
+  }, [searchTerm, selectedBrand, selectedCategory, priceRange, hasSuppliers, sortField, sortOrder]);
+  
+  // Load initial data
   useEffect(() => {
-    loadData();
-    loadMetadata();
+    loadInitialData();
   }, []);
   
-  // Load data when page changes or filters change
-  useEffect(() => {
-    loadData();
-  }, [currentPage, itemsPerPage, searchTerm, selectedBrand, selectedCategory, priceRange, hasSuppliers, sortField, sortOrder]);
+  // Measure table height after initial render to prevent layout shifts
+  useLayoutEffect(() => {
+    if (tableRef.current && products.length > 0 && tableHeight === null) {
+      setTableHeight(tableRef.current.offsetHeight);
+    }
+  }, [products, tableHeight]);
   
-  // Load metadata (brands, categories, price range)
-  const loadMetadata = async () => {
+  // Load data when any filter changes, but only after initial data is loaded
+  useEffect(() => {
+    // Don't trigger filter-based data loading until initial data is properly loaded
+    if (!isInitialDataLoaded) return;
+    
+    // Always load data, even during initial load
+    // This ensures we start fetching immediately without waiting
+    startTransition(() => {
+      loadData();
+    });
+  }, [currentPage, itemsPerPage, searchTerm, selectedBrand, selectedCategory, priceRange, hasSuppliers, sortField, sortOrder, isInitialDataLoaded]);
+
+  // Load metadata and initial data
+  const loadInitialData = async () => {
     try {
-      // Load brands
-      const brandsData = await getBrands();
+      // Set table height first to prevent layout shifts
+      if (tableRef.current) {
+        setTableHeight(Math.max(tableRef.current.clientHeight || 400, 400));
+      }
+
+      // Start metadata loading in parallel with products
+      const metadataPromise = Promise.all([
+        getBrands(),
+        getCategories(),
+        getPriceRange()
+      ]);
+      
+      // First get products - this might come from cache initially
+      await getProducts(1, itemsPerPage, getActiveFilters(), false);
+      
+      // Then wait for metadata
+      const [brandsData, categoriesData, priceRangeData] = await metadataPromise;
+      
+      // Only update UI when we have everything
       setBrands(brandsData);
-      
-      // Load categories
-      const categoriesData = await getCategories();
       setCategories(categoriesData);
-      
-      // Load price range
-      const priceRangeData = await getPriceRange();
       setPriceStats(priceRangeData);
       setPriceRange(priceRangeData);
+      
+      // Short delay before marking initial data as loaded
+      // This allows animations to complete naturally
+      setTimeout(() => {
+        setLastRefreshed(new Date());
+        setIsInitialDataLoaded(true);
+      }, 500);
     } catch (error) {
-      console.error('Error loading metadata:', error);
+      console.error('Error loading initial data:', error);
+      // Even on error, mark as loaded after a delay
+      setTimeout(() => {
+        setIsInitialDataLoaded(true);
+      }, 500);
     }
   };
   
+  // Load products based on current page and filters
   const loadData = async () => {
     try {
-      await fetchProducts(currentPage, itemsPerPage, {
-        searchTerm,
-        brand: selectedBrand,
-        category: selectedCategory,
-        priceRange,
-        hasSuppliers,
-        sortField,
-        sortOrder
-      });
+      setIsRefreshing(true);
+      
+      // Always force fetch to ensure accurate counts
+      await getProducts(currentPage, itemsPerPage, getActiveFilters(), true);
+      
+      setLastRefreshed(new Date());
     } catch (error) {
       console.error('Error loading products:', error);
+    } finally {
+      setIsRefreshing(false);
     }
   };
   
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
-    setCurrentPage(1); // Reset to first page on search
+    startTransition(() => {
+      setCurrentPage(1); // Reset to first page on search
+    });
   };
   
   const changePage = (page: number) => {
-    if (page > 0 && page <= Math.ceil(totalProductCount / itemsPerPage)) {
+  const maxPage = totalCount ? Math.ceil(totalCount / itemsPerPage) : 1;
+  if (page > 0 && page <= maxPage) {
+    startTransition(() => {
       setCurrentPage(page);
-    }
-  };
+    });
+  }
+};
 
   const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      // Toggle sort order if same field
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      // Set new field and default to ascending
-      setSortField(field);
-      setSortOrder('asc');
-    }
-    setCurrentPage(1); // Reset to first page on sort
+    startTransition(() => {
+      if (sortField === field) {
+        // Toggle sort order if same field
+        setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+      } else {
+        // Set new field and default to ascending
+        setSortField(field);
+        setSortOrder('asc');
+      }
+      setCurrentPage(1); // Reset to first page on sort
+    });
   };
 
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
-      await loadMetadata();
-      await loadData();
+      
+      // Invalidate cache to force fresh data fetch
+      invalidateCache();
+      
+      // Reload metadata
+      const [brandsData, categoriesData, priceRangeData] = await Promise.all([
+        getBrands(),
+        getCategories(),
+        getPriceRange()
+      ]);
+      
+      setBrands(brandsData);
+      setCategories(categoriesData);
+      setPriceStats(priceRangeData);
+      
+      // Force refetch current page
+      await getProducts(currentPage, itemsPerPage, getActiveFilters(), true);
+      
       setLastRefreshed(new Date());
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -111,14 +234,16 @@ const Products: React.FC = () => {
   };
 
   const handleClearFilters = () => {
-    setSelectedBrand('');
-    setSelectedCategory('');
-    setSearchTerm('');
-    setPriceRange(priceStats);
-    setHasSuppliers(null);
-    setSortField('');
-    setSortOrder('asc');
-    setCurrentPage(1);
+    startTransition(() => {
+      setSelectedBrand('');
+      setSelectedCategory('');
+      setSearchTerm('');
+      setPriceRange(priceStats);
+      setHasSuppliers(null);
+      setSortField('');
+      setSortOrder('asc');
+      setCurrentPage(1);
+    });
   };
 
   const getActiveFilterCount = () => {
@@ -132,41 +257,42 @@ const Products: React.FC = () => {
   };
 
   const handleItemsPerPageChange = (value: number) => {
-    setItemsPerPage(value);
-    setCurrentPage(1); // Reset to first page when changing items per page
+    startTransition(() => {
+      setItemsPerPage(value);
+      setCurrentPage(1); // Reset to first page when changing items per page
+    });
   };
 
-  // Show loading state based on different conditions
-  const renderLoadingState = () => {
-    // If loading initial data, show loading indicator
-    if (initialLoading) {
-      return (
-        <div className="flex flex-col items-center justify-center py-8">
-          <div className="w-16 h-16 relative mb-4">
-            <div className="animate-pulse bg-blue-100 w-full h-full rounded-full"></div>
-            <Loader2 className="w-10 h-10 text-blue-600 animate-spin absolute top-3 left-3" />
-          </div>
-          <h3 className="text-xl font-semibold mb-2">Loading products</h3>
-          <div className="text-gray-500 max-w-md text-center">
-            <p>Please wait while we load your product data...</p>
-          </div>
-        </div>
-      );
+  // Render product rows with skeletons until we have both products and accurate count
+  const renderProductRows = () => {
+    // Show real products as soon as we have them
+    if (products && products.length > 0) {
+      return products.map(product => (
+        <ProductRow 
+          key={product.id} 
+          product={product} 
+          className="transition-opacity duration-500 ease-in-out opacity-100"
+        />
+      ));
     }
     
-    // If no products after initial load, show empty state
-    if (products.length === 0 && !loading) {
-      return (
-        <div className="flex flex-col items-center justify-center py-12">
-          <Database className="w-12 h-12 text-gray-400 mb-4" />
-          <h3 className="text-xl font-semibold mb-2">No products found</h3>
-          <p className="text-gray-500">Try adjusting your filters or import some products.</p>
-        </div>
-      );
-    }
-    
-    return null;
+    // Fallback to skeletons only when necessary
+    return Array(itemsPerPage).fill(0).map((_, index) => (
+      <ProductRowSkeleton key={index} />
+    ));
   };
+
+  // Empty state for when there are no products at all
+
+  // We no longer show a full loading screen - we always show the table with skeleton loaders
+  // This improves perceived performance by not making users wait for a loading screen
+
+  useLayoutEffect(() => {
+    // Set a minimum height for the table container regardless of content
+    if (tableRef.current && !tableHeight) {
+      setTableHeight(Math.max(tableRef.current.clientHeight, 400)); // At least 400px
+    }
+  }, [tableRef.current, tableHeight]);
 
   return (
     <div className="container mx-auto px-4 py-6">
@@ -178,30 +304,31 @@ const Products: React.FC = () => {
               variant="secondary" 
               onClick={handleRefresh}
               disabled={isRefreshing}
+              className="transition-all duration-300 hover:bg-gray-100 active:bg-gray-200 flex items-center"
             >
               {isRefreshing ? (
                 <>
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" /> 
-                  Refreshing...
+                  <span className="transition-all duration-300 ease-in-out">Refreshing...</span>
                 </>
               ) : (
                 <>
-                  <RefreshCcw className="w-4 h-4 mr-2" /> 
-                  Refresh
+                  <RefreshCcw className="w-4 h-4 mr-2 transition-transform duration-300 hover:rotate-180" /> 
+                  <span className="transition-all duration-300 ease-in-out">Refresh</span>
                 </>
               )}
             </Button>
           </div>
         </div>
 
-        {/* Search & Filter UI */}
+        {/* Search & Filter UI with improved styling */}
         <div className="mb-6">
           <div className="flex justify-between items-center mb-2">
             <form onSubmit={handleSearch} className="flex w-full md:w-auto relative">
               <input
                 type="text"
                 placeholder="Search products by name, EAN, MPN, or brand..."
-                className="border pl-9 pr-4 py-2 rounded w-full md:w-80"
+                className="border pl-9 pr-4 py-2 rounded w-full md:w-80 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition-all duration-200"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
@@ -209,13 +336,13 @@ const Products: React.FC = () => {
               {searchTerm && (
                 <button 
                   type="button" 
-                  className="absolute right-10 top-2.5 text-gray-400 hover:text-gray-700"
+                  className="absolute right-10 top-2.5 text-gray-400 hover:text-gray-700 transition-colors duration-200"
                   onClick={() => setSearchTerm('')}
                 >
                   <X size={16} />
                 </button>
               )}
-              <Button type="submit" className="ml-2 text-sm">
+              <Button type="submit" className="ml-2 text-sm transition-all duration-200 hover:bg-blue-600 active:bg-blue-700">
                 Search
               </Button>
             </form>
@@ -223,25 +350,29 @@ const Products: React.FC = () => {
             <div className="flex items-center">
               <div className="flex items-center mr-2 text-sm">
                 <span className="text-gray-600 mr-1">Total:</span>
-                <span className="font-medium">{totalProductCount}</span>
-                {getActiveFilterCount() > 0 && (
-                  <span className="ml-1 text-blue-600">({getActiveFilterCount()} filter{getActiveFilterCount() !== 1 ? 's' : ''})</span>
+                {hasAccurateCount ? (
+                  <span className="font-medium min-w-[2rem] transition-all duration-500 ease-in-out opacity-100">{totalCount}</span>
+                ) : (
+                  <span className="font-medium w-8 h-5 bg-gray-100 animate-pulse rounded transition-all duration-500 ease-in-out"></span>
+                )}
+                {getActiveFilterCount() > 0 && hasAccurateCount && (
+                  <span className="ml-1 text-blue-600 transition-all duration-500 ease-in-out opacity-100">({getActiveFilterCount()} filter{getActiveFilterCount() !== 1 ? 's' : ''})</span>
                 )}
               </div>
               <Button 
                 variant={showFilters ? "primary" : "secondary"} 
-                className="flex items-center text-sm"
+                className={`transition-all duration-300 ${showFilters ? 'bg-blue-50 hover:bg-blue-100' : 'hover:bg-gray-100'} flex items-center`}
                 onClick={() => setShowFilters(!showFilters)}
               >
-                <Filter size={14} className="mr-1.5" /> 
-                {showFilters ? 'Hide Filters' : 'Show Filters'}
+                <Filter className="w-4 h-4 mr-2" /> 
+                Filters {getActiveFilterCount() > 0 && `(${getActiveFilterCount()})`}
               </Button>
             </div>
           </div>
           
-          {/* Expanded filters section */}
+          {/* Expanded filters section with smoother animation */}
           {showFilters && (
-            <div className="p-3 bg-gray-50 rounded-md mb-3 border border-gray-200">
+            <div className="p-3 bg-gray-50 rounded-md mb-3 border border-gray-200 animate-slideDown">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
@@ -383,80 +514,80 @@ const Products: React.FC = () => {
           )}
         </div>
 
-        {/* Loading states */}
-        {renderLoadingState()}
+        {/* Table container with guaranteed height */}
+        <div 
+          ref={tableRef} 
+          className="overflow-x-auto relative"
+          style={{ 
+            minHeight: tableHeight ? `${tableHeight}px` : '400px'
+          }}
+        >
+          <Table
+            headers={[
+              'Product', 
+              'EAN', 
+              'Brand', 
+              'Buy Box Price', 
+              'Units Sold', 
+              'FBA Fee', 
+              'Suppliers', 
+              'Best Cost', 
+              'Profit Margin',
+              'Actions'
+            ]}
+          >
+            {renderProductRows()}
+          </Table>
 
-        {/* Show loading overlay when refreshing data */}
-        {loading && !initialLoading && (
-          <div className="relative">
-            <div className="absolute inset-0 bg-white bg-opacity-70 flex items-center justify-center z-10">
-              <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+          {/* Pagination controls - simplified to avoid flickering */}
+          <div className="flex justify-between items-center mt-4">
+            <div className="text-sm text-gray-500 min-h-[1.25rem]">
+              {hasAccurateCount ? (
+                <span className="transition-all duration-500 ease-in-out opacity-100">
+                  Showing {products.length > 0 ? (currentPage - 1) * itemsPerPage + 1 : 0} to {Math.min(currentPage * itemsPerPage, totalCount || 0)} of {totalCount || 0} products
+                </span>
+              ) : (
+                <div className="h-5 bg-gray-100 animate-pulse rounded w-48 transition-all duration-500 ease-in-out"></div>
+              )}
+            </div>
+            <div className="flex items-center space-x-1">
+              <Button
+                variant="secondary"
+                onClick={() => changePage(currentPage - 1)}
+                disabled={currentPage === 1 || !hasAccurateCount}
+                className="p-1 transition-all duration-200 hover:bg-gray-100"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              <span className="px-2">
+                {hasAccurateCount ? (
+                  <span>Page {currentPage} of {Math.ceil((totalCount || 0) / itemsPerPage) || 1}</span>
+                ) : (
+                  <div className="h-5 bg-gray-100 animate-pulse rounded w-24 mx-2"></div>
+                )}
+              </span>
+              <Button
+                variant="secondary"
+                onClick={() => changePage(currentPage + 1)}
+                disabled={!hasAccurateCount || currentPage >= Math.ceil((totalCount || 0) / itemsPerPage)}
+                className="p-1 transition-all duration-200 hover:bg-gray-100"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Button>
+            
+              <select
+                className="ml-4 border rounded p-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition-all duration-200"
+                value={itemsPerPage}
+                onChange={(e) => handleItemsPerPageChange(Number(e.target.value))}
+              >
+                <option value={10}>10 per page</option>
+                <option value={20}>20 per page</option>
+                <option value={50}>50 per page</option>
+                <option value={100}>100 per page</option>
+              </select>
             </div>
           </div>
-        )}
-
-        {/* Only render table if we have data and passed initial loading */}
-        {!initialLoading && products.length > 0 && (
-          <>
-            <Table
-              headers={[
-                'Product', 
-                'EAN', 
-                'Brand', 
-                'Buy Box Price', 
-                'Units Sold', 
-                'FBA Fee', 
-                'Suppliers', 
-                'Best Cost', 
-                'Profit Margin',
-                'Actions'
-              ]}
-            >
-              {products.map(product => (
-                <ProductRow key={product.id} product={product} />
-              ))}
-            </Table>
-
-            {/* Pagination controls */}
-            <div className="flex justify-between items-center mt-4">
-              <div className="text-sm text-gray-500">
-                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, totalProductCount)} of {totalProductCount} products
-              </div>
-              <div className="flex items-center space-x-1">
-                <Button
-                  variant="secondary"
-                  onClick={() => changePage(currentPage - 1)}
-                  disabled={currentPage === 1}
-                  className="p-1"
-                >
-                  <ChevronLeft className="w-4 h-4" />
-                </Button>
-                <span className="px-2">
-                  Page {currentPage} of {Math.ceil(totalProductCount / itemsPerPage) || 1}
-                </span>
-                <Button
-                  variant="secondary"
-                  onClick={() => changePage(currentPage + 1)}
-                  disabled={currentPage === Math.ceil(totalProductCount / itemsPerPage)}
-                  className="p-1"
-                >
-                  <ChevronRight className="w-4 h-4" />
-                </Button>
-                
-                <select
-                  className="ml-4 border rounded p-1 text-sm"
-                  value={itemsPerPage}
-                  onChange={(e) => handleItemsPerPageChange(Number(e.target.value))}
-                >
-                  <option value={10}>10 per page</option>
-                  <option value={20}>20 per page</option>
-                  <option value={50}>50 per page</option>
-                  <option value={100}>100 per page</option>
-                </select>
-              </div>
-            </div>
-          </>
-        )}
+        </div>
       </Card>
     </div>
   );
