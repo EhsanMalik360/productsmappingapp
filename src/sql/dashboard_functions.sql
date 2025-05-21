@@ -33,13 +33,13 @@ BEGIN
       MIN(sp.cost) as min_cost,
       CASE 
         WHEN p.buy_box_price > 0 THEN
-          ((p.buy_box_price - COALESCE(p.fba_fees, COALESCE(p.amazon_fee, 0)) - MIN(sp.cost)) / p.buy_box_price) * 100
+          ((p.buy_box_price - COALESCE(p.fba_fees, COALESCE(p.amazon_fee, 0)) - MIN(sp.cost)) / NULLIF(p.buy_box_price, 0)) * 100
         ELSE 0
       END as profit_margin
     FROM products p
     JOIN supplier_products sp ON p.id = sp.product_id
     GROUP BY p.id, p.buy_box_price, p.fba_fees, p.amazon_fee
-    HAVING ((p.buy_box_price - COALESCE(p.fba_fees, COALESCE(p.amazon_fee, 0)) - MIN(sp.cost)) / p.buy_box_price) * 100 > 0
+    HAVING MIN(sp.cost) IS NOT NULL
   ) AS profit_margins;
   
   RETURN COALESCE(avg_margin, 0);
@@ -56,7 +56,7 @@ BEGIN
   FROM (
     SELECT 
       p.id,
-      (p.buy_box_price - COALESCE(p.fba_fees, COALESCE(p.amazon_fee, 0)) - MIN(sp.cost)) * p.units_sold as monthly_profit
+      (p.buy_box_price - COALESCE(p.fba_fees, COALESCE(p.amazon_fee, 0)) - MIN(sp.cost)) * COALESCE(p.units_sold, 0) as monthly_profit
     FROM products p
     JOIN supplier_products sp ON p.id = sp.product_id
     GROUP BY p.id, p.buy_box_price, p.fba_fees, p.amazon_fee, p.units_sold
@@ -72,16 +72,25 @@ CREATE OR REPLACE FUNCTION get_current_month_stats()
 RETURNS json AS $$
 DECLARE
   stats json;
+  total_products integer;
+  multi_supplier_products integer;
+  avg_profit_margin numeric;
+  total_monthly_profit numeric;
 BEGIN
-  WITH current_stats AS (
-    SELECT
-      COUNT(*) as total_products,
-      (SELECT get_multi_supplier_products_count()) as multi_supplier_products,
-      (SELECT get_average_profit_margin()) as avg_profit_margin,
-      (SELECT get_total_monthly_profit()) as total_monthly_profit
-  FROM products)
+  -- Get individual stats with proper error handling
+  SELECT COUNT(*) INTO total_products FROM products;
+  SELECT COALESCE(get_multi_supplier_products_count(), 0) INTO multi_supplier_products;
+  SELECT COALESCE(get_average_profit_margin(), 0) INTO avg_profit_margin;
+  SELECT COALESCE(get_total_monthly_profit(), 0) INTO total_monthly_profit;
   
-  SELECT row_to_json(current_stats) INTO stats FROM current_stats;
+  -- Build the JSON response
+  SELECT json_build_object(
+    'total_products', total_products,
+    'multi_supplier_products', multi_supplier_products,
+    'avg_profit_margin', avg_profit_margin,
+    'total_monthly_profit', total_monthly_profit
+  ) INTO stats;
+  
   RETURN stats;
 END;
 $$ LANGUAGE plpgsql;
@@ -94,6 +103,10 @@ DECLARE
   stats json;
   current_stats json;
   adjustment_factor numeric;
+  total_products numeric;
+  multi_supplier_products numeric;
+  avg_profit_margin numeric;
+  total_monthly_profit numeric;
 BEGIN
   SELECT get_current_month_stats() INTO current_stats;
   
@@ -101,15 +114,20 @@ BEGIN
   -- This simulates previous month data
   SELECT 0.8 + random() * 0.4 INTO adjustment_factor;
   
-  WITH previous_stats AS (
-    SELECT
-      (current_stats->>'total_products')::numeric * adjustment_factor as total_products,
-      (current_stats->>'multi_supplier_products')::numeric * adjustment_factor as multi_supplier_products,
-      (current_stats->>'avg_profit_margin')::numeric * adjustment_factor as avg_profit_margin,
-      (current_stats->>'total_monthly_profit')::numeric * adjustment_factor as total_monthly_profit
-  )
+  -- Extract stats and apply adjustment with nullif to prevent division by zero
+  SELECT GREATEST(1, (current_stats->>'total_products')::numeric * adjustment_factor) INTO total_products;
+  SELECT GREATEST(0, (current_stats->>'multi_supplier_products')::numeric * adjustment_factor) INTO multi_supplier_products;
+  SELECT GREATEST(0, (current_stats->>'avg_profit_margin')::numeric * adjustment_factor) INTO avg_profit_margin;
+  SELECT GREATEST(0, (current_stats->>'total_monthly_profit')::numeric * adjustment_factor) INTO total_monthly_profit;
   
-  SELECT row_to_json(previous_stats) INTO stats FROM previous_stats;
+  -- Build the JSON response
+  SELECT json_build_object(
+    'total_products', total_products,
+    'multi_supplier_products', multi_supplier_products,
+    'avg_profit_margin', avg_profit_margin,
+    'total_monthly_profit', total_monthly_profit
+  ) INTO stats;
+  
   RETURN stats;
 END;
 $$ LANGUAGE plpgsql;
@@ -124,7 +142,7 @@ DECLARE
   i integer;
 BEGIN
   -- Get base revenue from current products
-  SELECT SUM(buy_box_price * units_sold) INTO base_revenue FROM products;
+  SELECT COALESCE(SUM(buy_box_price * COALESCE(units_sold, 0)), 100) INTO base_revenue FROM products;
   
   -- Generate simulated monthly data
   FOR i IN 0..5 LOOP
@@ -142,9 +160,10 @@ BEGIN
   RETURN QUERY
   SELECT 
     p.brand,
-    SUM((p.buy_box_price - COALESCE(p.fba_fees, COALESCE(p.amazon_fee, 0)) - MIN(sp.cost)) * p.units_sold) as total_profit
+    SUM((p.buy_box_price - COALESCE(p.fba_fees, COALESCE(p.amazon_fee, 0)) - MIN(sp.cost)) * COALESCE(p.units_sold, 0)) as total_profit
   FROM products p
   JOIN supplier_products sp ON p.id = sp.product_id
+  WHERE p.brand IS NOT NULL AND p.brand != ''
   GROUP BY p.brand
   ORDER BY total_profit DESC
   LIMIT limit_count;
@@ -180,7 +199,7 @@ BEGIN
     SELECT 
       CASE 
         WHEN p.buy_box_price > 0 THEN
-          ((p.buy_box_price - COALESCE(p.fba_fees, COALESCE(p.amazon_fee, 0)) - MIN(sp.cost)) / p.buy_box_price) * 100
+          ((p.buy_box_price - COALESCE(p.fba_fees, COALESCE(p.amazon_fee, 0)) - MIN(sp.cost)) / NULLIF(p.buy_box_price, 0)) * 100
         ELSE 0
       END as margin
     FROM products p

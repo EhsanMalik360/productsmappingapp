@@ -135,7 +135,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     getPriceRange: getProductPriceRange
   } = useProducts();
 
-  const { 
+  const {
     suppliers: dbSuppliers, 
     loading: suppliersLoading, 
     initialLoading: suppliersInitialLoading,

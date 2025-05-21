@@ -44,11 +44,13 @@ const SupplierImport: React.FC = () => {
     successfulImports: number;
     failedImports: number;
     suppliersAdded: number;
+    duplicateRows: number;
   }>({
     totalRecords: 0,
     successfulImports: 0,
     failedImports: 0,
-    suppliersAdded: 0
+    suppliersAdded: 0,
+    duplicateRows: 0
   });
   
   // Match options state
@@ -85,6 +87,13 @@ const SupplierImport: React.FC = () => {
   const [isLongRunningImport, setIsLongRunningImport] = useState<boolean>(false);
   const [importComplete, setImportComplete] = useState<boolean>(false);
 
+  // First, add a new state for duplicate details around line 32-41
+  const [duplicateDetails, setDuplicateDetails] = useState<{
+    row_index: number;
+    reason: string;
+    data?: Record<string, string>;
+  }[]>([]);
+
   // Required supplier custom attributes
   const requiredCustomAttributes = customAttributes
     .filter(attr => attr.forType === 'supplier' && attr.required)
@@ -110,8 +119,10 @@ const SupplierImport: React.FC = () => {
       totalRecords: 0,
       successfulImports: 0,
       failedImports: 0,
-      suppliersAdded: 0
+      suppliersAdded: 0,
+      duplicateRows: 0
     });
+    setDuplicateDetails([]);
     setLoadingProgress(0);
     setLoadingMessage("Processing data...");
     setImportStartTime(null);
@@ -225,7 +236,8 @@ const SupplierImport: React.FC = () => {
               totalRecords: statusData.results.total || 0,
               successfulImports: statusData.results.successful || 0,
               failedImports: statusData.results.failed || 0,
-              suppliersAdded: statusData.results.suppliers_added || 0
+              suppliersAdded: statusData.results.suppliers_added || 0,
+              duplicateRows: statusData.results.deduped || 0
             });
             
             // Set match stats if available
@@ -238,6 +250,12 @@ const SupplierImport: React.FC = () => {
                   [MatchMethod.NAME]: statusData.results.match_stats.by_method?.name || 0
                 }
               });
+            }
+            
+            // Set duplicate details if available
+            if (statusData.results.duplicate_details && Array.isArray(statusData.results.duplicate_details)) {
+              setDuplicateDetails(statusData.results.duplicate_details);
+              console.log(`Received ${statusData.results.duplicate_details.length} duplicate details`);
             }
           }
           
@@ -711,10 +729,12 @@ const SupplierImport: React.FC = () => {
         onClose={handleSuccessModalClose}
         title="Supplier Import Completed"
         message="Your supplier data has been successfully imported into the system."
+        duplicateDetails={duplicateDetails}
         details={[
           { label: 'Total Records', value: importResults.totalRecords },
           { label: 'Successfully Imported', value: importResults.successfulImports },
           { label: 'Failed', value: importResults.failedImports },
+          { label: 'Duplicate Rows Skipped', value: importResults.duplicateRows, color: 'text-amber-600' },
           { label: 'New Suppliers Added', value: importResults.suppliersAdded },
           { 
             label: 'Matched by EAN', 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 // UI Components
 import Button from '../../components/UI/Button';
 // Third-party components
@@ -92,6 +92,14 @@ const AmazonImport: React.FC = () => {
     successfulImports: number;
     failedImports: number;
     skippedImports?: number;
+    matchStats?: {
+      totalMatched: number;
+      byMethod?: {
+        ean: number;
+        mpn: number;
+        name: number;
+      }
+    };
   }>({ totalRecords: 0, successfulImports: 0, failedImports: 0, skippedImports: 0 });
   
   // Job tracking states
@@ -99,13 +107,14 @@ const AmazonImport: React.FC = () => {
   const [loadingMessage, setLoadingMessage] = useState<string>("Processing data...");
   const [loadingProgress, setLoadingProgress] = useState<number>(0);
   const [batchSize, setBatchSize] = useState<number>(500); // Increased default batch size
-  const [] = useState<number | null>(null);
-  
-  // Add states for timeout handling
   const [importStartTime, setImportStartTime] = useState<number | null>(null);
   const [executionTime, setExecutionTime] = useState<number>(0);
   const [isLongRunningImport, setIsLongRunningImport] = useState<boolean>(false);
   const [importComplete, setImportComplete] = useState<boolean>(false);
+  const [isDragActive, setIsDragActive] = useState(false);
+  
+  // Create ref for file input
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   // Get required product custom attributes
   const requiredCustomAttributes = customAttributes
@@ -310,7 +319,8 @@ const AmazonImport: React.FC = () => {
       
       // Handle job completion
       if (statusData.status === 'completed') {
-        console.log('Import job completed successfully!');
+        console.log('Import job completed successfully!', statusData.results);
+        console.log('Match statistics from server:', statusData.results?.match_stats);
         
         // Process results to match our expected format
         if (statusData.results) {
@@ -318,14 +328,22 @@ const AmazonImport: React.FC = () => {
             totalRecords: statusData.results.total || 0,
             successfulImports: statusData.results.successful || 0,
             failedImports: statusData.results.failed || 0,
-            skippedImports: statusData.results.skipped || 0
+            skippedImports: statusData.results.skipped || 0,
+            matchStats: statusData.results.match_stats ? {
+              totalMatched: statusData.results.match_stats.total_matched || 0,
+              byMethod: {
+                ean: statusData.results.match_stats.by_method?.ean || 0,
+                mpn: statusData.results.match_stats.by_method?.mpn || 0,
+                name: statusData.results.match_stats.by_method?.name || 0
+              }
+            } : undefined
           });
         }
         
         // Show success modal
         setShowSuccess(true);
-          setIsLoading(false);
-          setJobId(null);
+        setIsLoading(false);
+        setJobId(null);
         
         return 'completed';
       }
@@ -802,7 +820,15 @@ const AmazonImport: React.FC = () => {
                 totalRecords: results.total || recentCompletedJob.total_rows || 0,
                 successfulImports: results.successful || recentCompletedJob.processed_rows || 0,
                 failedImports: results.failed || recentCompletedJob.error_count || 0,
-                skippedImports: results.skipped || 0
+                skippedImports: results.skipped || 0,
+                matchStats: results.match_stats ? {
+                  totalMatched: results.match_stats.total_matched || 0,
+                  byMethod: {
+                    ean: results.match_stats.by_method?.ean || 0,
+                    mpn: results.match_stats.by_method?.mpn || 0,
+                    name: results.match_stats.by_method?.name || 0
+                  }
+                } : undefined
               });
               setLoadingProgress(100);
               setImportComplete(true);
@@ -891,7 +917,15 @@ const AmazonImport: React.FC = () => {
                 totalRecords: results.total || recentJob.total_rows || 0,
                 successfulImports: results.successful || recentJob.processed_rows || 0,
                 failedImports: results.failed || recentJob.error_count || 0,
-                skippedImports: results.skipped || 0
+                skippedImports: results.skipped || 0,
+                matchStats: results.match_stats ? {
+                  totalMatched: results.match_stats.total_matched || 0,
+                  byMethod: {
+                    ean: results.match_stats.by_method?.ean || 0,
+                    mpn: results.match_stats.by_method?.mpn || 0,
+                    name: results.match_stats.by_method?.name || 0
+                  }
+                } : undefined
               });
               setLoadingProgress(100);
               setImportComplete(true);
@@ -954,6 +988,7 @@ const AmazonImport: React.FC = () => {
     const successCount = importResults.successfulImports;
     const failedCount = importResults.failedImports;
     const skippedCount = importResults.skippedImports || 0;
+    const matchedCount = importResults.matchStats?.totalMatched || 0;
     
     // Calculate success percentage for visual display
     const successPercentage = totalCount > 0 
@@ -963,6 +998,10 @@ const AmazonImport: React.FC = () => {
     // Check if we have skipped records (from backend)
     const hasSkipped = skippedCount > 0;
     const hasFailed = failedCount > 0;
+    const hasMatches = matchedCount > 0;
+    
+    console.log("Import results:", importResults);
+    console.log("Match stats:", importResults.matchStats);
     
     return (
       <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50 backdrop-blur-sm">
@@ -1006,7 +1045,7 @@ const AmazonImport: React.FC = () => {
                     successPercentage > 70 ? 'bg-blue-500' : 
                     successPercentage > 50 ? 'bg-yellow-500' : 'bg-orange-500'
                   }`}
-                ></div>
+                />
               </div>
             </div>
             
@@ -1019,10 +1058,10 @@ const AmazonImport: React.FC = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path>
                   </svg>
                   <span className="text-xs font-medium text-gray-600">Successful</span>
-            </div>
+                </div>
                 <div className="text-lg font-bold text-center text-green-600">{successCount.toLocaleString()}</div>
-          </div>
-          
+              </div>
+              
               {/* Skipped card */}
               <div className="bg-white border border-yellow-200 rounded p-2 shadow-sm">
                 <div className="flex items-center justify-center mb-1">
@@ -1044,6 +1083,36 @@ const AmazonImport: React.FC = () => {
                 </div>
                 <div className="text-lg font-bold text-center text-red-600">{failedCount.toLocaleString()}</div>
               </div>
+            </div>
+            
+            {/* NEW: Matching statistics section - always show this section */}
+            <div className="border border-indigo-200 rounded p-3 mb-3 bg-indigo-50">
+              <h4 className="text-sm font-semibold text-indigo-800 mb-2">Supplier Matching Results</h4>
+              <div className="flex justify-between items-center mb-2">
+                <span className="text-xs text-indigo-700">Total Matched:</span>
+                <span className="font-semibold text-indigo-800">{matchedCount.toLocaleString()}</span>
+              </div>
+              
+              {importResults.matchStats?.byMethod ? (
+                <div className="grid grid-cols-3 gap-2 text-xs text-center">
+                  <div className="bg-white rounded p-1 border border-indigo-100">
+                    <span className="block text-indigo-600">EAN</span>
+                    <span className="font-bold">{importResults.matchStats.byMethod.ean}</span>
+                  </div>
+                  <div className="bg-white rounded p-1 border border-indigo-100">
+                    <span className="block text-indigo-600">MPN</span>
+                    <span className="font-bold">{importResults.matchStats.byMethod.mpn}</span>
+                  </div>
+                  <div className="bg-white rounded p-1 border border-indigo-100">
+                    <span className="block text-indigo-600">Name</span>
+                    <span className="font-bold">{importResults.matchStats.byMethod.name}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-xs text-indigo-600 text-center py-1">
+                  No matches found between these products and existing supplier products
+                </div>
+              )}
             </div>
             
             {/* Status message */}
@@ -1071,6 +1140,7 @@ const AmazonImport: React.FC = () => {
                 <div>
                   <p className="font-medium mb-1">Import completed successfully</p>
                   <p>All {successCount} products imported without errors</p>
+                  {hasMatches && <p className="mt-1">Matched with {matchedCount} supplier products</p>}
                 </div>
               )}
             </div>
@@ -1080,17 +1150,13 @@ const AmazonImport: React.FC = () => {
             <Button 
               variant="secondary"
               className="px-3 py-1 text-sm"
-              onClick={() => {
-                handleCloseModal();
-              }}
+              onClick={handleCloseModal}
             >
               Close
             </Button>
             <Button 
               className="px-3 py-1 text-sm"
-              onClick={() => {
-                handleCloseModal();
-              }}
+              onClick={handleCloseModal}
             >
               Continue
             </Button>
@@ -1157,25 +1223,41 @@ const AmazonImport: React.FC = () => {
       
       {currentStep === 1 && (
         <div>
-          <h3 className="text-lg font-semibold mb-3">Import Amazon Product Data</h3>
-          <p className="mb-4">Upload a CSV file containing your Amazon product data.</p>
+          <h3 className="text-lg font-semibold mb-3">Upload Amazon Product Data</h3>
+          <p className="mb-4">Upload your Amazon product data from any marketplace analysis tool.</p>
           
+          <div className="bg-blue-50 p-4 mb-6 rounded-md border border-blue-100">
+            <div className="flex items-start">
+              <Info size={18} className="text-blue-600 mr-2 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-blue-800">
+                <p className="font-medium mb-1">Automatic Matching</p>
+                <p>When you upload Amazon products, the system will automatically match them with any existing unmatched supplier products using EAN, MPN, and product name matching. This bidirectional matching ensures your supplier data connects with Amazon products regardless of which was uploaded first.</p>
+              </div>
+            </div>
+          </div>
+
           <div 
-            className="dropzone border-2 border-dashed border-gray-300 rounded-lg p-10 text-center cursor-pointer hover:border-blue-500 transition-colors"
-            onDrop={handleFileUpload}
+            className={`border-2 border-dashed rounded-lg p-10 text-center ${
+              isDragActive ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+            }`}
             onDragOver={handleDragOver}
-            onClick={() => document.getElementById('amazonFileInput')?.click()}
+            onDragEnter={() => setIsDragActive(true)}
+            onDragLeave={() => setIsDragActive(false)}
+            onDrop={handleFileUpload}
+            onClick={() => fileInputRef.current?.click()}
+            style={{ cursor: 'pointer' }}
           >
             <input 
               type="file" 
               id="amazonFileInput"
-              className="hidden"
-              accept=".csv"
+              ref={fileInputRef}
+              accept=".csv,.xlsx,.xls" 
               onChange={handleFileUpload}
+              className="hidden" 
             />
             <UploadCloud className="mx-auto h-12 w-12 text-gray-400 mb-3" />
             <p>Drag and drop your CSV file here, or <span className="text-blue-500">browse</span></p>
-            <p className="text-sm text-gray-500 mt-2">Supported format: .csv</p>
+            <p className="text-sm text-gray-500 mt-2">Supported format: .csv, .xlsx, .xls</p>
           </div>
           
           <div className="mt-4 flex justify-between">
