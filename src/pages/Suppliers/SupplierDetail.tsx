@@ -20,7 +20,9 @@ const SupplierDetail: React.FC = () => {
     getEntityAttributes,
     setAttributeValue,
     updateSupplier,
-    fetchSupplierProducts
+    fetchSupplierProducts,
+    supplierCache,
+    cacheSupplierById
   } = useAppContext();
   
   // Component state
@@ -138,18 +140,43 @@ const SupplierDetail: React.FC = () => {
     }
   }, [normalizedId, fetchSupplierProducts]);
 
-  // Load initial data
+  // Add a flag to track if we're coming back from product details
+  const [isReturningFromProduct, setIsReturningFromProduct] = useState(false);
+
+  // Update the fetchInitialData function to use cache
   const fetchInitialData = useCallback(async () => {
     if (!normalizedId || dataFetched) return;
     
     try {
       setIsRefreshing(true);
       
+      // Check if we're coming back from a product details page
+      const cachedSupplierData = supplierCache[normalizedId];
+      const isReturning = cachedSupplierData && 
+        cachedSupplierData.supplier && 
+        (Date.now() - cachedSupplierData.timestamp) < 2 * 60 * 1000;
+      
+      if (isReturning) {
+        console.log('Using cached supplier data - returning from product details');
+        setIsReturningFromProduct(true);
+        // We can use the cached data, no need for a full refresh
+        setDataFetched(true);
+        
+        // Still get accurate count in background without waiting
+        fetchTotalProductCount();
+        setIsRefreshing(false);
+        return;
+      }
+      
+      // If not returning from product or no cache, proceed as normal
       // Check if we already have the supplier
       const existingSupplier = suppliers.find(s => s.id === normalizedId);
       
       if (!existingSupplier) {
         await refreshData();
+      } else {
+        // Cache the supplier for future use
+        cacheSupplierById(normalizedId);
       }
       
       // Get accurate count in background
@@ -171,7 +198,7 @@ const SupplierDetail: React.FC = () => {
     } finally {
       setIsRefreshing(false);
     }
-  }, [normalizedId, suppliers, refreshData, fetchTotalProductCount, dataFetched]);
+  }, [normalizedId, suppliers, refreshData, fetchTotalProductCount, dataFetched, supplierCache, cacheSupplierById]);
 
   // Load data on mount
   useEffect(() => {
@@ -639,7 +666,10 @@ const SupplierDetail: React.FC = () => {
       
       {/* Supplier Products Section */}
       {(supplier || (showSkeleton && dataFetched)) && (
-        supplier ? <SupplierProducts supplierId={supplier.id} /> : (
+        supplier ? <SupplierProducts 
+          supplierId={supplier.id} 
+          initialCachedProducts={supplierCache[supplier.id]?.products || []} 
+        /> : (
           <Card className="mb-6 card-skeleton">
             <div className="h-7 bg-gray-200 rounded skeleton-shimmer w-40 mb-4"></div>
             <div className="skeleton-shimmer space-y-4">

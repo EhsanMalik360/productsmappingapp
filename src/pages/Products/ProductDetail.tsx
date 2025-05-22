@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useMemo, useLayoutEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useAppContext } from '../../context/AppContext';
 import { useProfitFormula } from '../../context/ProfitFormulaContext';
 import { useAuth } from '../../context/AuthContext';
@@ -32,6 +32,7 @@ ChartJS.register(
 const ProductDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { isAdmin } = useAuth();
   const { 
     getProductById, 
@@ -43,11 +44,15 @@ const ProductDetail: React.FC = () => {
     setAttributeValue,
     getAttributeValue,
     customAttributes,
-    updateProduct
+    updateProduct,
+    cacheSupplierById
   } = useAppContext();
   
   // Use the shared profit formula context
   const { formulaItems, evaluateFormula } = useProfitFormula();
+
+  // Check if we have a passed product from navigation state
+  const passedProduct = location.state?.product;
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -70,7 +75,10 @@ const ProductDetail: React.FC = () => {
   const [profitSectionLoading, setProfitSectionLoading] = useState(false);
   const [chartSectionLoading, setChartSectionLoading] = useState(false);
   
-  const product = getProductById(id!);
+  // Get product data with preference for passed data from navigation
+  // This ensures immediate display without waiting for getProductById
+  const contextProduct = getProductById(id!);
+  const product = passedProduct || contextProduct;
   
   // Initialize a default empty product if not yet loaded
   const emptyProduct = {
@@ -92,14 +100,17 @@ const ProductDetail: React.FC = () => {
   // Use a safe version of product that's never undefined
   const safeProduct = product || emptyProduct;
   
-  // Initialize edited product when product data loads or edit mode is entered
-  useEffect(() => {
+  // Use layout effect to ensure UI updates immediately with product data
+  useLayoutEffect(() => {
     // Always set loading states to false immediately to prevent loaders from displaying
     setHeaderLoaded(true);
     setSupplierSectionLoading(false);
     setProfitSectionLoading(false);
     setChartSectionLoading(false);
-    
+  }, []);
+  
+  // Initialize edited product when product data loads or edit mode is entered
+  useEffect(() => {
     if (safeProduct && (isEditing || !editedProduct)) {
       setEditedProduct({
         ...safeProduct,
@@ -128,6 +139,35 @@ const ProductDetail: React.FC = () => {
       setCustomSupplierCost(bestSupplier ? bestSupplier.cost : 0);
     }
   }, [safeProduct, getBestSupplierForProduct]);
+
+  // Silent background refresh to update data without showing loading states
+  useEffect(() => {
+    // Only perform background refresh if we came with passed product data
+    // This ensures we eventually get full data without disrupting the UI
+    if (passedProduct && id) {
+      const silentRefresh = async () => {
+        try {
+          await refreshData();
+        } catch (error) {
+          console.error('Error in background refresh:', error);
+        }
+      };
+      
+      silentRefresh();
+    }
+  }, [passedProduct, id, refreshData]);
+
+  // Add a check for the referrer in useEffect
+  useEffect(() => {
+    // Check if we came from a supplier details page
+    if (location.state?.from === 'supplierDetail' && location.state?.supplierId) {
+      // Store the supplier ID to return to
+      setReferringSupplierId(location.state.supplierId);
+    }
+  }, [location.state]);
+
+  // Add state to store the referring supplier ID
+  const [referringSupplierId, setReferringSupplierId] = useState<string | null>(null);
 
   const handleRefresh = async () => {
     try {
@@ -419,6 +459,23 @@ const ProductDetail: React.FC = () => {
   const minCost = hasCostRange ? Math.min(...supplierCosts) : (supplierCosts[0] || 0);
   const maxCost = hasCostRange ? Math.max(...supplierCosts) : (supplierCosts[0] || 0);
   
+  // Update the back button click handler
+  const handleBackClick = () => {
+    if (referringSupplierId) {
+      // Use replace:true to prevent adding to history stack and causing re-renders
+      navigate(`/suppliers/${referringSupplierId}`, { 
+        replace: true,
+        state: { 
+          fromProduct: true,
+          productId: id
+        }
+      });
+    } else {
+      // Default behavior - go to products page
+      navigate('/products');
+    }
+  };
+  
   // Start rendering as soon as possible with progressive loading
   return (
     <div className="max-w-7xl mx-auto">
@@ -428,7 +485,7 @@ const ProductDetail: React.FC = () => {
           <Button 
             variant="secondary" 
             className="mr-3"
-            onClick={() => navigate('/products')}
+            onClick={handleBackClick}
           >
             <ArrowLeft size={14} className="mr-1.5" /> Back
           </Button>
@@ -556,7 +613,7 @@ const ProductDetail: React.FC = () => {
                         className="border p-1 rounded text-sm w-full"
                       />
                     ) : (
-                      <div className="text-base font-semibold">${safeProduct?.salePrice.toFixed(2) || '0.00'}</div>
+                      <div className="text-base font-semibold">${safeProduct?.salePrice ? safeProduct.salePrice.toFixed(2) : '0.00'}</div>
                     )}
                   </div>
                   {/* Continue with other product fields */}
@@ -570,7 +627,7 @@ const ProductDetail: React.FC = () => {
                         className="border p-1 rounded text-sm w-full"
                       />
                     ) : (
-                      <div className="text-base font-semibold">{safeProduct?.unitsSold.toLocaleString() || '0'}</div>
+                      <div className="text-base font-semibold">{safeProduct?.unitsSold ? safeProduct.unitsSold.toLocaleString() : '0'}</div>
                     )}
                   </div>
 
@@ -585,7 +642,7 @@ const ProductDetail: React.FC = () => {
                         className="border p-1 rounded text-sm w-full"
                       />
                     ) : (
-                      <div className="text-base font-semibold">${safeProduct?.amazonFee.toFixed(2) || '0.00'}</div>
+                      <div className="text-base font-semibold">${safeProduct?.amazonFee ? safeProduct.amazonFee.toFixed(2) : '0.00'}</div>
                     )}
                   </div>
                   <div className="bg-gray-50 p-2 rounded">
@@ -676,19 +733,19 @@ const ProductDetail: React.FC = () => {
                 <div className="bg-white p-2 rounded shadow-sm flex justify-between items-center">
                   <div className="text-xs text-gray-600">Margin:</div>
                   <div className={`text-sm font-semibold ${profitMargin > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {profitMargin.toFixed(1)}%
+                    {typeof profitMargin === 'number' ? profitMargin.toFixed(1) : '0.0'}%
                   </div>
                 </div>
                 <div className="bg-white p-2 rounded shadow-sm flex justify-between items-center">
                   <div className="text-xs text-gray-600">Unit Profit:</div>
                   <div className={`text-sm font-semibold ${profitPerUnit > 0 ? 'text-black' : 'text-red-600'}`}>
-                    ${profitPerUnit.toFixed(2)}
+                    ${typeof profitPerUnit === 'number' ? profitPerUnit.toFixed(2) : '0.00'}
                   </div>
                 </div>
                 <div className="bg-white p-2 rounded shadow-sm flex justify-between items-center">
                   <div className="text-xs text-gray-600">Monthly:</div>
                   <div className={`text-sm font-semibold ${monthlyProfit > 0 ? 'text-black' : 'text-red-600'}`}>
-                    ${monthlyProfit.toFixed(2)}
+                    ${typeof monthlyProfit === 'number' ? monthlyProfit.toFixed(2) : '0.00'}
                   </div>
                 </div>
               </div>
@@ -724,7 +781,7 @@ const ProductDetail: React.FC = () => {
                 {hasCostRange && (
                   <p className="flex items-center mb-1.5">
                     <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
-                    <span><span className="font-medium">Cost range:</span> ${minCost.toFixed(2)} - ${maxCost.toFixed(2)}</span>
+                    <span><span className="font-medium">Cost range:</span> ${typeof minCost === 'number' ? minCost.toFixed(2) : '0.00'} - ${typeof maxCost === 'number' ? maxCost.toFixed(2) : '0.00'}</span>
                   </p>
                 )}
                 <p className="flex items-center">
@@ -940,7 +997,7 @@ const ProductDetail: React.FC = () => {
                     {/* Monthly calculation */}
                     <tr>
                       <td className="font-medium py-0.5">Monthly Units Sold:</td>
-                      <td className="text-right">{safeProduct.unitsSold.toLocaleString()}</td>
+                      <td className="text-right">{safeProduct?.unitsSold ? safeProduct.unitsSold.toLocaleString() : '0'}</td>
                     </tr>
                     <tr className="border-t">
                       <td className="font-medium py-1">Monthly Profit:</td>
@@ -1134,11 +1191,11 @@ const ProductDetail: React.FC = () => {
                       </tr>
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">Buy Box Price</td>
-                        <td className="px-2 py-1.5">${safeProduct.buyBoxPrice.toFixed(2)}</td>
+                        <td className="px-2 py-1.5">${safeProduct?.buyBoxPrice !== undefined ? safeProduct.buyBoxPrice.toFixed(2) : '0.00'}</td>
                       </tr>
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">FBA Fee</td>
-                        <td className="px-2 py-1.5">${safeProduct.amazonFee.toFixed(2)}</td>
+                        <td className="px-2 py-1.5">${safeProduct?.amazonFee !== undefined ? safeProduct.amazonFee.toFixed(2) : '0.00'}</td>
                       </tr>
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">Referral Fee</td>
@@ -1146,7 +1203,7 @@ const ProductDetail: React.FC = () => {
                       </tr>
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">Units Sold</td>
-                        <td className="px-2 py-1.5">{safeProduct.unitsSold}</td>
+                        <td className="px-2 py-1.5">{safeProduct?.unitsSold !== undefined ? safeProduct.unitsSold : 0}</td>
                       </tr>
 
                       

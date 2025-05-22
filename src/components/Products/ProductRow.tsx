@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Eye } from 'lucide-react';
-import { useAppContext, Product, SupplierProduct } from '../../context/AppContext';
+import { useAppContext, Product } from '../../context/AppContext';
 import ProductMatchBadge from './ProductMatchBadge';
 
 interface ProductRowProps {
@@ -67,7 +67,11 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, className = '' }) => {
         </div>
       </td>
       <td className="px-4 py-3">
-        <Link to={`/products/${product.id}`} className="text-blue-600 hover:underline flex items-center">
+        <Link 
+          to={`/products/${product.id}`} 
+          state={{ product }} 
+          className="text-blue-600 hover:underline flex items-center"
+        >
           <Eye size={16} className="mr-1" /> View
         </Link>
       </td>

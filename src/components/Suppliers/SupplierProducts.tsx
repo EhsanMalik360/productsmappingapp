@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, ExternalLink, Link, Info, Search, Filter, X, ArrowDownAZ, DollarSign, TrendingUp, Tag, ChevronLeft, ChevronRight, RefreshCcw } from 'lucide-react';
 import Card from '../UI/Card';
@@ -8,17 +8,33 @@ import EmptyState from '../Dashboard/EmptyState';
 import ProductMatchBadge from '../UI/ProductMatchBadge';
 import { useAppContext } from '../../context/AppContext';
 
+// Add CSS to ensure smooth transitions
+const transitionStyles = {
+  table: {
+    transition: 'opacity 0.3s ease-in-out'
+  },
+  fadeIn: {
+    opacity: 1,
+    transition: 'opacity 0.3s ease-in-out'
+  },
+  fadeOut: {
+    opacity: 0.6,
+    transition: 'opacity 0.3s ease-in-out'
+  }
+};
+
 interface SupplierProductsProps {
   supplierId: string;
+  initialCachedProducts?: any[];
 }
 
 type FilterOption = 'all' | 'matched' | 'unmatched';
 type SortField = 'name' | 'cost' | 'price' | 'profit' | 'margin' | '';
 type SortOrder = 'asc' | 'desc';
 
-const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
+const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initialCachedProducts }) => {
   const navigate = useNavigate();
-  const { products, fetchSupplierProducts } = useAppContext();
+  const { products, fetchSupplierProducts, supplierCache } = useAppContext();
   const [filterOption, setFilterOption] = useState<FilterOption>('all');
   const [selectedUnmatchedProduct, setSelectedUnmatchedProduct] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -26,12 +42,12 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
   const [sortField, setSortField] = useState<SortField>('');
   const [sortOrder, setSortOrder] = useState<SortOrder>('asc');
   const [costRange, setCostRange] = useState<{min: number, max: number}>({min: 0, max: 1000});
-  // Track if the user has manually changed the cost range filter
   const [userModifiedCostRange, setUserModifiedCostRange] = useState(false);
   const [matchMethodFilter, setMatchMethodFilter] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isBackgroundRefreshing, setIsBackgroundRefreshing] = useState(false);
   const [supplierProductsData, setSupplierProductsData] = useState<any[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [costStats, setCostStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
@@ -42,11 +58,82 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     unmatched: 0
   });
   const [hasInitializedFilters, setHasInitializedFilters] = useState(false);
+  const [usingCachedData, setUsingCachedData] = useState(false);
   
-  // Fetch data when component mounts or parameters change
-  const loadData = useCallback(async () => {
-    try {
+  // Add ref for tracking data updates to prevent flickering
+  const dataUpdateTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Add state for visual stability
+  const [isTableVisible, setIsTableVisible] = useState(true);
+  
+  // Modify the cached data initialization to prevent flickering
+  useEffect(() => {
+    // Check for cache in both props and context
+    const cachedProducts = initialCachedProducts || 
+                         (supplierCache[supplierId]?.products || []);
+    const cachedCount = supplierCache[supplierId]?.count || 0;
+    
+    if (cachedProducts && cachedProducts.length > 0) {
+      console.log('Using cached supplier products data');
+      
+      // Set data without causing flickering
+      setSupplierProductsData(cachedProducts);
+      setTotalCount(cachedCount);
+      setUsingCachedData(true);
+      setIsTableVisible(true);
+      
+      // Start a silent background refresh with delay to prevent immediate flicker
+      setTimeout(() => {
+        setIsBackgroundRefreshing(true);
+        loadData(true);
+      }, 500);
+    } else {
+      // No cached data, need to load with spinner
       setIsLoading(true);
+      setIsTableVisible(false);
+    }
+  }, [supplierId]); // Only trigger on supplier ID change to prevent re-runs
+  
+  // Batch state updates to prevent flickering when data refreshes
+  const updateDisplayData = useCallback((data: any[], count: number, keepVisible = false) => {
+    // Clear any pending updates
+    if (dataUpdateTimeoutRef.current) {
+      clearTimeout(dataUpdateTimeoutRef.current);
+    }
+    
+    // If we're updating with new data and table is visible, fade it out first
+    if (!keepVisible && isTableVisible && data.length > 0) {
+      setIsTableVisible(false);
+      
+      // Wait for fade out transition before updating data
+      dataUpdateTimeoutRef.current = setTimeout(() => {
+        setSupplierProductsData(data);
+        setTotalCount(count);
+        
+        // Then fade back in after a short delay
+        setTimeout(() => {
+          setIsTableVisible(true);
+        }, 50);
+      }, 300); // Match the CSS transition duration
+    } else {
+      // Direct update without animation if table is already hidden or we want to keep it visible
+      setSupplierProductsData(data);
+      setTotalCount(count);
+      if (!isTableVisible) {
+        setIsTableVisible(true);
+      }
+    }
+  }, [isTableVisible]);
+  
+  // Fetch data with improved handling to prevent flickering
+  const loadData = useCallback(async (skipLoadingState = false) => {
+    try {
+      if (!skipLoadingState) {
+        setIsLoading(true);
+        // Only hide table if we don't have data yet
+        if (supplierProductsData.length === 0) {
+          setIsTableVisible(false);
+        }
+      }
 
       // Create filter params - only include cost range if user has modified it
       const filterParams: any = {
@@ -57,7 +144,6 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         sortOrder
       };
       
-      // Only apply cost range filter if the user has explicitly set it
       if (userModifiedCostRange) {
         filterParams.costRange = costRange;
       }
@@ -70,8 +156,11 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         filterParams
       );
       
-      setSupplierProductsData(result.data);
-      setTotalCount(result.count);
+      // Batch update the UI to prevent flickering
+      updateDisplayData(result.data, result.count, skipLoadingState);
+      
+      // Keep cached flag for UI indication, but update silently
+      setUsingCachedData(false);
     
       // If we haven't loaded filter stats yet, fetch them
       if (!hasInitializedFilters) {
@@ -82,8 +171,9 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
       console.error('Error loading supplier products:', error);
     } finally {
       setIsLoading(false);
+      setIsBackgroundRefreshing(false);
     }
-  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, userModifiedCostRange, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters]);
+  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, userModifiedCostRange, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters, updateDisplayData, supplierProductsData.length]);
   
   // Load filter statistics (match stats, cost range, match methods)
   const loadFilterStats = useCallback(async () => {
@@ -132,10 +222,33 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     }
   }, [supplierId, fetchSupplierProducts]);
 
-  // Load data when component mounts or when parameters change
+  // Improve loading behavior to prevent unnecessary re-renders
   useEffect(() => {
-    loadData();
-  }, [loadData]);
+    const loadDataWithParams = async () => {
+      // Skip the loading state if we have data and are just changing filters
+      const skipLoading = supplierProductsData.length > 0;
+      
+      // Clear any existing debounce timers
+      if (dataUpdateTimeoutRef.current) {
+        clearTimeout(dataUpdateTimeoutRef.current);
+      }
+      
+      // Debounce the load operation to prevent rapid updates
+      dataUpdateTimeoutRef.current = setTimeout(async () => {
+        await loadData(skipLoading);
+      }, 200); // Small delay to batch changes
+    };
+    
+    // Only trigger data load when relevant parameters change
+    loadDataWithParams();
+    
+    // Cleanup any pending updates when component unmounts or dependencies change
+    return () => {
+      if (dataUpdateTimeoutRef.current) {
+        clearTimeout(dataUpdateTimeoutRef.current);
+      }
+    };
+  }, [loadData, currentPage, itemsPerPage, filterOption, sortField, sortOrder, userModifiedCostRange && costRange, matchMethodFilter, searchTerm]);
 
   // Join with product data for additional information
   const productsWithDetails = useMemo(() => {
@@ -146,7 +259,9 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     return supplierProductsData.map(sp => {
       // For matched products, include product details and calculate profit metrics
       if (sp.product_id) {
-        const product = products.find(p => p.id === sp.product_id);
+        // Normalize IDs to strings for comparison to avoid type mismatches
+        const product = products.find(p => String(p.id) === String(sp.product_id));
+        
         if (product) {
           const profitPerUnit = product.salePrice - product.amazonFee - sp.cost;
           const profitMargin = (profitPerUnit / product.salePrice) * 100;
@@ -159,6 +274,22 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
             productMpn: product.mpn || sp.mpn || '-',
             profitPerUnit,
             profitMargin
+          };
+        }
+        
+        // If product_id exists but product not found in products array,
+        // treat it as matched anyway since it has a valid product_id
+        if (sp.match_method) {
+          // Create a minimal placeholder to indicate it's matched
+          return {
+            ...sp,
+            product: { id: sp.product_id }, // Minimal placeholder
+            isPlaceholderProduct: true, // Flag to indicate product details are missing
+            productName: sp.product_name || '-',
+            productEan: sp.ean || '-',
+            productMpn: sp.mpn || '-',
+            profitPerUnit: 0,
+            profitMargin: 0
           };
         }
       }
@@ -330,48 +461,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
     );
   };
   
-  // Show loading state
-  if (isLoading && productsWithDetails.length === 0) {
-    return (
-      <Card className="mb-4">
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h3 className="text-lg font-semibold">Supplier Products</h3>
-            <span className="text-sm text-gray-500">Loading data...</span>
-          </div>
-          <div className="flex items-center">
-            <div className="animate-spin mr-2 h-5 w-5 text-blue-600">
-              <RefreshCcw size={20} />
-            </div>
-          </div>
-        </div>
-        
-        <div className="animate-pulse space-y-3">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="flex justify-between items-center border-t py-3">
-              <div className="w-1/3">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-    );
-  }
-  
-  // Main render with progressive loading
+  // Main render with progressive loading and smooth transitions
   return (
     <Card className="mb-4">
       <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
@@ -409,6 +499,12 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         </div>
         
         <div className="flex items-center gap-2">
+          {usingCachedData && (
+            <div className="text-xs text-blue-700 px-2 py-1 bg-blue-50 border border-blue-100 rounded flex items-center">
+              <RefreshCcw size={12} className={`mr-1.5 ${isBackgroundRefreshing ? 'animate-spin' : ''}`} />
+              {isBackgroundRefreshing ? 'Refreshing...' : 'Using cached data'}
+            </div>
+          )}
           <form onSubmit={handleSearch} className="relative w-60">
             <input
               type="text"
@@ -542,189 +638,211 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId }) => {
         </div>
       )}
       
-      {/* Show table content */}
-      {isLoading && productsWithDetails.length === 0 ? (
-        <div className="animate-pulse space-y-3">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="flex justify-between items-center border-t py-3">
-              <div className="w-1/3">
-                <div className="h-5 bg-gray-200 rounded"></div>
+      {/* Improve the table rendering with fade transitions */}
+      <div 
+        style={{
+          ...transitionStyles.table, 
+          opacity: isTableVisible ? 1 : 0.6,
+          minHeight: '100px' // Prevent layout shifts
+        }}
+      >
+        {isLoading && productsWithDetails.length === 0 ? (
+          <div className="animate-pulse space-y-3">
+            {[...Array(3)].map((_, i) => (
+              <div key={i} className="flex justify-between items-center border-t py-3">
+                <div className="w-1/3">
+                  <div className="h-5 bg-gray-200 rounded"></div>
+                </div>
+                <div className="w-1/6">
+                  <div className="h-5 bg-gray-200 rounded"></div>
+                </div>
+                <div className="w-1/6">
+                  <div className="h-5 bg-gray-200 rounded"></div>
+                </div>
+                <div className="w-1/6">
+                  <div className="h-5 bg-gray-200 rounded"></div>
+                </div>
+                <div className="w-1/6">
+                  <div className="h-5 bg-gray-200 rounded"></div>
+                </div>
               </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
+            ))}
+          </div>
+        ) : productsWithDetails.length === 0 ? (
+          <EmptyState
+            message={`No ${filterOption} products found matching your criteria`}
+            suggestion={
+              getActiveFilterCount() > 0 
+                ? "Try adjusting your filters or search term"
+                : filterOption === 'matched' 
+                  ? "This supplier doesn't have any matched products. Try importing products or manually associating them."
+                  : filterOption === 'unmatched'
+                    ? "All products for this supplier have been matched."
+                    : "Add products through product import or manually associate products with this supplier."
+            }
+          />
+        ) : (
+          <>
+            {/* Background refresh indicator - keep it subtle */}
+            {isBackgroundRefreshing && (
+              <div className="bg-blue-50 border-blue-100 border text-blue-700 text-xs py-1 px-2 rounded mb-2 flex items-center" style={{opacity: 0.8}}>
+                <RefreshCcw size={12} className="animate-spin mr-1.5" />
+                Refreshing data...
               </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-              <div className="w-1/6">
-                <div className="h-5 bg-gray-200 rounded"></div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : productsWithDetails.length === 0 ? (
-        <EmptyState
-          message={`No ${filterOption} products found matching your criteria`}
-          suggestion={
-            getActiveFilterCount() > 0 
-              ? "Try adjusting your filters or search term"
-              : filterOption === 'matched' 
-                ? "This supplier doesn't have any matched products. Try importing products or manually associating them."
-                : filterOption === 'unmatched'
-                  ? "All products for this supplier have been matched."
-                  : "Add products through product import or manually associate products with this supplier."
-          }
-        />
-      ) : (
-        <>
-          <Table headers={tableHeaders}>
-            {productsWithDetails.map((item: any) => (
-              <React.Fragment key={item.id}>
-                <tr className={`border-t ${selectedUnmatchedProduct === item.id ? 'bg-blue-50' : ''} hover:bg-gray-50`}>
-                  <td className="px-4 py-3 font-medium">
-                    {item.productName}
-                  </td>
-                  <td className="px-4 py-3">{item.productEan || '-'}</td>
-                  <td className="px-4 py-3">{item.product?.mpn || item.mpn || '-'}</td>
-                  <td className="px-4 py-3">${item.cost.toFixed(2)}</td>
-                  <td className="px-4 py-3">
-                    <ProductMatchBadge matchMethod={item.match_method} />
-                  </td>
-                  
-                  {/* Display finance data for all products, with placeholders for unmatched */}
-                  <td className="px-4 py-3">
-                    {item.product ? `$${item.product.salePrice.toFixed(2)}` : '-'}
-                  </td>
-                  <td className={`px-4 py-3 ${item.product ? (item.profitPerUnit >= 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
-                    {item.product ? `$${item.profitPerUnit.toFixed(2)}` : '-'}
-                  </td>
-                  <td className={`px-4 py-3 ${item.product ? (item.profitMargin >= 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
-                    {item.product ? `${item.profitMargin.toFixed(1)}%` : '-'}
-                  </td>
-                  
-                  <td className="px-4 py-3">
-                    {item.product ? (
-                      <Button
-                        onClick={() => navigate(`/products/${item.product.id}`)}
-                        variant="secondary"
-                        className="flex items-center gap-2 text-sm py-1"
-                      >
-                        <Package size={14} />
-                        View Product
-                      </Button>
-                    ) : (
-                      <Button
-                        variant="secondary"
-                        className="flex items-center gap-2 text-sm py-1 bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100"
-                        onClick={() => handleViewUnmatchedProduct(item.id)}
-                      >
-                        <Info size={14} />
-                        {selectedUnmatchedProduct === item.id ? 'Hide Details' : 'View Details'}
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-                
-                {/* Details panel for unmatched products */}
-                {!item.product && selectedUnmatchedProduct === item.id && (
-                  <tr>
-                    <td colSpan={9} className="px-0 py-0 border-t border-blue-100">
-                      <div className="bg-gradient-to-b from-blue-50 to-white p-4 rounded-md shadow-inner">
-                        <div className="flex items-center justify-between mb-3">
-                          <h4 className="text-base font-semibold text-blue-900 flex items-center">
-                            <Info size={16} className="mr-2 text-blue-500" />
-                            Product Details
-                          </h4>
-                          <div className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs font-medium">
-                            Unmatched Product
-                          </div>
-                        </div>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                          <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100">
-                            <h5 className="font-medium text-blue-900 mb-1.5 pb-1.5 border-b border-blue-100 text-sm">Basic Info</h5>
-                            <div className="space-y-2">
-                              <div>
-                                <p className="text-xs text-gray-500 uppercase mb-0.5">Product Name</p>
-                                <p className="font-medium text-sm">{item.productName}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500 uppercase mb-0.5">EAN / Barcode</p>
-                                <p className="font-mono text-xs bg-gray-50 p-1 rounded">{item.ean || '-'}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500 uppercase mb-0.5">MPN</p>
-                                <p className="font-mono text-xs bg-gray-50 p-1 rounded">{item.mpn || '-'}</p>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100">
-                            <h5 className="font-medium text-blue-900 mb-1.5 pb-1.5 border-b border-blue-100 text-sm">Ordering Info</h5>
-                            <div className="space-y-2">
-                              <div>
-                                <p className="text-xs text-gray-500 uppercase mb-0.5">Cost</p>
-                                <p className="font-medium text-sm text-green-700">${item.cost.toFixed(2)}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500 uppercase mb-0.5">MOQ</p>
-                                <div className="flex items-center">
-                                  <span className="font-medium text-sm">{item.moq || '1'}</span>
-                                  <span className="text-xs text-gray-500 ml-1">units</span>
-                                </div>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500 uppercase mb-0.5">Lead Time</p>
-                                <p className="font-medium text-sm">{item.lead_time || '-'}</p>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100">
-                            <h5 className="font-medium text-blue-900 mb-1.5 pb-1.5 border-b border-blue-100 text-sm">Additional Info</h5>
-                            <div className="space-y-2">
-                              <div>
-                                <p className="text-xs text-gray-500 uppercase mb-0.5">Payment Terms</p>
-                                <p className="font-medium text-sm">{item.payment_terms || '-'}</p>
-                              </div>
-                              <div>
-                                <p className="text-xs text-gray-500 uppercase mb-0.5">Last Updated</p>
-                                <p className="font-medium text-sm">{new Date(item.updated_at || Date.now()).toLocaleDateString()}</p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        <div className="mt-3 pt-2 border-t border-blue-100 flex justify-between items-center">
-                          <p className="text-sm text-blue-700 flex items-center">
-                            <ExternalLink size={14} className="mr-1.5" />
-                            This product needs to be matched with a catalog product
-                          </p>
-                          
-                          <Button 
-                            variant="primary" 
-                            className="flex items-center gap-2 text-sm"
-                            // Functionality to be implemented
-                            onClick={() => alert('This functionality will be implemented soon')}
-                          >
-                            <Link size={14} /> Find Matches
-                          </Button>
-                        </div>
-                      </div>
+            )}
+            
+            <Table headers={tableHeaders}>
+              {productsWithDetails.map((item: any) => (
+                <React.Fragment key={item.id}>
+                  <tr className={`border-t ${selectedUnmatchedProduct === item.id ? 'bg-blue-50' : ''} hover:bg-gray-50`}>
+                    <td className="px-4 py-3 font-medium">
+                      {item.productName}
+                    </td>
+                    <td className="px-4 py-3">{item.productEan || '-'}</td>
+                    <td className="px-4 py-3">{item.product?.mpn || item.mpn || '-'}</td>
+                    <td className="px-4 py-3">${item.cost.toFixed(2)}</td>
+                    <td className="px-4 py-3">
+                      <ProductMatchBadge matchMethod={item.match_method} />
+                    </td>
+                    
+                    {/* Display finance data for all products, with placeholders for unmatched */}
+                    <td className="px-4 py-3">
+                      {item.product && !item.isPlaceholderProduct ? `$${item.product.salePrice.toFixed(2)}` : '-'}
+                    </td>
+                    <td className={`px-4 py-3 ${item.product && !item.isPlaceholderProduct ? (item.profitPerUnit >= 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
+                      {item.product && !item.isPlaceholderProduct ? `$${item.profitPerUnit.toFixed(2)}` : '-'}
+                    </td>
+                    <td className={`px-4 py-3 ${item.product && !item.isPlaceholderProduct ? (item.profitMargin >= 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
+                      {item.product && !item.isPlaceholderProduct ? `${item.profitMargin.toFixed(1)}%` : '-'}
+                    </td>
+                    
+                    <td className="px-4 py-3">
+                      {item.product ? (
+                        <Button
+                          onClick={() => navigate(`/products/${item.product.id}`, { 
+                            state: { 
+                              product: item.product,
+                              from: 'supplierDetail',
+                              supplierId: supplierId 
+                            } 
+                          })}
+                          variant="secondary"
+                          className="flex items-center gap-2 text-sm py-1"
+                        >
+                          <Package size={14} />
+                          View Product
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="secondary"
+                          className="flex items-center gap-2 text-sm py-1 bg-blue-50 text-blue-800 border-blue-200 hover:bg-blue-100"
+                          onClick={() => handleViewUnmatchedProduct(item.id)}
+                        >
+                          <Info size={14} />
+                          {selectedUnmatchedProduct === item.id ? 'Hide Details' : 'View Details'}
+                        </Button>
+                      )}
                     </td>
                   </tr>
-                )}
-              </React.Fragment>
-            ))}
-          </Table>
-          
-          {/* Pagination */}
-          {renderPagination()}
-        </>
-      )}
+                  
+                  {/* Only show details panel for truly unmatched products */}
+                  {!item.product && selectedUnmatchedProduct === item.id && (
+                    <tr>
+                      <td colSpan={9} className="px-0 py-0 border-t border-blue-100">
+                        <div className="bg-gradient-to-b from-blue-50 to-white p-4 rounded-md shadow-inner">
+                          <div className="flex items-center justify-between mb-3">
+                            <h4 className="text-base font-semibold text-blue-900 flex items-center">
+                              <Info size={16} className="mr-2 text-blue-500" />
+                              Product Details
+                            </h4>
+                            <div className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full text-xs font-medium">
+                              Unmatched Product
+                            </div>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100">
+                              <h5 className="font-medium text-blue-900 mb-1.5 pb-1.5 border-b border-blue-100 text-sm">Basic Info</h5>
+                              <div className="space-y-2">
+                                <div>
+                                  <p className="text-xs text-gray-500 uppercase mb-0.5">Product Name</p>
+                                  <p className="font-medium text-sm">{item.productName}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500 uppercase mb-0.5">EAN / Barcode</p>
+                                  <p className="font-mono text-xs bg-gray-50 p-1 rounded">{item.ean || '-'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500 uppercase mb-0.5">MPN</p>
+                                  <p className="font-mono text-xs bg-gray-50 p-1 rounded">{item.mpn || '-'}</p>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100">
+                              <h5 className="font-medium text-blue-900 mb-1.5 pb-1.5 border-b border-blue-100 text-sm">Ordering Info</h5>
+                              <div className="space-y-2">
+                                <div>
+                                  <p className="text-xs text-gray-500 uppercase mb-0.5">Cost</p>
+                                  <p className="font-medium text-sm text-green-700">${item.cost.toFixed(2)}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500 uppercase mb-0.5">MOQ</p>
+                                  <div className="flex items-center">
+                                    <span className="font-medium text-sm">{item.moq || '1'}</span>
+                                    <span className="text-xs text-gray-500 ml-1">units</span>
+                                  </div>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500 uppercase mb-0.5">Lead Time</p>
+                                  <p className="font-medium text-sm">{item.lead_time || '-'}</p>
+                                </div>
+                              </div>
+                            </div>
+                            
+                            <div className="bg-white p-3 rounded-lg shadow-sm border border-blue-100">
+                              <h5 className="font-medium text-blue-900 mb-1.5 pb-1.5 border-b border-blue-100 text-sm">Additional Info</h5>
+                              <div className="space-y-2">
+                                <div>
+                                  <p className="text-xs text-gray-500 uppercase mb-0.5">Payment Terms</p>
+                                  <p className="font-medium text-sm">{item.payment_terms || '-'}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500 uppercase mb-0.5">Last Updated</p>
+                                  <p className="font-medium text-sm">{new Date(item.updated_at || Date.now()).toLocaleDateString()}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          
+                          <div className="mt-3 pt-2 border-t border-blue-100 flex justify-between items-center">
+                            <p className="text-sm text-blue-700 flex items-center">
+                              <ExternalLink size={14} className="mr-1.5" />
+                              This product needs to be matched with a catalog product
+                            </p>
+                            
+                            <Button 
+                              variant="primary" 
+                              className="flex items-center gap-2 text-sm"
+                              // Functionality to be implemented
+                              onClick={() => alert('This functionality will be implemented soon')}
+                            >
+                              <Link size={14} /> Find Matches
+                            </Button>
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </Table>
+            
+            {/* Pagination */}
+            {renderPagination()}
+          </>
+        )}
+      </div>
     </Card>
   );
 };

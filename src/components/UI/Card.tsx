@@ -1,18 +1,20 @@
-import React, { ReactNode, forwardRef } from 'react';
+import React, { ReactNode } from 'react';
 
 interface CardProps {
   children: ReactNode;
   className?: string;
 }
 
-const Card = forwardRef<HTMLDivElement, CardProps>(({ children, className = '' }, ref) => {
+// Card component with smooth transitions to prevent flickering
+const Card: React.FC<CardProps> = ({ children, className = '' }) => {
+  const baseClasses = 'bg-white shadow-sm rounded-lg p-6 relative';
+  const transitionClasses = 'transition-all duration-300 ease-in-out';
+  
   return (
-    <div ref={ref} className={`bg-white rounded-lg shadow-md p-6 ${className}`}>
+    <div className={`${baseClasses} ${transitionClasses} ${className}`}>
       {children}
     </div>
   );
-});
-
-Card.displayName = 'Card';
+};
 
 export default Card;

@@ -112,6 +112,13 @@ interface AppContextType {
   getBrands: () => Promise<string[]>;
   getCategories: () => Promise<string[]>;
   getPriceRange: () => Promise<{min: number, max: number}>;
+  cacheSupplierById: (id: string) => Supplier | undefined;
+  supplierCache: Record<string, {
+    supplier: Supplier | undefined,
+    products: SupplierProduct[],
+    count: number,
+    timestamp: number
+  }>;
 }
 
 // Create context
@@ -255,6 +262,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     fetchAttributeValues();
   }, []);
 
+  // Add a supplier cache object at the top of the AppProvider component
+  const [supplierCache, setSupplierCache] = useState<Record<string, {
+    supplier: Supplier | undefined,
+    products: SupplierProduct[],
+    count: number,
+    timestamp: number
+  }>>({});
+
+  // Add a function to get or set supplier cache
+  const getOrSetSupplierCache = (supplierId: string) => {
+    const cachedData = supplierCache[supplierId];
+    
+    // If we have recent cache (less than 2 minutes old), use it
+    if (cachedData && (Date.now() - cachedData.timestamp) < 2 * 60 * 1000) {
+      return cachedData;
+    }
+    
+    return null;
+  };
+
+  // Update cache when we have new data
+  const updateSupplierCache = (supplierId: string, data: {
+    supplier?: Supplier,
+    products?: SupplierProduct[],
+    count?: number
+  }) => {
+    setSupplierCache(prev => ({
+      ...prev,
+      [supplierId]: {
+        supplier: data.supplier || prev[supplierId]?.supplier,
+        products: data.products || prev[supplierId]?.products || [],
+        count: data.count !== undefined ? data.count : (prev[supplierId]?.count || 0),
+        timestamp: Date.now()
+      }
+    }));
+  };
 
   // Add product method using the new hook
   const addProduct = async (product: Omit<Product, 'id'>) => {
@@ -684,7 +727,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Get product by ID
   const getProductById = (id: string) => {
-    return products.find(product => product.id === id);
+    const product = products.find(p => p.id === id);
+    return product;
   };
 
   // Get suppliers for a product
@@ -779,7 +823,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Add new function to fetch supplier products with pagination and filtering
+  // Modify fetchSupplierProducts to use cache
   const fetchSupplierProducts = async (
     supplierId: string,
     page: number = 1,
@@ -793,6 +837,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       sortOrder?: 'asc' | 'desc'
     } = {}
   ) => {
+    // Check if we're requesting the first page with default filters
+    const isDefaultRequest = page === 1 && pageSize === 10 && 
+      !filters.searchTerm && !filters.filterOption && 
+      !filters.costRange && !filters.matchMethodFilter && 
+      !filters.sortField;
+
+    // Try to get from cache for basic requests
+    if (isDefaultRequest) {
+      const cachedData = getOrSetSupplierCache(supplierId);
+      if (cachedData && cachedData.products.length > 0) {
+        console.log('Using cached supplier data');
+        return {
+          data: cachedData.products,
+          count: cachedData.count
+        };
+      }
+    }
+
     try {
       console.log(`Fetching supplier products for supplier ${supplierId}, page ${page}, size ${pageSize}`);
       
@@ -886,6 +948,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       
       console.log(`Fetched ${data?.length || 0} supplier products (total count: ${count})`);
       
+      // After fetching, update cache for default requests
+      if (isDefaultRequest) {
+        updateSupplierCache(supplierId, {
+          products: data, // Use the result data
+          count: count // Use the result count
+        });
+      }
+      
       return {
         data: data as SupplierProduct[] || [],
         count: count || 0
@@ -916,6 +986,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const getPriceRange = async () => {
     return getProductPriceRange();
+  };
+
+  // Add a helper function to cache supplier
+  const cacheSupplierById = (id: string) => {
+    const supplier = suppliers.find(s => s.id === id);
+    if (supplier) {
+      updateSupplierCache(id, { supplier });
+    }
+    return supplier;
   };
 
   return (
@@ -968,7 +1047,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         fetchSupplierProducts,
         getBrands,
         getCategories,
-        getPriceRange
+        getPriceRange,
+        cacheSupplierById,
+        supplierCache
       }}
     >
       {children}
