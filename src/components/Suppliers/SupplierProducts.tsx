@@ -21,7 +21,7 @@ type SortOrder = 'asc' | 'desc';
 
 const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initialCachedProducts }) => {
   const navigate = useNavigate();
-  const { products, fetchSupplierProducts, supplierCache, refreshData } = useAppContext();
+  const { products, fetchSupplierProducts, supplierCache, refreshData, suppliers } = useAppContext();
   const [filterOption, setFilterOption] = useState<FilterOption>('all');
   const [selectedUnmatchedProduct, setSelectedUnmatchedProduct] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -173,26 +173,13 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
         }
       }
 
-      // FIX: We need to invert the filter option
-      // The backend filter is getting inverted, so we need to fix it here
-      let correctedFilterOption = filterOption;
-      
-      // CRITICAL FIX: The backend is receiving the right parameter but returning the opposite
-      // We need to invert the filterOption to get the correct results
-      if (filterOption === 'matched') {
-        correctedFilterOption = 'unmatched'; // Invert to get matched products
-      } else if (filterOption === 'unmatched') {
-        correctedFilterOption = 'matched'; // Invert to get unmatched products
-      }
-      
       // Log which filter we're applying (for debugging)
-      console.log('Filter selected by user:', filterOption);
-      console.log('Actually passing to backend:', correctedFilterOption);
+      console.log('Filter selected by user (and passing to backend):', filterOption);
       
       // Create filter params - only include cost range if user has modified it
       const filterParams: any = {
         searchTerm,
-        filterOption: correctedFilterOption,
+        filterOption: filterOption,
         matchMethodFilter,
         sortField,
         sortOrder
@@ -260,11 +247,10 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
   const loadFilterStats = useCallback(async () => {
     try {
       // Fetch total count stats for matched/unmatched
-      // IMPORTANT: We need to invert the filter parameters here too!
       console.log('Fetching matched products stats...');
-      const matchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'unmatched' }); // Inverted!
+      const matchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'matched' });
       console.log('Fetching unmatched products stats...');
-      const unmatchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'matched' }); // Inverted!
+      const unmatchedResult = await fetchSupplierProducts(supplierId, 1, 1, { filterOption: 'unmatched' });
       console.log('Fetching total products stats...');
       const totalResult = await fetchSupplierProducts(supplierId, 1, 1);
       
@@ -367,82 +353,8 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
       return [];
     }
     
-    // First, verify if matched/unmatched data looks correct
-    // Here's where we need to fix the classification issue
-    const matchedCount = supplierProductsData.filter(sp => sp.product_id).length;
-    const unmatchedCount = supplierProductsData.filter(sp => !sp.product_id).length;
-    
-    // IMPORTANT: When checking if our filter worked correctly, we need to check based on what the UI expects,
-    // NOT what the API returns. This is the root of our confusion.
-    
-    console.log(`Processing ${supplierProductsData.length} supplier products:`, {
-      matchedCount,
-      unmatchedCount,
-      filterOption,
-      shouldBeMatched: filterOption === 'matched',
-      shouldBeUnmatched: filterOption === 'unmatched'
-    });
-    
-    // Create a transformed copy of the data to fix the filter display issue
-    let transformedData = [...supplierProductsData]; // Create a copy so we don't modify the original
-    
-    // Let's handle the data transformation here to fix the display issue
-    if (filterOption === 'matched' && unmatchedCount > 0 && matchedCount === 0) {
-      console.log('Transforming data for matched view');
-      // When we're in the "matched" view, we need to transform our unmatched data to look like matched data
-      transformedData = supplierProductsData.map(sp => ({
-        ...sp,
-        product_id: sp.product_id || 'temp-id-' + sp.id, // Add a fake product_id if missing
-        _originallyMatched: !!sp.product_id, // Keep track of original state
-        _transformedForDisplay: true // Mark as transformed
-      }));
-    } else if (filterOption === 'unmatched' && matchedCount > 0 && unmatchedCount === 0) {
-      console.log('Transforming data for unmatched view');
-      // When we're in the "unmatched" view, we need to transform our matched data to look like unmatched data
-      transformedData = supplierProductsData.map(sp => ({
-        ...sp,
-        _originalProductId: sp.product_id, // Store the original product_id
-        product_id: null, // Remove the product_id to make it look unmatched
-        _originallyMatched: !!sp.product_id, // Keep track of original state
-        _transformedForDisplay: true // Mark as transformed
-      }));
-    }
-    
     // Use the transformed data instead of the original data
-    return transformedData.map(sp => {
-      // Check if this is a transformed record for display purposes
-      const isTransformed = sp._transformedForDisplay;
-      
-      // Handle specially if this is a transformed record
-      if (isTransformed) {
-        if (filterOption === 'matched') {
-          // For transformed matched display (originally unmatched)
-          return {
-            ...sp,
-            product: { id: sp.product_id }, // Use the fake product_id we added
-            isPlaceholderProduct: true,
-            isTransformedForDisplay: true,
-            productName: sp.product_name || '-',
-            productEan: sp.ean || '-',
-            productMpn: sp.mpn || '-',
-            profitPerUnit: 0,
-            profitMargin: 0
-          };
-        } else if (filterOption === 'unmatched') {
-          // For transformed unmatched display (originally matched)
-          return {
-            ...sp,
-            product: null, // Remove product reference
-            isTransformedForDisplay: true,
-            productName: sp.product_name || '-',
-            productEan: sp.ean || '-',
-            productMpn: sp.mpn || '-',
-            profitPerUnit: 0,
-            profitMargin: 0
-          };
-        }
-      }
-      
+    return supplierProductsData.map(sp => {
       // Normal processing for non-transformed records
       // For matched products, include product details and calculate profit metrics
       if (sp.product_id) {
@@ -722,30 +634,28 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
             onClick={() => {
               // Only update if actually changing the filter
               if (filterOption !== 'all') {
-                // Keep UI responsive - pre-select the button immediately
-                setFilterOption('all');
-                setCurrentPage(1);
-                
-                // Use cached data if available for this filter
+                // Try to display from sessionStorage immediately
                 const cachedFilterKey = `filter_all_${supplierId}`;
-                const cachedData = sessionStorage.getItem(cachedFilterKey);
-                
-                if (cachedData) {
+                const cachedDataString = sessionStorage.getItem(cachedFilterKey);
+                if (cachedDataString) {
                   try {
-                    const { data, count } = JSON.parse(cachedData);
-                    // Use cached data immediately without fadeout/fadein
-                    updateDisplayData(data, count, true);
-                    
-                    // Still refresh in background for latest data
-                    setTimeout(() => loadData(true), 100);
+                    const { data, count } = JSON.parse(cachedDataString);
+                    updateDisplayData(data, count, true); // true to keep table visible
                   } catch (e) {
-                    // If cache parse fails, just load normally
-                    loadData(true);
+                    console.error("Failed to parse cached filter data for all", e);
+                    setSupplierProductsData([]);
+                    setTotalCount(0);
+                    setIsTableVisible(false); // Show loading state
                   }
                 } else {
-                  // No cache, load with priority on maintaining UI
-                  loadData(true);
+                  // No cache, ensure loading state is shown until useEffect loads data
+                  setSupplierProductsData([]);
+                  setTotalCount(0);
+                  setIsTableVisible(false); // Show loading state
                 }
+                // Set state to trigger useEffect, which will call loadData
+                setFilterOption('all');
+                setCurrentPage(1);
               }
             }}
           >
@@ -760,36 +670,30 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
               onClick={() => {
                 // Only update if actually changing the filter
                 if (filterOption !== 'matched') {
-                  // Keep UI responsive - pre-select the button immediately
+                  // Try to display from sessionStorage immediately
+                  const cachedFilterKey = `filter_matched_${supplierId}`;
+                  const cachedDataString = sessionStorage.getItem(cachedFilterKey);
+                  if (cachedDataString) {
+                    try {
+                      const { data, count } = JSON.parse(cachedDataString);
+                      updateDisplayData(data, count, true); // true to keep table visible
+                    } catch (e) {
+                      console.error("Failed to parse cached filter data for matched", e);
+                      setSupplierProductsData([]);
+                      setTotalCount(0);
+                      setIsTableVisible(false); // Show loading state
+                    }
+                  } else {
+                    // No cache, ensure loading state is shown until useEffect loads data
+                    setSupplierProductsData([]);
+                    setTotalCount(0);
+                    setIsTableVisible(false); // Show loading state
+                  }
+                  // Set state to trigger useEffect, which will call loadData
                   setFilterOption('matched');
                   setCurrentPage(1);
-                  
-                  // Clear any cached stats to ensure consistency
-                  setIsBackgroundRefreshing(true);
-                  
-                  // Use cached data if available for this filter
-                  // Note: We use 'unmatched' in the cache key because of the filter inversion
-                  const cachedFilterKey = `filter_unmatched_${supplierId}`;
-                  const cachedData = sessionStorage.getItem(cachedFilterKey);
-                
-                if (cachedData) {
-                  try {
-                    const { data, count } = JSON.parse(cachedData);
-                    // Use cached data immediately without fadeout/fadein
-                    updateDisplayData(data, count, true);
-                    
-                    // Still refresh in background for latest data
-                    setTimeout(() => loadData(true), 100);
-                  } catch (e) {
-                    // If cache parse fails, just load normally
-                    loadData(true);
-                  }
-                } else {
-                  // No cache, load with priority on maintaining UI
-                  loadData(true);
                 }
-              }
-            }}
+              }}
           >
             <span>Matched</span>
             <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center text-xs whitespace-nowrap">
@@ -802,36 +706,30 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
               onClick={() => {
                 // Only update if actually changing the filter
                 if (filterOption !== 'unmatched') {
-                  // Keep UI responsive - pre-select the button immediately
+                  // Try to display from sessionStorage immediately
+                  const cachedFilterKey = `filter_unmatched_${supplierId}`;
+                  const cachedDataString = sessionStorage.getItem(cachedFilterKey);
+                  if (cachedDataString) {
+                    try {
+                      const { data, count } = JSON.parse(cachedDataString);
+                      updateDisplayData(data, count, true); // true to keep table visible
+                    } catch (e) {
+                      console.error("Failed to parse cached filter data for unmatched", e);
+                      setSupplierProductsData([]);
+                      setTotalCount(0);
+                      setIsTableVisible(false); // Show loading state
+                    }
+                  } else {
+                    // No cache, ensure loading state is shown until useEffect loads data
+                    setSupplierProductsData([]);
+                    setTotalCount(0);
+                    setIsTableVisible(false); // Show loading state
+                  }
+                  // Set state to trigger useEffect, which will call loadData
                   setFilterOption('unmatched');
                   setCurrentPage(1);
-                  
-                  // Clear any cached stats to ensure consistency
-                  setIsBackgroundRefreshing(true);
-                  
-                  // Use cached data if available for this filter
-                  // Note: We use 'matched' in the cache key because of the filter inversion
-                  const cachedFilterKey = `filter_matched_${supplierId}`;
-                  const cachedData = sessionStorage.getItem(cachedFilterKey);
-                
-                if (cachedData) {
-                  try {
-                    const { data, count } = JSON.parse(cachedData);
-                    // Use cached data immediately without fadeout/fadein
-                    updateDisplayData(data, count, true);
-                    
-                    // Still refresh in background for latest data
-                    setTimeout(() => loadData(true), 100);
-                  } catch (e) {
-                    // If cache parse fails, just load normally
-                    loadData(true);
-                  }
-                } else {
-                  // No cache, load with priority on maintaining UI
-                  loadData(true);
                 }
-              }
-            }}
+              }}
           >
             <span>Unmatched</span>
             <span className="ml-1.5 bg-white text-blue-700 font-medium rounded-full min-w-[20px] h-5 px-1.5 flex items-center justify-center text-xs whitespace-nowrap">
@@ -1086,13 +984,15 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                           onClick={() => {
                             // Get product ID - this will always be valid for matched products
                             const productId = item.product.id;
+                            const currentSupplierObject = supplierCache[supplierId]?.supplier || suppliers.find(s => s.id === supplierId);
                             
                             // First navigate immediately to prevent click delays
                             navigate(`/products/${productId}`, {
                               state: {
                                 product: item.product,
+                                supplier: currentSupplierObject, // Pass the full supplier object if found
                                 from: 'supplierDetail',
-                                supplierId: supplierId
+                                supplierId: supplierId // Keep supplierId as a fallback
                               }
                             });
                             

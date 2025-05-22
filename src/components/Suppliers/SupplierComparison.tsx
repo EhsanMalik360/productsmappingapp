@@ -1,18 +1,17 @@
 import React from 'react';
-import { useAppContext } from '../../context/AppContext';
+import { useAppContext, SupplierProduct } from '../../context/AppContext';
 import Card from '../UI/Card';
 import ProductMatchBadge from '../UI/ProductMatchBadge';
 
 interface SupplierComparisonProps {
   productId: string;
+  linkedSuppliers: SupplierProduct[];
 }
 
-const SupplierComparison: React.FC<SupplierComparisonProps> = ({ productId }) => {
-  const { getSuppliersForProduct, suppliers } = useAppContext();
+const SupplierComparison: React.FC<SupplierComparisonProps> = ({ productId, linkedSuppliers }) => {
+  const { suppliers } = useAppContext();
   
-  const supplierProducts = getSuppliersForProduct(productId);
-  
-  if (supplierProducts.length === 0) {
+  if (!linkedSuppliers || linkedSuppliers.length === 0) {
     return (
       <Card>
         <h3 className="text-base font-semibold mb-2">Suppliers Comparison</h3>
@@ -24,7 +23,7 @@ const SupplierComparison: React.FC<SupplierComparisonProps> = ({ productId }) =>
   }
 
   // Sort suppliers by cost (cheapest first)
-  const sortedSuppliers = [...supplierProducts].sort((a, b) => a.cost - b.cost);
+  const sortedSuppliers = [...linkedSuppliers].sort((a, b) => a.cost - b.cost);
   const cheapestSupplierId = sortedSuppliers[0]?.supplier_id;
   
   return (

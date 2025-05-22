@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useMemo, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useMemo, useLayoutEffect, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { useAppContext } from '../../context/AppContext';
+import { useAppContext, Product, SupplierProduct } from '../../context/AppContext';
 import { useProfitFormula } from '../../context/ProfitFormulaContext';
 import { useAuth } from '../../context/AuthContext';
 import Card from '../../components/UI/Card';
@@ -46,7 +46,8 @@ const ProductDetail: React.FC = () => {
     getAttributeValue,
     customAttributes,
     updateProduct,
-    cacheSupplierById
+    cacheSupplierById,
+    fetchLinkedSuppliersForProduct
   } = useAppContext();
   
   // Use the shared profit formula context
@@ -77,102 +78,18 @@ const ProductDetail: React.FC = () => {
   const [chartSectionLoading, setChartSectionLoading] = useState(false);
   
   // Add a specific product loading state
-  const [isLoadingProduct, setIsLoadingProduct] = useState(false);
+  const [isLoadingProduct, setIsLoadingProduct] = useState(true);
   const [freshProductData, setFreshProductData] = useState<any>(null);
   
-  // Get product data with preference for passed data from navigation
-  // This ensures immediate display without waiting for getProductById
+  // Add state for directly fetched linked suppliers
+  const [linkedSuppliers, setLinkedSuppliers] = useState<SupplierProduct[]>([]);
+  const [isLoadingLinkedSuppliers, setIsLoadingLinkedSuppliers] = useState<boolean>(true);
+
+  // Get product data from context as a fallback or for initial render
   const contextProduct = getProductById(id!);
 
-  // If we came from supplier view and have incomplete data, try to enrich it immediately
-  const enrichedPassedProduct = useMemo(() => {
-    if (passedProduct && location.state?.from === 'supplierDetail') {
-      // Check if passed product is missing important data
-      if (passedProduct.salePrice === 0 || passedProduct.unitsSold === 0) {
-        console.log('Passed product data is incomplete, attempting to enrich');
-        // Try to get complete data from context if available
-        if (contextProduct && contextProduct.id === passedProduct.id) {
-          console.log('Enriching passed product with context data');
-          return {
-            ...passedProduct,
-            title: contextProduct.title || passedProduct.title,
-            ean: contextProduct.ean || passedProduct.ean,
-            brand: contextProduct.brand || passedProduct.brand,
-            mpn: contextProduct.mpn || passedProduct.mpn,
-            salePrice: contextProduct.salePrice || passedProduct.salePrice,
-            buyBoxPrice: contextProduct.buyBoxPrice || passedProduct.buyBoxPrice,
-            amazonFee: contextProduct.amazonFee || passedProduct.amazonFee,
-            unitsSold: contextProduct.unitsSold || passedProduct.unitsSold,
-            referralFee: contextProduct.referralFee || passedProduct.referralFee,
-            rating: contextProduct.rating || passedProduct.rating,
-            reviewCount: contextProduct.reviewCount || passedProduct.reviewCount
-          };
-        }
-      }
-    }
-    return passedProduct;
-  }, [passedProduct, contextProduct, location.state]);
-
-  // Add a more direct approach to load product data by ID
-  const loadProductData = async (productId: string) => {
-    if (!productId) return;
-    
-    try {
-      setIsLoadingProduct(true);
-      console.log('Explicitly loading product data for ID:', productId);
-      
-      // Execute a direct database query for this product
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('id', productId)
-        .single();
-        
-      if (error) throw error;
-      if (!data) {
-        console.error('No product data found for ID:', productId);
-        return;
-      }
-      
-      console.log('Successfully loaded fresh product data:', data);
-      
-      // Transform to our app format
-      const freshProduct = {
-        id: data.id,
-        title: data.title || 'Untitled Product',
-        ean: data.ean || '',
-        brand: data.brand || '',
-        salePrice: typeof data.sale_price === 'number' ? data.sale_price : 0,
-        unitsSold: typeof data.units_sold === 'number' ? data.units_sold : 0,
-        amazonFee: typeof data.amazon_fee === 'number' ? data.amazon_fee : 
-                  typeof data.fba_fees === 'number' ? data.fba_fees : 0,
-        referralFee: typeof data.referral_fee === 'number' ? data.referral_fee : 0,
-        buyBoxPrice: typeof data.buy_box_price === 'number' ? data.buy_box_price : 0,
-        category: data.category || null,
-        rating: typeof data.rating === 'number' ? data.rating : null,
-        reviewCount: typeof data.review_count === 'number' ? data.review_count : null,
-        mpn: data.mpn || null
-      };
-      
-      // Force a refresh of the UI with fresh data
-      setFreshProductData(freshProduct);
-      
-    } catch (err) {
-      console.error('Error loading product data:', err);
-    } finally {
-      setIsLoadingProduct(false);
-    }
-  };
-
-  // Call load on mount
-  useEffect(() => {
-    if (id) {
-      loadProductData(id);
-    }
-  }, [id]);
-
-  // Use the freshest data available
-  const actualProduct = freshProductData || enrichedPassedProduct || contextProduct;
+  // Use the freshest data available: 1. Direct fetch, 2. Enriched from nav, 3. Context
+  const actualProduct = freshProductData || passedProduct || contextProduct;
   
   // Initialize a default empty product if not yet loaded
   const emptyProduct = {
@@ -194,6 +111,110 @@ const ProductDetail: React.FC = () => {
   // Use a safe version of product that's never undefined
   const safeProduct = actualProduct || emptyProduct;
   
+  // console.log('ProductDetail Render: safeProduct.id:', safeProduct.id, 'isLoadingProduct:', isLoadingProduct, 'actualProduct source:', freshProductData ? 'fresh' : enrichedPassedProduct ? 'passed' : contextProduct ? 'context' : 'none');
+
+  const enrichedPassedProduct = useMemo(() => {
+    // Ensure dependencies are accessed safely, especially on initial render
+    const currentPassedProduct = location.state?.product;
+    const currentFreshProductData = freshProductData;
+    const currentContextProduct = contextProduct; // id should be stable here if this memo runs
+
+    const productToEnrich = currentFreshProductData || currentPassedProduct;
+    
+    if (productToEnrich && location.state?.from === 'supplierDetail') {
+      if (productToEnrich.salePrice === 0 || productToEnrich.unitsSold === 0) {
+        if (currentContextProduct && currentContextProduct.id === productToEnrich.id && 
+            (currentContextProduct.salePrice !== productToEnrich.salePrice || currentContextProduct.unitsSold !== productToEnrich.unitsSold)) {
+          return {
+            ...productToEnrich,
+            title: currentContextProduct.title || productToEnrich.title,
+            ean: currentContextProduct.ean || productToEnrich.ean,
+            brand: currentContextProduct.brand || productToEnrich.brand,
+            mpn: currentContextProduct.mpn || productToEnrich.mpn,
+            salePrice: currentContextProduct.salePrice !== 0 ? currentContextProduct.salePrice : productToEnrich.salePrice,
+            buyBoxPrice: currentContextProduct.buyBoxPrice !== 0 ? currentContextProduct.buyBoxPrice : productToEnrich.buyBoxPrice,
+            amazonFee: currentContextProduct.amazonFee !== 0 ? currentContextProduct.amazonFee : productToEnrich.amazonFee,
+            unitsSold: currentContextProduct.unitsSold !== 0 ? currentContextProduct.unitsSold : productToEnrich.unitsSold,
+            referralFee: currentContextProduct.referralFee !== 0 ? currentContextProduct.referralFee : productToEnrich.referralFee,
+            rating: currentContextProduct.rating || productToEnrich.rating,
+            reviewCount: currentContextProduct.reviewCount || productToEnrich.reviewCount
+          };
+        }
+      }
+    }
+    return currentFreshProductData || currentPassedProduct; 
+  }, [location.state, freshProductData, contextProduct]); // Dependencies kept simple
+
+  // Add a more direct approach to load product data by ID
+  const loadProductData = useCallback(async (productId: string) => { // Wrapped in useCallback
+    if (!productId) {
+      setIsLoadingProduct(false);
+      return;
+    }
+    
+    console.log('ProductDetail: Loading product data for ID:', productId);
+    setIsLoadingProduct(true); // Ensure loading state is true at start
+    
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', productId)
+        .single();
+        
+      if (error) throw error;
+      if (!data) {
+        console.error('ProductDetail: No product data found from direct fetch for ID:', productId);
+        setFreshProductData(null); // Explicitly set to null if not found
+        toast.error('Product not found.');
+        // Optionally navigate back or to a 404 page
+        // navigate('/products'); 
+        return;
+      }
+      
+      console.log('ProductDetail: Successfully loaded fresh product data:', data);
+      
+      const freshProduct = {
+        id: data.id,
+        title: data.title || 'Untitled Product',
+        ean: data.ean || '',
+        brand: data.brand || '',
+        salePrice: typeof data.sale_price === 'number' ? data.sale_price : 0,
+        unitsSold: typeof data.units_sold === 'number' ? data.units_sold : 0,
+        amazonFee: typeof data.amazon_fee === 'number' ? data.amazon_fee : 
+                  typeof data.fba_fees === 'number' ? data.fba_fees : 0,
+        referralFee: typeof data.referral_fee === 'number' ? data.referral_fee : 0,
+        buyBoxPrice: typeof data.buy_box_price === 'number' ? data.buy_box_price : 0,
+        category: data.category || null,
+        rating: typeof data.rating === 'number' ? data.rating : null,
+        reviewCount: typeof data.review_count === 'number' ? data.review_count : null,
+        mpn: data.mpn || null
+      };
+      
+      setFreshProductData(freshProduct);
+      
+    } catch (err) {
+      console.error('ProductDetail: Error loading product data directly:', err);
+      toast.error('Failed to load product details.');
+      setFreshProductData(null); // Set to null on error
+    } finally {
+      setIsLoadingProduct(false);
+    }
+  }, [navigate]); // Added navigate to dependencies
+
+  // Call load on mount
+  useEffect(() => {
+    if (id) {
+      loadProductData(id);
+    } else {
+      // No ID, maybe navigate away or show error
+      console.error("ProductDetail: No product ID provided.");
+      toast.error("No product specified.");
+      // navigate("/products");
+      setIsLoadingProduct(false);
+    }
+  }, [id, loadProductData]);
+
   // Use layout effect to ensure UI updates immediately with product data
   useLayoutEffect(() => {
     // Always set loading states to false immediately to prevent loaders from displaying
@@ -234,31 +255,69 @@ const ProductDetail: React.FC = () => {
     }
   }, [safeProduct, getBestSupplierForProduct]);
 
-  // Silent background refresh to update data without showing loading states
+  // Silent background refresh - simplified
   useEffect(() => {
-    // Always perform a background refresh when component mounts, regardless of how we navigated here
-      const silentRefresh = async () => {
+    const silentRefresh = async () => {
+      if (id && actualProduct && (actualProduct.salePrice === 0 || !actualProduct.mpn)) { // Simpler check
+        console.log('ProductDetail: Data for current product seems minimal (e.g. no sale price/MPN), performing background context refresh.');
         try {
-        // Add a small delay before refreshing to prevent overwhelming the browser with requests
-        await new Promise(resolve => setTimeout(resolve, 200));
-        
-        // If we have a product ID but the contextProduct is missing or incomplete
-        // (which can happen when navigating from supplier side), force a refresh
-        if (id && (!contextProduct || contextProduct.mpn !== passedProduct?.mpn)) {
-          console.log('Product data incomplete or mismatch detected - refreshing from API');
-          await refreshData();
-        } else if (passedProduct) {
-          // Even with passedProduct, do a refresh to ensure data consistency
-          await refreshData();
-        }
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Delay a bit
+          await refreshData(); // Refresh general app context data
         } catch (error) {
-          console.error('Error in background refresh:', error);
-        // Don't rethrow - allow the UI to continue with the data we have
+          console.error("ProductDetail: Error during silent background refresh:", error);
+        }
+      }
+    };
+    // Only run if we have an ID and some form of product data to evaluate
+    if (id && actualProduct) {
+      const refreshTimeout = setTimeout(silentRefresh, 2000); // Delay this overall refresh
+      return () => clearTimeout(refreshTimeout);
+    }
+  }, [id, actualProduct, refreshData]); // Dependency on actualProduct
+
+  // useEffect to fetch linked suppliers when product ID is available
+  useEffect(() => {
+    console.log('ProductDetail: linkedSuppliers effect triggered. safeProduct.id:', safeProduct.id, 'isLoadingProduct:', isLoadingProduct);
+    if (safeProduct.id && !isLoadingProduct) { // Ensure product is loaded before fetching its suppliers
+      const loadLinkedSuppliers = async () => {
+        console.log(`ProductDetail: Condition met (safeProduct.id && !isLoadingProduct). safeProduct.id is ${safeProduct.id}, attempting to fetch linked suppliers.`);
+        setIsLoadingLinkedSuppliers(true);
+        try {
+          const data = await fetchLinkedSuppliersForProduct(safeProduct.id);
+          setLinkedSuppliers(data);
+          console.log('ProductDetail: Fetched linked suppliers directly:', data);
+        } catch (error) {
+          console.error('ProductDetail: Error fetching linked suppliers:', error);
+          setLinkedSuppliers([]); // Set to empty array on error
+        } finally {
+          setIsLoadingLinkedSuppliers(false);
         }
       };
-      
-      silentRefresh();
-  }, [id, contextProduct, passedProduct, refreshData]);
+      loadLinkedSuppliers();
+    }
+  }, [safeProduct.id, fetchLinkedSuppliersForProduct, isLoadingProduct]); // Depend on safeProduct.id, the fetch function, and isLoadingProduct
+
+  // Add a useEffect to try and refresh context if product is loaded but suppliers are missing
+  // This useEffect might need to be re-evaluated or removed if direct fetch for linkedSuppliers is sufficient
+  useEffect(() => {
+    if (!isLoadingProduct && safeProduct.id && linkedSuppliers.length === 0 && !isLoadingLinkedSuppliers) {
+      // Check if a refresh is already in progress to avoid loops if refreshData itself doesn't immediately populate suppliers
+      if (!isRefreshing) { 
+        console.log(`ProductDetail: Product ${safeProduct.id} loaded, direct linkedSuppliers fetch resulted in 0. Current context refresh status: ${isRefreshing}. Consider if global refresh is needed.`);
+        // const forceRefreshSuppliers = async () => { // Potentially remove or adapt this section
+        //   try {
+        //     setIsRefreshing(true); // Indicate a refresh is happening
+        //     await refreshData();
+        //   } catch (error) {
+        //     console.error("ProductDetail: Error during explicit refresh for missing suppliers:", error);
+        //   } finally {
+        //     setIsRefreshing(false);
+        //   }
+        // };
+        // forceRefreshSuppliers();
+      }
+    }
+  }, [isLoadingProduct, safeProduct.id, linkedSuppliers, refreshData, isRefreshing, isLoadingLinkedSuppliers]); 
 
   // Add a check for the referrer in useEffect
   useEffect(() => {
@@ -275,31 +334,39 @@ const ProductDetail: React.FC = () => {
   const handleRefresh = async () => {
     try {
       setIsRefreshing(true);
-      await refreshData();
+      // Reload the direct product data
+      if (id) await loadProductData(id);
+      // Reload the linked suppliers for this product
+      if (safeProduct.id) {
+        const data = await fetchLinkedSuppliersForProduct(safeProduct.id);
+        setLinkedSuppliers(data);
+      }
+      // Optionally, trigger a global refresh if other parts of the app might need it
+      // await refreshData(); 
+      toast.success('Product data refreshed');
     } catch (error) {
-      console.error('Error refreshing data:', error);
+      console.error('Error refreshing product data:', error);
+      toast.error('Failed to refresh product data');
     } finally {
       setIsRefreshing(false);
     }
   };
 
   const calculateCustomProfit = () => {
-    if (isNaN(customSalePrice) || isNaN(customAmazonFee) || isNaN(customSupplierCost)) {
-      alert("Please enter valid numbers for all fields");
+    if (isNaN(customSalePrice) || isNaN(customAmazonFee) || isNaN(customSupplierCost) || isNaN(customReferralFee)) {
+      toast.error("Please enter valid numbers for all calculator fields");
       return;
     }
 
-    // Use the formula context to evaluate profit
     const values: Record<string, number> = {
-      salePrice: customSalePrice, // Keep for backwards compatibility 
+      salePrice: customSalePrice, 
       amazonFee: customAmazonFee,
       referralFee: customReferralFee,
       supplierCost: customSupplierCost,
-      buyBoxPrice: customSalePrice, // Use the same value for buyBoxPrice
+      buyBoxPrice: customSalePrice, 
       unitsSold: safeProduct?.unitsSold || 0
     };
     
-    // Add any custom attributes that might be used in the formula
     const customAttrs = getEntityAttributes(safeProduct?.id || '', 'product');
     customAttrs.forEach(({ attribute, value }) => {
       if (attribute.type === 'Number') {
@@ -308,12 +375,10 @@ const ProductDetail: React.FC = () => {
     });
     
     const profitPerUnit = evaluateFormula(values);
-    const monthlyProfit = safeProduct ? profitPerUnit * safeProduct.unitsSold : 0;
-    
-    // Updated margin calculation using Buy Box price
-    const buyBoxPrice = safeProduct?.buyBoxPrice || 0;
-    const margin = buyBoxPrice - customAmazonFee - customReferralFee - customSupplierCost;
-    const profitMargin = buyBoxPrice > 0 ? (margin / buyBoxPrice) * 100 : 0;
+    const monthlyProfit = safeProduct ? profitPerUnit * (safeProduct.unitsSold || 0) : 0;
+    const currentBuyBoxPrice = customSalePrice; // Use the custom sale price for margin calculation here
+    const margin = currentBuyBoxPrice - customAmazonFee - customReferralFee - customSupplierCost;
+    const profitMargin = currentBuyBoxPrice > 0 ? (margin / currentBuyBoxPrice) * 100 : 0;
     
     setCustomProfit({
       perUnit: profitPerUnit,
@@ -329,9 +394,10 @@ const ProductDetail: React.FC = () => {
     const parsedValue = parseFloat(value);
     setter(isNaN(parsedValue) ? 0 : parsedValue);
     
-    // Auto-calculate if enabled
     if (autoCalculate) {
-      setTimeout(() => calculateCustomProfit(), 100);
+      // Debounce or directly call calculateCustomProfit
+      // Using a timeout to allow state to update before calculation
+      setTimeout(() => calculateCustomProfit(), 0); 
     }
   };
 
@@ -341,18 +407,16 @@ const ProductDetail: React.FC = () => {
     }
   };
 
-  // Add a reset function for the calculator
   const resetCalculator = () => {
     if (safeProduct) {
-      setCustomSalePrice(safeProduct.buyBoxPrice);
+      setCustomSalePrice(safeProduct.buyBoxPrice); // Reset to product's buyBoxPrice
       setCustomAmazonFee(safeProduct.amazonFee);
       setCustomReferralFee(safeProduct.referralFee || 0);
       
-      const bestSupplier = getBestSupplierForProduct(safeProduct.id);
-      // Set default value of 0 if no supplier is available
-      setCustomSupplierCost(bestSupplier ? bestSupplier.cost : 0);
+      // Use the best supplier from the new linkedSuppliers logic
+      const localBestSupplier = bestSupplier; // Already calculated via useMemo
+      setCustomSupplierCost(localBestSupplier ? localBestSupplier.cost : 0);
       
-      // Reset results
       setCustomProfit({
         perUnit: 0,
         monthly: 0,
@@ -361,7 +425,6 @@ const ProductDetail: React.FC = () => {
     }
   };
 
-  // New function to handle input changes when editing
   const handleEditChange = (field: string, value: any) => {
     setEditedProduct((prev: any) => ({
       ...prev,
@@ -369,35 +432,38 @@ const ProductDetail: React.FC = () => {
     }));
   };
 
-  // New function to save changes
   const handleSave = async () => {
     if (!editedProduct) return;
     
     try {
       setIsSaving(true);
       
-      // Validate required fields
       if (!editedProduct.title || !editedProduct.ean || !editedProduct.brand) {
         toast.error('Title, EAN, and Brand are required fields');
+        setIsSaving(false);
         return;
       }
       
-      // Convert numeric string values to numbers
-      const updatedProduct = {
+      const productToSave = {
         ...editedProduct,
-        salePrice: parseFloat(editedProduct.salePrice),
-        buyBoxPrice: parseFloat(editedProduct.buyBoxPrice),
-        amazonFee: parseFloat(editedProduct.amazonFee),
-        unitsSold: parseInt(editedProduct.unitsSold, 10),
-        referralFee: parseFloat(editedProduct.referralFee)
+        salePrice: parseFloat(String(editedProduct.salePrice || 0)),
+        buyBoxPrice: parseFloat(String(editedProduct.buyBoxPrice || 0)),
+        amazonFee: parseFloat(String(editedProduct.amazonFee || 0)),
+        unitsSold: parseInt(String(editedProduct.unitsSold || 0), 10),
+        referralFee: parseFloat(String(editedProduct.referralFee || 0))
       };
       
-      // Update the product
-      await updateProduct(updatedProduct);
+      await updateProduct(productToSave as Product); // Ensure type compatibility
       
-      // Refresh data to get updated state
-      await refreshData();
-      
+      // Refresh local product data and linked suppliers after save
+      if (id) await loadProductData(id);
+      if (id) {
+          const data = await fetchLinkedSuppliersForProduct(id);
+          setLinkedSuppliers(data);
+      }
+      // Optionally call global refreshData if other parts of app need update
+      // await refreshData();
+
       toast.success('Product updated successfully');
       setIsEditing(false);
     } catch (error) {
@@ -425,61 +491,11 @@ const ProductDetail: React.FC = () => {
     }
     setIsEditing(false);
   };
+
+  // Sort suppliers by cost (lowest first) - now use linkedSuppliers
+  const sortedSuppliers = useMemo(() => [...linkedSuppliers].sort((a, b) => a.cost - b.cost), [linkedSuppliers]);
   
-  // Show loading indicator only when saving, not during initial loading
-  if (isSaving) {
-    return (
-      <div className="max-w-7xl mx-auto">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center">
-            <Button 
-              variant="secondary" 
-              className="mr-3"
-              onClick={() => navigate('/products')}
-            >
-              <ArrowLeft size={14} className="mr-1.5" /> Back
-            </Button>
-            <div className="h-6 bg-gray-200 rounded animate-pulse w-48"></div>
-          </div>
-          <div className="flex items-center gap-2 text-sm text-gray-500">
-            <div className="animate-spin h-4 w-4 text-blue-600 mr-1">
-              <RefreshCcw size={16} />
-            </div>
-            <span>Saving...</span>
-          </div>
-        </div>
-        
-        {/* Minimal saving indicator instead of full page loader */}
-        <div className="p-6 text-center">
-          <div className="animate-spin h-8 w-8 text-blue-600 mx-auto mb-4">
-            <RefreshCcw size={24} />
-          </div>
-          <p>Saving your changes...</p>
-        </div>
-      </div>
-    );
-  }
-  
-  // Skip product check during loading - this prevents flashing "Product Not Found" during initial load
-  if (!safeProduct && !loading) {
-    return (
-      <div className="text-center py-10">
-        <h2 className="text-2xl font-bold mb-4">Product Not Found</h2>
-        <p className="mb-6">The product you're looking for doesn't exist or has been removed.</p>
-        <Button onClick={() => navigate('/products')} className="flex items-center mx-auto">
-          <ArrowLeft size={16} className="mr-2" /> Back to Products
-        </Button>
-      </div>
-    );
-  }
-  
-  const suppliers = getSuppliersForProduct(safeProduct.id);
-  const bestSupplier = getBestSupplierForProduct(safeProduct.id);
-  
-  // Sort suppliers by cost (lowest first)
-  const sortedSuppliers = [...suppliers].sort((a, b) => a.cost - b.cost);
-  
-  // Prepare data for chart
+  // Prepare data for chart - now use sortedSuppliers
   const supplierNames = sortedSuppliers.map(s => s.suppliers?.name || 'Unknown');
   const supplierCosts = sortedSuppliers.map(s => s.cost);
   
@@ -530,8 +546,17 @@ const ProductDetail: React.FC = () => {
   const amazonFee = safeProduct.amazonFee;
   const referralFee = safeProduct.referralFee || 0; 
   const buyBoxPrice = safeProduct.buyBoxPrice;
-  const costBestSupplier = bestSupplier ? bestSupplier.cost : 0;
-  
+  // const costBestSupplier = bestSupplier ? bestSupplier.cost : 0; // REMOVED
+
+  // Recalculate bestSupplier based on linkedSuppliers
+  const bestSupplier = useMemo(() => {
+    if (sortedSuppliers.length === 0) return undefined;
+    // sortedSuppliers is already sorted by cost, so the first element is the best
+    return sortedSuppliers[0]; 
+  }, [sortedSuppliers]);
+
+  const costBestSupplier = bestSupplier ? bestSupplier.cost : 0; // Now uses the new bestSupplier
+
   // Create values object for formula evaluation
   const formulaValues: Record<string, number> = {
     salePrice: revenue,
@@ -579,6 +604,10 @@ const ProductDetail: React.FC = () => {
     }
   };
   
+  // Log dependencies just before returning JSX
+  console.log('ProductDetail Render: safeProduct.id:', safeProduct.id, 'isLoadingProduct:', isLoadingProduct, 'actualProduct source:', freshProductData ? 'fresh' : enrichedPassedProduct ? 'passed' : contextProduct ? 'context' : 'none');
+  console.log('ProductDetail Pre-Render State: safeProduct.id:', safeProduct.id, 'isLoadingProduct:', isLoadingProduct, 'isLoadingLinkedSuppliers:', isLoadingLinkedSuppliers, 'actualProduct source:', freshProductData ? 'fresh' : enrichedPassedProduct ? 'passed' : contextProduct ? 'context' : 'none', 'linkedSuppliers count:', linkedSuppliers.length);
+
   // Start rendering as soon as possible with progressive loading
   return (
     <div className="max-w-7xl mx-auto">
@@ -711,12 +740,12 @@ const ProductDetail: React.FC = () => {
                       <input
                         type="number"
                         step="0.01"
-                        value={editedProduct?.salePrice || 0}
-                        onChange={(e) => handleEditChange('salePrice', e.target.value)}
+                        value={editedProduct?.buyBoxPrice || 0}
+                        onChange={(e) => handleEditChange('buyBoxPrice', e.target.value)}
                         className="border p-1 rounded text-sm w-full"
                       />
                     ) : (
-                      <div className="text-base font-semibold">${safeProduct?.salePrice ? safeProduct.salePrice.toFixed(2) : '0.00'}</div>
+                      <div className="text-base font-semibold">${safeProduct?.buyBoxPrice ? safeProduct.buyBoxPrice.toFixed(2) : '0.00'}</div>
                     )}
                   </div>
                   {/* Continue with other product fields */}
@@ -786,7 +815,7 @@ const ProductDetail: React.FC = () => {
               <div className="h-40 bg-gray-200 rounded w-full"></div>
             </Card>
           ) : (
-            safeProduct && <SupplierComparison productId={safeProduct.id} />
+            safeProduct && <SupplierComparison productId={safeProduct.id} linkedSuppliers={linkedSuppliers} />
           )}
         </div>
       </div>
@@ -797,13 +826,13 @@ const ProductDetail: React.FC = () => {
         <div className="col-span-12 md:col-span-4">
           <Card>
             <h3 className="text-sm font-semibold mb-2">Cost Comparison</h3>
-            {chartSectionLoading ? (
+            {isLoadingLinkedSuppliers || chartSectionLoading ? (
               <div className="h-[180px] bg-gray-100 animate-pulse flex items-center justify-center">
                 <div className="animate-spin h-6 w-6 text-blue-600">
                   <RefreshCcw size={24} />
                 </div>
               </div>
-            ) : suppliers.length === 0 ? (
+            ) : linkedSuppliers.length === 0 ? (
               <div className="text-center py-6 text-gray-500 h-[180px] flex items-center justify-center bg-gray-50 rounded">
                 <span className="text-xs">No supplier data available to generate chart</span>
               </div>
@@ -858,9 +887,9 @@ const ProductDetail: React.FC = () => {
         
         {/* Supplier Info - 4 columns */}
         <div className="col-span-12 sm:col-span-4">
-          <Card className={`${suppliers.length > 0 ? "bg-green-50" : "bg-gray-100"} h-full`}>
+          <Card className={`${linkedSuppliers.length > 0 ? "bg-green-50" : "bg-gray-100"} h-full`}>
             <h3 className="text-sm font-semibold mb-2">Multi-Supplier Product</h3>
-            {chartSectionLoading ? (
+            {isLoadingLinkedSuppliers || chartSectionLoading ? (
               <div className="space-y-2 animate-pulse">
                 <div className="flex items-center mb-1.5">
                   <div className="h-4 w-4 bg-gray-200 rounded-full mr-1"></div>
@@ -875,11 +904,11 @@ const ProductDetail: React.FC = () => {
                   <div className="h-4 bg-gray-200 rounded w-40"></div>
                 </div>
               </div>
-            ) : suppliers.length > 0 ? (
+            ) : linkedSuppliers.length > 0 ? (
               <div className="text-xs">
                 <p className="flex items-center mb-1.5">
                   <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
-                  <span className="font-medium">{suppliers.length} supplier{suppliers.length !== 1 ? 's' : ''} available</span>
+                  <span className="font-medium">{linkedSuppliers.length} supplier{linkedSuppliers.length !== 1 ? 's' : ''} available</span>
                 </p>
                 {hasCostRange && (
                   <p className="flex items-center mb-1.5">
@@ -1187,7 +1216,7 @@ const ProductDetail: React.FC = () => {
                           placeholder="Supplier Cost" 
                           className="border p-1 rounded w-full text-xs" 
                         />
-                        {!getBestSupplierForProduct(safeProduct.id) && (
+                        {!bestSupplier && (
                           <div className="text-xs text-amber-600 mt-1">
                             No supplier available. Using 0 as default.
                           </div>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { useSuppliers } from '../hooks/useSupabase';
 import { useProducts } from '../hooks/useProducts';
 import { supabase } from '../lib/supabase';
@@ -82,6 +82,7 @@ interface AppContextType {
   getProductById: (id: string) => Product | undefined;
   getSuppliersForProduct: (productId: string) => SupplierProduct[];
   getBestSupplierForProduct: (productId: string) => SupplierProduct | undefined;
+  fetchLinkedSuppliersForProduct: (productId: string) => Promise<SupplierProduct[]>;
   refreshData: () => Promise<void>;
   fetchProducts: (
     page?: number, 
@@ -191,11 +192,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               id,
               name
             )
-          `);
+          `)
+          .limit(5000);
 
         if (error) throw error;
         
         // Just use the data as is and suppress TypeScript errors
+        console.log('AppContext: Initial fetch of supplier_products completed. Count:', (data || []).length);
+        if (data && data.length > 0) {
+          console.log('AppContext: Sample of initially fetched supplier_products (first 5 relevant to product c8130f79... if present, or just first 5):', 
+            (data as SupplierProduct[]).filter(sp => sp.product_id === 'c8130f79-57db-43a7-ba27-424c9d55b7c7').slice(0, 5).concat(
+              (data as SupplierProduct[]).slice(0, 5)
+            ).filter((item, index, self) => index === self.findIndex(t => t.id === item.id)).slice(0,5) // Deduplicate and take first 5 overall just in case
+            .map(sp => ({ id: sp.id, product_id: sp.product_id, supplier_id: sp.supplier_id, suppliers_name: sp.suppliers?.name }))
+          );
+        }
         setSupplierProducts((data || []) as SupplierProduct[]);
       } catch (err) {
         console.error('Error fetching supplier products:', err);
@@ -694,17 +705,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Get all attributes for an entity
-  const getEntityAttributes = (entityId: string, forType: 'product' | 'supplier') => {
-    const relevantAttributes = customAttributes.filter(attr => attr.forType === forType);
-    
-    return relevantAttributes.map(attribute => {
-      const value = getAttributeValue(attribute.id, entityId);
-      return {
+  const getEntityAttributes = useCallback((entityId: string, forType: 'product' | 'supplier') => {
+    return customAttributes
+      .filter(attr => attr.forType === forType)
+      .map(attribute => ({
         attribute,
-        value
-      };
-    });
-  };
+        value: getAttributeValue(attribute.id, entityId)
+      }));
+  }, [customAttributes, getAttributeValue]);
 
   // Get all required attributes for a type
   const getRequiredAttributes = (forType: 'product' | 'supplier') => {
@@ -727,27 +735,61 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Get product by ID
   const getProductById = (id: string) => {
-    const product = products.find(p => p.id === id);
-    return product;
+    return products.find(p => p.id === id);
   };
 
   // Get suppliers for a product
-  const getSuppliersForProduct = (productId: string) => {
-    return supplierProducts.filter(sp => sp.product_id === productId);
-  };
+  const getSuppliersForProduct = useCallback((productId: string) => {
+    console.log('AppContext: getSuppliersForProduct called for productId:', productId);
+    console.log('AppContext: Current global supplierProducts count:', supplierProducts.length);
+    // Log a few supplier_products to see their structure, especially product_id
+    if (supplierProducts.length > 0) {
+      console.log('AppContext: Sample supplierProducts entries (first 5):', supplierProducts.slice(0, 5).map(sp => ({ id: sp.id, product_id: sp.product_id, supplier_id: sp.supplier_id, suppliers_name: sp.suppliers?.name })) );
+    }
+    const filtered = supplierProducts.filter(sp => sp.product_id === productId);
+    console.log('AppContext: Filtered supplierProducts for this productId:', filtered);
+    return filtered;
+  }, [supplierProducts]);
 
   // Get best supplier for a product (lowest cost)
-  const getBestSupplierForProduct = (productId: string) => {
+  const getBestSupplierForProduct = useCallback((productId: string) => {
     const productSuppliers = getSuppliersForProduct(productId);
     if (productSuppliers.length === 0) return undefined;
     
     return productSuppliers.reduce((best, current) => {
       return (current.cost < best.cost) ? current : best;
     }, productSuppliers[0]);
-  };
+  }, [getSuppliersForProduct]);
+
+  const fetchLinkedSuppliersForProduct = useCallback(async (productId: string): Promise<SupplierProduct[]> => {
+    if (!productId) return [];
+    try {
+      console.log(`AppContext: Fetching linked suppliers directly for productID: ${productId}`);
+      const { data, error } = await supabase
+        .from('supplier_products')
+        .select(`
+          *,
+          suppliers (
+            id,
+            name
+          )
+        `)
+        .eq('product_id', productId);
+
+      if (error) {
+        console.error('Error fetching linked suppliers for product:', error);
+        throw error;
+      }
+      console.log(`AppContext: Successfully fetched ${data?.length || 0} linked suppliers for productID: ${productId}`);
+      return (data || []) as SupplierProduct[];
+    } catch (err) {
+      console.error('Error in fetchLinkedSuppliersForProduct:', err);
+      return []; // Return empty array on error
+    }
+  }, []);
 
   // Refresh all data
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     try {
       await getProducts(1, 10, {}, true);
       await refreshSuppliers();
@@ -773,7 +815,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             id,
             name
           )
-        `);
+        `)
+        .limit(5000);
 
       if (supplierProductsError) throw supplierProductsError;
       
@@ -813,15 +856,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       
       setCustomAttributes(formattedAttributes);
       
-      // We don't need to refresh attribute values from custom_attribute_values table anymore
-      // since we're storing them directly in their respective tables
-      // This just maintains the local state for UI consistency
-      setAttributeValues([]);
+      // Refresh attribute values
+      const { data: valuesData, error: valuesError } = await supabase
+        .from('custom_attribute_values')
+        .select('*');
+
+      if (valuesError) throw valuesError;
+      const formattedValues = (valuesData || []).map(val => ({
+        attributeId: val.attribute_id,
+        entityId: val.entity_id,
+        value: val.value
+      }));
+      setAttributeValues(formattedValues);
+
     } catch (err) {
       console.error('Error refreshing data:', err);
-      throw err;
+      throw err instanceof Error ? err : new Error('Failed to refresh data');
     }
-  };
+  }, [getProducts, refreshSuppliers]);
 
   // Modify fetchSupplierProducts to use cache
   const fetchSupplierProducts = async (
@@ -952,7 +1004,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (isDefaultRequest) {
         updateSupplierCache(supplierId, {
           products: data, // Use the result data
-          count: count // Use the result count
+          count: count ?? 0 // Use nullish coalescing to ensure count is a number
         });
       }
       
@@ -1048,6 +1100,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         getProductById,
         getSuppliersForProduct,
         getBestSupplierForProduct,
+        fetchLinkedSuppliersForProduct,
         refreshData,
         fetchProducts: async (
           page?: number,
@@ -1063,9 +1116,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         ): Promise<{ data: any[], count: number }> => {
           const result = await getProducts(page, pageSize, filters);
+          let finalCount: number;
+          if (result.count === null || result.count === undefined) {
+            finalCount = 0;
+          } else {
+            finalCount = result.count;
+          }
           return {
-                      data: result.data,
-          count: result.count ?? 0
+            data: result.data,
+            count: finalCount
           };
         },
         fetchSupplierProducts,
