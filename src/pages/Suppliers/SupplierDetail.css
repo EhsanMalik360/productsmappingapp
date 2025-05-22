@@ -8,30 +8,36 @@
   }
 }
 
+@keyframes slideIn {
+  from { transform: translateY(10px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
 @keyframes shimmer {
   0% {
-    background-position: -200% 0;
+    background-position: -1000px 0;
   }
   100% {
-    background-position: 200% 0;
+    background-position: 1000px 0;
   }
 }
 
 .animate-fadeIn {
-  animation: fadeIn 0.3s ease-out forwards;
+  animation: fadeIn 0.4s ease-in-out;
 }
 
-.animate-pulse {
-  animation: pulse 1.5s ease-in-out infinite;
+.animate-slideIn {
+  animation: slideIn 0.5s ease-out;
 }
 
 .skeleton-shimmer {
   background: linear-gradient(90deg, 
-                              rgba(226, 232, 240, 0.6) 25%, 
-                              rgba(237, 242, 247, 0.9) 50%, 
-                              rgba(226, 232, 240, 0.6) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s infinite;
+    rgba(229, 232, 235, 0.8) 25%, 
+    rgba(215, 219, 223, 0.6) 37%, 
+    rgba(229, 232, 235, 0.8) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.5s infinite linear;
 }
 
 /* Transition helpers */
@@ -52,11 +58,19 @@
   min-height: 200px;
   position: relative;
   overflow: hidden;
+  padding: 16px;
+  border-radius: 8px;
+  transition: all 0.3s ease;
 }
 
 .stat-card {
   min-height: 100px;
-  transition: all 0.3s ease-in-out;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
 
 .supplier-table {
@@ -67,6 +81,76 @@
 .supplier-table td {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.supplier-table tr {
+  transition: background-color 0.15s ease;
+}
+
+.supplier-table tr:hover {
+  background-color: rgba(243, 244, 246, 0.7);
+}
+
+/* Professional table transition system */
+.supplier-products-table {
+  /* Core optimizations */
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+  transform: translateZ(0);
+  perspective: 1000px;
+  /* Performance hints */
+  will-change: opacity, transform;
+  /* Content stability */
+  min-height: 400px;
+  position: relative;
+  /* GPU acceleration */
+  transition: all 0ms linear;
+}
+
+/* Subtle updating state */
+.supplier-products-table.updating {
+  opacity: 0.98;
+  animation: none;
+}
+
+/* Visual feedback for data changes */
+.supplier-products-table.data-updated {
+  animation: flash-highlight 300ms ease-out;
+}
+
+@keyframes flash-highlight {
+  0% { background-color: rgba(59, 130, 246, 0.03); }
+  50% { background-color: rgba(59, 130, 246, 0.06); }
+  100% { background-color: transparent; }
+}
+
+/* Eliminate table reflow */
+.supplier-products-table table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+/* Optimize row transitions */
+.supplier-products-table tr {
+  transform: translateZ(0);
+  transition: background-color 80ms linear;
+  will-change: background-color;
+}
+
+/* Prevent cell repaints */
+.supplier-products-table th,
+.supplier-products-table td {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  transition: all 0ms linear;
+}
+
+/* Optimize hover effects */
+.supplier-products-table tr:hover {
+  background-color: rgba(243, 244, 246, 0.7);
+  transition: background-color 60ms linear;
 }
 
 /* Grid layout and responsiveness improvements */
@@ -80,6 +164,7 @@
 /* Prevent content jumps */
 .content-wrapper {
   min-height: 400px;
+  transition: opacity 0.25s ease;
 }
 
 /* Card container styling */
@@ -87,6 +172,8 @@
   height: 100%;
   display: flex;
   flex-direction: column;
+  transition: all 0.3s ease;
+  transform-origin: center top;
 }
 
 .card-container.loading {
@@ -103,4 +190,58 @@
   background: rgba(255, 255, 255, 0.7);
   backdrop-filter: blur(2px);
   z-index: 1;
+}
+
+/* View product button */
+.view-product-btn {
+  position: relative;
+  overflow: hidden;
+  transition: all 0.2s ease;
+  transform: translateZ(0); /* Force hardware acceleration */
+  cursor: pointer;
+  will-change: transform; /* Optimize for animations */
+}
+
+.view-product-btn:active {
+  transform: scale(0.97); /* Give slight feedback on click */
+  transition: transform 0.1s ease;
+}
+
+.view-product-btn::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 5px;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.7);
+  opacity: 0;
+  border-radius: 100%;
+  transform: scale(1, 1) translate(-50%, -50%);
+  transform-origin: 50% 50%;
+  pointer-events: none; /* Ensure this doesn't interfere with clicks */
+  z-index: 1;
+}
+
+.view-product-btn:hover::after {
+  animation: ripple 0.6s ease-out;
+}
+
+.view-product-btn:active::after {
+  animation: ripple 0.4s ease-out;
+}
+
+@keyframes ripple {
+  0% {
+    transform: scale(0, 0) translate(-50%, -50%);
+    opacity: 1;
+  }
+  20% {
+    transform: scale(25, 25) translate(-50%, -50%);
+    opacity: 0.8;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(40, 40) translate(-50%, -50%);
+  }
 } 

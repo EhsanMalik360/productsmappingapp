@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef, useLayoutEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, RefreshCcw, Edit, Save, X, DollarSign, Package, TrendingUp, BarChart } from 'lucide-react';
 import { useAppContext } from '../../context/AppContext';
 import Card from '../../components/UI/Card';
@@ -7,11 +7,28 @@ import Button from '../../components/UI/Button';
 import SupplierModal from './SupplierModal';
 import SupplierProducts from '../../components/Suppliers/SupplierProducts';
 import toast from 'react-hot-toast';
+import { supabase } from '../../lib/supabase';
 import './SupplierDetail.css';
+
+// Add CSS for smooth transitions
+const styles = {
+  fadeIn: {
+    opacity: 1,
+    transition: 'opacity 0.3s ease-in-out'
+  },
+  fadeOut: {
+    opacity: 0.6,
+    transition: 'opacity 0.3s ease-in-out'
+  },
+  contentTransition: {
+    transition: 'all 0.25s ease-in-out'
+  }
+};
 
 const SupplierDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const { 
     suppliers, 
     supplierProducts, 
@@ -34,6 +51,10 @@ const SupplierDetail: React.FC = () => {
   const [totalProductCount, setTotalProductCount] = useState(0);
   const [hasAccurateCount, setHasAccurateCount] = useState(false);
   
+  // Add states for visual transitions
+  const [isContentVisible, setIsContentVisible] = useState(true);
+  const [prefetchedProducts, setPrefetchedProducts] = useState<any[]>([]);
+  
   // Edit mode states
   const [isEditing, setIsEditing] = useState(false);
   const [editedSupplier, setEditedSupplier] = useState<any>(null);
@@ -42,11 +63,72 @@ const SupplierDetail: React.FC = () => {
   // Refs for height measurement
   const overviewRef = useRef<HTMLDivElement>(null);
   const detailsRef = useRef<HTMLDivElement>(null);
+  const productsContainerRef = useRef<HTMLDivElement>(null);
   const [overviewHeight, setOverviewHeight] = useState<number>(200);
   const [detailsHeight, setDetailsHeight] = useState<number>(200);
+  const [productsHeight, setProductsHeight] = useState<number>(400);
 
   // Format ID properly
   const normalizedId = useMemo(() => id ? String(id) : '', [id]);
+
+  // Add direct database access for optimized loading
+  const loadSupplierDirectly = async (supplierId: string) => {
+    if (!supplierId) return null;
+    
+    try {
+      console.log('Loading supplier data directly from database');
+      const { data, error } = await supabase
+        .from('suppliers')
+        .select('*')
+        .eq('id', supplierId)
+        .single();
+        
+      if (error) throw error;
+      return data;
+    } catch (err) {
+      console.error('Error loading supplier directly:', err);
+      return null;
+    }
+  };
+  
+  // Pre-fetch supplier products to avoid flickering
+  const prefetchSupplierProducts = async (supplierId: string) => {
+    if (!supplierId) return;
+    
+    try {
+      console.log('Pre-fetching supplier products');
+      const { data, error } = await supabase
+        .from('supplier_products')
+        .select(`
+          id,
+          supplier_id,
+          product_id,
+          cost,
+          moq,
+          lead_time,
+          payment_terms,
+          ean,
+          match_method,
+          product_name,
+          mpn,
+          created_at,
+          updated_at,
+          suppliers (
+            id,
+            name
+          )
+        `)
+        .eq('supplier_id', supplierId)
+        .limit(50);
+        
+      if (error) throw error;
+      if (data) {
+        setPrefetchedProducts(data);
+      }
+    } catch (err) {
+      console.error('Error pre-fetching supplier products:', err);
+    }
+  };
 
   // Get supplier data
   const supplier = useMemo(() => 
@@ -54,13 +136,23 @@ const SupplierDetail: React.FC = () => {
     [suppliers, normalizedId]
   );
   
-  // Get supplier products
-  const supplierProductsList = useMemo(() => 
-    supplierProducts.filter(sp => sp.supplier_id === normalizedId), 
-    [supplierProducts, normalizedId]
-  );
+  // Get supplier products with improved caching
+  const supplierProductsList = useMemo(() => {
+    // First try to use pre-fetched products for instant display
+    if (prefetchedProducts.length > 0) {
+      return prefetchedProducts;
+    }
+    
+    // Then try cached products
+    if (supplierCache[normalizedId]?.products?.length > 0) {
+      return supplierCache[normalizedId].products;
+    }
+    
+    // Finally fall back to filtered products from context
+    return supplierProducts.filter(sp => sp.supplier_id === normalizedId);
+  }, [supplierProducts, normalizedId, prefetchedProducts, supplierCache]);
   
-  // Calculate statistics
+  // Calculate statistics with smooth transitions
   const stats = useMemo(() => {
     // Use client-side data for immediate display
     const clientCount = supplierProductsList.length;
@@ -127,13 +219,21 @@ const SupplierDetail: React.FC = () => {
     }
   }, [supplier, getEntityAttributes]);
   
-  // Fetch accurate product count
+  // Fetch accurate product count with visual transitions
   const fetchTotalProductCount = useCallback(async () => {
     if (!normalizedId) return;
+    
     try {
+      // Use the optimized fetch method with direct database access
       const result = await fetchSupplierProducts(normalizedId, 1, 1);
-      setTotalProductCount(result.count);
-      setHasAccurateCount(true);
+      
+      // Apply transition when updating the count
+      setIsContentVisible(false);
+      setTimeout(() => {
+        setTotalProductCount(result.count);
+        setHasAccurateCount(true);
+        setIsContentVisible(true);
+      }, 150);
     } catch (err) {
       console.error('Error fetching count:', err);
       setHasAccurateCount(true); // Show client-side data on error
@@ -143,14 +243,14 @@ const SupplierDetail: React.FC = () => {
   // Add a flag to track if we're coming back from product details
   const [isReturningFromProduct, setIsReturningFromProduct] = useState(false);
 
-  // Update the fetchInitialData function to use cache
+  // Update the fetchInitialData function with progressive loading
   const fetchInitialData = useCallback(async () => {
     if (!normalizedId || dataFetched) return;
     
     try {
       setIsRefreshing(true);
       
-      // Check if we're coming back from a product details page
+      // Stage 1: Check for cached data or returning from product details
       const cachedSupplierData = supplierCache[normalizedId];
       const isReturning = cachedSupplierData && 
         cachedSupplierData.supplier && 
@@ -159,31 +259,50 @@ const SupplierDetail: React.FC = () => {
       if (isReturning) {
         console.log('Using cached supplier data - returning from product details');
         setIsReturningFromProduct(true);
-        // We can use the cached data, no need for a full refresh
         setDataFetched(true);
         
-        // Still get accurate count in background without waiting
+        // Still pre-fetch to ensure fresh data without disrupting UI
+        prefetchSupplierProducts(normalizedId);
         fetchTotalProductCount();
         setIsRefreshing(false);
         return;
       }
       
-      // If not returning from product or no cache, proceed as normal
-      // Check if we already have the supplier
-      const existingSupplier = suppliers.find(s => s.id === normalizedId);
+      // Stage 2: Start with direct database query for immediate supplier data
+      const directSupplier = await loadSupplierDirectly(normalizedId);
       
-      if (!existingSupplier) {
-        await refreshData();
+      if (directSupplier) {
+        // Fade in transition for immediate data display
+        setIsContentVisible(false);
+        setTimeout(() => {
+          // Cache the direct supplier data
+          cacheSupplierById(normalizedId);
+          setDataFetched(true);
+          setIsContentVisible(true);
+        }, 150);
+        
+        // Stage 3: Start pre-fetching products data in parallel
+        prefetchSupplierProducts(normalizedId);
       } else {
-        // Cache the supplier for future use
-        cacheSupplierById(normalizedId);
+        // No direct data found, fall back to full refresh
+        const existingSupplier = suppliers.find(s => s.id === normalizedId);
+        
+        if (!existingSupplier) {
+          await refreshData();
+        } else {
+          // Cache the supplier for future use
+          cacheSupplierById(normalizedId);
+        }
       }
       
-      // Get accurate count in background
+      // Stage 4: Get accurate count in background regardless of data source
       fetchTotalProductCount();
       
       // Check if supplier exists
-      const supplierExists = suppliers.some(s => s.id === normalizedId) || !!existingSupplier;
+      const supplierExists = !!directSupplier || 
+        suppliers.some(s => s.id === normalizedId) || 
+        (cachedSupplierData && cachedSupplierData.supplier);
+        
       setSupplierNotFound(!supplierExists);
       
       if (!supplierExists) {
@@ -198,7 +317,7 @@ const SupplierDetail: React.FC = () => {
     } finally {
       setIsRefreshing(false);
     }
-  }, [normalizedId, suppliers, refreshData, fetchTotalProductCount, dataFetched, supplierCache, cacheSupplierById]);
+  }, [normalizedId, suppliers, refreshData, fetchTotalProductCount, dataFetched, supplierCache, cacheSupplierById, prefetchSupplierProducts, loadSupplierDirectly]);
 
   // Load data on mount
   useEffect(() => {
@@ -262,20 +381,57 @@ const SupplierDetail: React.FC = () => {
     setIsEditing(false);
   };
 
-  // Refresh data
+  // Refresh data with optimized transitions
   const handleRefresh = async () => {
     try {
+      // Start fade out transition
+      setIsContentVisible(false);
       setIsRefreshing(true);
       setHasAccurateCount(false);
-      await refreshData();
-      await fetchTotalProductCount();
+      
+      // Clear prefetched data to force reload
+      setPrefetchedProducts([]);
+      
+      // Small delay for visual transition
+      await new Promise(resolve => setTimeout(resolve, 150));
+      
+      // Perform refresh operations in parallel
+      await Promise.all([
+        refreshData(),
+        prefetchSupplierProducts(normalizedId),
+        fetchTotalProductCount()
+      ]);
+      
+      // Apply height measurement again after data reload
+      measureCardHeights();
+      
+      // Fade back in after data is loaded
+      setTimeout(() => {
+        setIsContentVisible(true);
+        setIsRefreshing(false);
+      }, 100);
     } catch (err) {
       console.error('Error refreshing:', err);
-    } finally {
       setIsRefreshing(false);
+      setIsContentVisible(true);
     }
   };
   
+  // Add a utility function to measure card heights to prevent layout shifts
+  const measureCardHeights = useCallback(() => {
+    if (overviewRef.current) {
+      setOverviewHeight(Math.max(overviewRef.current.offsetHeight, 200));
+    }
+    
+    if (detailsRef.current) {
+      setDetailsHeight(Math.max(detailsRef.current.offsetHeight, 200));
+    }
+    
+    if (productsContainerRef.current) {
+      setProductsHeight(Math.max(productsContainerRef.current.offsetHeight, 400));
+    }
+  }, []);
+
   // Modal control
   const closeModal = () => setIsModalOpen(false);
   
@@ -317,7 +473,10 @@ const SupplierDetail: React.FC = () => {
   return (
     <div className="p-6 content-wrapper">
       {/* Header Section */}
-      <div className="flex items-center justify-between mb-6 animate-fadeIn">
+      <div 
+        className="flex items-center justify-between mb-6 animate-fadeIn"
+        style={isContentVisible ? styles.fadeIn : styles.fadeOut}
+      >
         <div className="flex items-center">
           <Button 
             variant="secondary" 
@@ -342,48 +501,58 @@ const SupplierDetail: React.FC = () => {
           )}
         </div>
         
-        <div className="flex space-x-2">
-          {isRefreshing || isSaving ? (
-            <div className="flex items-center gap-2 text-sm text-gray-500 px-4 py-2 border rounded">
-              <RefreshCcw size={16} className="animate-spin" />
-              <span>
-                {isSaving ? "Saving..." : "Refreshing..."}
-              </span>
+        <div className="flex items-center space-x-2">
+          {isRefreshing ? (
+            <div className="flex items-center text-gray-500 text-sm">
+              <RefreshCcw size={16} className="mr-2 animate-spin" />
+              Refreshing...
             </div>
-          ) : isEditing ? (
-            <>
-              <Button 
-                variant="secondary" 
-                onClick={handleCancelEdit}
-                className="flex items-center transition-all"
-              >
-                <X size={16} className="mr-2" /> Cancel
-              </Button>
-              <Button 
-                onClick={handleSave}
-                className="flex items-center transition-all"
-              >
-                <Save size={16} className="mr-2" /> Save
-              </Button>
-            </>
           ) : (
             <>
-              <Button 
-                variant="secondary" 
-                onClick={() => setIsEditing(true)} 
-                className="flex items-center transition-all" 
-                disabled={showSkeleton}
-              >
-                <Edit size={16} className="mr-2" /> Edit
-              </Button>
-              <Button 
-                variant="secondary" 
-                onClick={handleRefresh}
-                className="flex items-center transition-all"
-                disabled={isRefreshing}
-              >
-                <RefreshCcw size={16} className="mr-2 transition-transform hover:rotate-180" /> Refresh
-              </Button>
+              {!isEditing && (
+                <Button 
+                  variant="secondary"
+                  onClick={() => setIsEditing(true)}
+                  className="flex items-center text-sm"
+                  disabled={isSaving}
+                >
+                  <Edit size={16} className="mr-2" />
+                  Edit
+                </Button>
+              )}
+              
+              {isEditing ? (
+                <>
+                  <Button 
+                    variant="secondary"
+                    onClick={handleCancelEdit}
+                    className="flex items-center text-sm"
+                    disabled={isSaving}
+                  >
+                    <X size={16} className="mr-2" />
+                    Cancel
+                  </Button>
+                  
+                  <Button 
+                    onClick={handleSave}
+                    className="flex items-center text-sm"
+                    disabled={isSaving}
+                  >
+                    <Save size={16} className="mr-2" />
+                    {isSaving ? 'Saving...' : 'Save'}
+                  </Button>
+                </>
+              ) : (
+                <Button 
+                  variant="secondary"
+                  onClick={handleRefresh}
+                  className="flex items-center text-sm"
+                  disabled={isRefreshing}
+                >
+                  <RefreshCcw size={16} className="mr-2" />
+                  Refresh
+                </Button>
+              )}
             </>
           )}
         </div>
@@ -666,19 +835,35 @@ const SupplierDetail: React.FC = () => {
       
       {/* Supplier Products Section */}
       {(supplier || (showSkeleton && dataFetched)) && (
-        supplier ? <SupplierProducts 
-          supplierId={supplier.id} 
-          initialCachedProducts={supplierCache[supplier.id]?.products || []} 
-        /> : (
-          <Card className="mb-6 card-skeleton">
-            <div className="h-7 bg-gray-200 rounded skeleton-shimmer w-40 mb-4"></div>
-            <div className="skeleton-shimmer space-y-4">
-            <div className="h-10 bg-gray-200 rounded"></div>
-            <div className="h-10 bg-gray-200 rounded"></div>
-            <div className="h-10 bg-gray-200 rounded"></div>
-          </div>
-        </Card>
-        )
+        <div 
+          ref={productsContainerRef} 
+          style={{ 
+            minHeight: productsHeight,
+            ...styles.contentTransition,
+            ...(isContentVisible ? styles.fadeIn : styles.fadeOut)
+          }}
+        >
+          {supplier ? (
+            <SupplierProducts 
+              supplierId={supplier.id} 
+              initialCachedProducts={
+                // Use the most complete data source available
+                prefetchedProducts.length > 0 
+                  ? prefetchedProducts 
+                  : supplierCache[supplier.id]?.products || []
+              } 
+            />
+          ) : (
+            <Card className="mb-6 card-skeleton">
+              <div className="h-7 bg-gray-200 rounded skeleton-shimmer w-40 mb-4"></div>
+              <div className="skeleton-shimmer space-y-4">
+                <div className="h-10 bg-gray-200 rounded"></div>
+                <div className="h-10 bg-gray-200 rounded"></div>
+                <div className="h-10 bg-gray-200 rounded"></div>
+              </div>
+            </Card>
+          )}
+        </div>
       )}
       
       {/* Edit Modal */}

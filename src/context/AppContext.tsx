@@ -992,7 +992,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const cacheSupplierById = (id: string) => {
     const supplier = suppliers.find(s => s.id === id);
     if (supplier) {
-      updateSupplierCache(id, { supplier });
+      // Get products for this supplier to ensure complete data
+      const supplierProductData = supplierProducts.filter(sp => sp.supplier_id === id);
+      
+      // Ensure we have full product information cached for each supplier product
+      // This helps when navigating to product details from supplier view
+      const supplierProductsWithData = supplierProductData.map(sp => {
+        if (sp.product_id) {
+          // Add full product data to the cache
+          const productData = products.find(p => p.id === sp.product_id);
+          if (productData) {
+            return {
+              ...sp,
+              product: productData // Include complete product data
+            };
+          }
+        }
+        return sp;
+      });
+      
+      // Update cache with supplier and its products
+      updateSupplierCache(id, { 
+        supplier,
+        products: supplierProductsWithData,
+        count: supplierProductsWithData.length || 0
+      });
     }
     return supplier;
   };

@@ -9,6 +9,7 @@ import { Bar } from 'react-chartjs-2';
 import { Check, ArrowLeft, RefreshCcw, Calculator, Edit2, Save, X } from 'lucide-react';
 import SupplierComparison from '../../components/Suppliers/SupplierComparison';
 import toast from 'react-hot-toast';
+import { supabase } from '../../lib/supabase';
 import { 
   Chart as ChartJS, 
   CategoryScale, 
@@ -75,10 +76,103 @@ const ProductDetail: React.FC = () => {
   const [profitSectionLoading, setProfitSectionLoading] = useState(false);
   const [chartSectionLoading, setChartSectionLoading] = useState(false);
   
+  // Add a specific product loading state
+  const [isLoadingProduct, setIsLoadingProduct] = useState(false);
+  const [freshProductData, setFreshProductData] = useState<any>(null);
+  
   // Get product data with preference for passed data from navigation
   // This ensures immediate display without waiting for getProductById
   const contextProduct = getProductById(id!);
-  const product = passedProduct || contextProduct;
+
+  // If we came from supplier view and have incomplete data, try to enrich it immediately
+  const enrichedPassedProduct = useMemo(() => {
+    if (passedProduct && location.state?.from === 'supplierDetail') {
+      // Check if passed product is missing important data
+      if (passedProduct.salePrice === 0 || passedProduct.unitsSold === 0) {
+        console.log('Passed product data is incomplete, attempting to enrich');
+        // Try to get complete data from context if available
+        if (contextProduct && contextProduct.id === passedProduct.id) {
+          console.log('Enriching passed product with context data');
+          return {
+            ...passedProduct,
+            title: contextProduct.title || passedProduct.title,
+            ean: contextProduct.ean || passedProduct.ean,
+            brand: contextProduct.brand || passedProduct.brand,
+            mpn: contextProduct.mpn || passedProduct.mpn,
+            salePrice: contextProduct.salePrice || passedProduct.salePrice,
+            buyBoxPrice: contextProduct.buyBoxPrice || passedProduct.buyBoxPrice,
+            amazonFee: contextProduct.amazonFee || passedProduct.amazonFee,
+            unitsSold: contextProduct.unitsSold || passedProduct.unitsSold,
+            referralFee: contextProduct.referralFee || passedProduct.referralFee,
+            rating: contextProduct.rating || passedProduct.rating,
+            reviewCount: contextProduct.reviewCount || passedProduct.reviewCount
+          };
+        }
+      }
+    }
+    return passedProduct;
+  }, [passedProduct, contextProduct, location.state]);
+
+  // Add a more direct approach to load product data by ID
+  const loadProductData = async (productId: string) => {
+    if (!productId) return;
+    
+    try {
+      setIsLoadingProduct(true);
+      console.log('Explicitly loading product data for ID:', productId);
+      
+      // Execute a direct database query for this product
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', productId)
+        .single();
+        
+      if (error) throw error;
+      if (!data) {
+        console.error('No product data found for ID:', productId);
+        return;
+      }
+      
+      console.log('Successfully loaded fresh product data:', data);
+      
+      // Transform to our app format
+      const freshProduct = {
+        id: data.id,
+        title: data.title || 'Untitled Product',
+        ean: data.ean || '',
+        brand: data.brand || '',
+        salePrice: typeof data.sale_price === 'number' ? data.sale_price : 0,
+        unitsSold: typeof data.units_sold === 'number' ? data.units_sold : 0,
+        amazonFee: typeof data.amazon_fee === 'number' ? data.amazon_fee : 
+                  typeof data.fba_fees === 'number' ? data.fba_fees : 0,
+        referralFee: typeof data.referral_fee === 'number' ? data.referral_fee : 0,
+        buyBoxPrice: typeof data.buy_box_price === 'number' ? data.buy_box_price : 0,
+        category: data.category || null,
+        rating: typeof data.rating === 'number' ? data.rating : null,
+        reviewCount: typeof data.review_count === 'number' ? data.review_count : null,
+        mpn: data.mpn || null
+      };
+      
+      // Force a refresh of the UI with fresh data
+      setFreshProductData(freshProduct);
+      
+    } catch (err) {
+      console.error('Error loading product data:', err);
+    } finally {
+      setIsLoadingProduct(false);
+    }
+  };
+
+  // Call load on mount
+  useEffect(() => {
+    if (id) {
+      loadProductData(id);
+    }
+  }, [id]);
+
+  // Use the freshest data available
+  const actualProduct = freshProductData || enrichedPassedProduct || contextProduct;
   
   // Initialize a default empty product if not yet loaded
   const emptyProduct = {
@@ -98,7 +192,7 @@ const ProductDetail: React.FC = () => {
   };
 
   // Use a safe version of product that's never undefined
-  const safeProduct = product || emptyProduct;
+  const safeProduct = actualProduct || emptyProduct;
   
   // Use layout effect to ensure UI updates immediately with product data
   useLayoutEffect(() => {
@@ -142,20 +236,29 @@ const ProductDetail: React.FC = () => {
 
   // Silent background refresh to update data without showing loading states
   useEffect(() => {
-    // Only perform background refresh if we came with passed product data
-    // This ensures we eventually get full data without disrupting the UI
-    if (passedProduct && id) {
+    // Always perform a background refresh when component mounts, regardless of how we navigated here
       const silentRefresh = async () => {
         try {
+        // Add a small delay before refreshing to prevent overwhelming the browser with requests
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        // If we have a product ID but the contextProduct is missing or incomplete
+        // (which can happen when navigating from supplier side), force a refresh
+        if (id && (!contextProduct || contextProduct.mpn !== passedProduct?.mpn)) {
+          console.log('Product data incomplete or mismatch detected - refreshing from API');
           await refreshData();
+        } else if (passedProduct) {
+          // Even with passedProduct, do a refresh to ensure data consistency
+          await refreshData();
+        }
         } catch (error) {
           console.error('Error in background refresh:', error);
+        // Don't rethrow - allow the UI to continue with the data we have
         }
       };
       
       silentRefresh();
-    }
-  }, [passedProduct, id, refreshData]);
+  }, [id, contextProduct, passedProduct, refreshData]);
 
   // Add a check for the referrer in useEffect
   useEffect(() => {
