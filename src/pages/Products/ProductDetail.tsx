@@ -826,21 +826,23 @@ const ProductDetail: React.FC = () => {
         <div className="col-span-12 md:col-span-4">
           <Card>
             <h3 className="text-sm font-semibold mb-2">Cost Comparison</h3>
-            {isLoadingLinkedSuppliers || chartSectionLoading ? (
-              <div className="h-[180px] bg-gray-100 animate-pulse flex items-center justify-center">
-                <div className="animate-spin h-6 w-6 text-blue-600">
-                  <RefreshCcw size={24} />
+            <div className="h-[180px] relative">
+              {isLoadingLinkedSuppliers || chartSectionLoading ? (
+                <div className="absolute inset-0 bg-gray-100 animate-pulse flex items-center justify-center opacity-90 transition-opacity duration-300">
+                  <div className="animate-spin h-6 w-6 text-blue-600">
+                    <RefreshCcw size={24} />
+                  </div>
                 </div>
-              </div>
-            ) : linkedSuppliers.length === 0 ? (
-              <div className="text-center py-6 text-gray-500 h-[180px] flex items-center justify-center bg-gray-50 rounded">
-                <span className="text-xs">No supplier data available to generate chart</span>
-              </div>
-            ) : (
-              <div className="h-[180px]">
-                <Bar data={chartData} options={chartOptions} />
-              </div>
-            )}
+              ) : linkedSuppliers.length === 0 ? (
+                <div className="absolute inset-0 text-center py-6 text-gray-500 flex items-center justify-center bg-gray-50 rounded transition-opacity duration-300">
+                  <span className="text-xs">No supplier data available to generate chart</span>
+                </div>
+              ) : (
+                <div className="absolute inset-0 transition-opacity duration-300">
+                  <Bar data={chartData} options={chartOptions} />
+                </div>
+              )}
+            </div>
           </Card>
         </div>
         
@@ -887,45 +889,49 @@ const ProductDetail: React.FC = () => {
         
         {/* Supplier Info - 4 columns */}
         <div className="col-span-12 sm:col-span-4">
-          <Card className={`${linkedSuppliers.length > 0 ? "bg-green-50" : "bg-gray-100"} h-full`}>
+          <Card className={`h-full transition-colors duration-300 ${linkedSuppliers.length > 0 ? 'bg-green-50' : 'bg-gray-50'}`}>
             <h3 className="text-sm font-semibold mb-2">Multi-Supplier Product</h3>
-            {isLoadingLinkedSuppliers || chartSectionLoading ? (
-              <div className="space-y-2 animate-pulse">
-                <div className="flex items-center mb-1.5">
-                  <div className="h-4 w-4 bg-gray-200 rounded-full mr-1"></div>
-                  <div className="h-4 bg-gray-200 rounded w-32"></div>
+            <div className="min-h-[100px] relative">
+              {isLoadingLinkedSuppliers || chartSectionLoading ? (
+                <div className="space-y-2 animate-pulse absolute inset-0 transition-opacity duration-300">
+                  <div className="flex items-center mb-1.5">
+                    <div className="h-4 w-4 bg-gray-200 rounded-full mr-1"></div>
+                    <div className="h-4 bg-gray-200 rounded w-32"></div>
+                  </div>
+                  <div className="flex items-center mb-1.5">
+                    <div className="h-4 w-4 bg-gray-200 rounded-full mr-1"></div>
+                    <div className="h-4 bg-gray-200 rounded w-48"></div>
+                  </div>
+                  <div className="flex items-center">
+                    <div className="h-4 w-4 bg-gray-200 rounded-full mr-1"></div>
+                    <div className="h-4 bg-gray-200 rounded w-40"></div>
+                  </div>
                 </div>
-                <div className="flex items-center mb-1.5">
-                  <div className="h-4 w-4 bg-gray-200 rounded-full mr-1"></div>
-                  <div className="h-4 bg-gray-200 rounded w-48"></div>
+              ) : (
+                <div className="text-xs transition-opacity duration-300">
+                  {linkedSuppliers.length > 0 ? (
+                    <>
+                      <p className="flex items-center mb-1.5">
+                        <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
+                        <span className="font-medium">{linkedSuppliers.length} supplier{linkedSuppliers.length !== 1 ? 's' : ''} available</span>
+                      </p>
+                      {hasCostRange && (
+                        <p className="flex items-center mb-1.5">
+                          <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
+                          <span><span className="font-medium">Cost range:</span> ${typeof minCost === 'number' ? minCost.toFixed(2) : '0.00'} - ${typeof maxCost === 'number' ? maxCost.toFixed(2) : '0.00'}</span>
+                        </p>
+                      )}
+                      <p className="flex items-center">
+                        <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
+                        <span><span className="font-medium">Best supplier:</span> {bestSupplier?.suppliers?.name || 'N/A'}</span>
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-gray-600">No suppliers available for this product.</p>
+                  )}
                 </div>
-                <div className="flex items-center">
-                  <div className="h-4 w-4 bg-gray-200 rounded-full mr-1"></div>
-                  <div className="h-4 bg-gray-200 rounded w-40"></div>
-                </div>
-              </div>
-            ) : linkedSuppliers.length > 0 ? (
-              <div className="text-xs">
-                <p className="flex items-center mb-1.5">
-                  <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
-                  <span className="font-medium">{linkedSuppliers.length} supplier{linkedSuppliers.length !== 1 ? 's' : ''} available</span>
-                </p>
-                {hasCostRange && (
-                  <p className="flex items-center mb-1.5">
-                    <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
-                    <span><span className="font-medium">Cost range:</span> ${typeof minCost === 'number' ? minCost.toFixed(2) : '0.00'} - ${typeof maxCost === 'number' ? maxCost.toFixed(2) : '0.00'}</span>
-                  </p>
-                )}
-                <p className="flex items-center">
-                  <Check size={14} className="text-green-600 mr-1 flex-shrink-0" />
-                  <span><span className="font-medium">Best supplier:</span> {bestSupplier?.suppliers?.name || 'N/A'}</span>
-                </p>
-              </div>
-            ) : (
-              <div className="text-xs text-gray-600">
-                <p>No suppliers available for this product.</p>
-              </div>
-            )}
+              )}
+            </div>
           </Card>
         </div>
       </div>

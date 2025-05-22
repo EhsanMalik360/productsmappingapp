@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { useSuppliers } from '../hooks/useSupabase';
 import { useProducts } from '../hooks/useProducts';
 import { supabase } from '../lib/supabase';
@@ -746,7 +746,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (supplierProducts.length > 0) {
       console.log('AppContext: Sample supplierProducts entries (first 5):', supplierProducts.slice(0, 5).map(sp => ({ id: sp.id, product_id: sp.product_id, supplier_id: sp.supplier_id, suppliers_name: sp.suppliers?.name })) );
     }
-    const filtered = supplierProducts.filter(sp => sp.product_id === productId);
+    
+    // Use normalized string comparison to avoid type and format issues
+    const filtered = supplierProducts.filter(sp => 
+      sp.product_id && String(sp.product_id).trim() === String(productId).trim()
+    );
+    
     console.log('AppContext: Filtered supplierProducts for this productId:', filtered);
     return filtered;
   }, [supplierProducts]);
@@ -761,32 +766,127 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }, productSuppliers[0]);
   }, [getSuppliersForProduct]);
 
+  // Implement a cache for supplier products by product ID to reduce database calls
+  const [supplierProductsCache, setSupplierProductsCache] = useState<Record<string, {
+    data: SupplierProduct[],
+    timestamp: number,
+    isLoading: boolean
+  }>>({});
+  
+  // Track ongoing supplier fetch promises to avoid duplicate requests
+  const pendingSupplierFetches = useRef<Record<string, Promise<SupplierProduct[]>>>({});
+  
   const fetchLinkedSuppliersForProduct = useCallback(async (productId: string): Promise<SupplierProduct[]> => {
     if (!productId) return [];
-    try {
-      console.log(`AppContext: Fetching linked suppliers directly for productID: ${productId}`);
-      const { data, error } = await supabase
-        .from('supplier_products')
-        .select(`
-          *,
-          suppliers (
-            id,
-            name
-          )
-        `)
-        .eq('product_id', productId);
-
-      if (error) {
-        console.error('Error fetching linked suppliers for product:', error);
-        throw error;
-      }
-      console.log(`AppContext: Successfully fetched ${data?.length || 0} linked suppliers for productID: ${productId}`);
-      return (data || []) as SupplierProduct[];
-    } catch (err) {
-      console.error('Error in fetchLinkedSuppliersForProduct:', err);
-      return []; // Return empty array on error
+    
+    // Check if there's an ongoing fetch for this product
+    const pendingFetch = pendingSupplierFetches.current[productId];
+    if (pendingFetch) {
+      return pendingFetch;
     }
-  }, []);
+    
+    // Check cache first - use cache if less than 5 minutes old
+    // This longer cache time reduces flickering between page navigations
+    const cachedData = supplierProductsCache[productId];
+    if (cachedData && !cachedData.isLoading && (Date.now() - cachedData.timestamp) < 300000) {
+      return cachedData.data;
+    }
+    
+    // If data is stale but we have it, mark it as loading but return immediately
+    // This prevents flickering by showing stale data while fetching new data
+    if (cachedData && cachedData.data.length > 0) {
+      setSupplierProductsCache(prev => ({
+        ...prev,
+        [productId]: {
+          ...prev[productId],
+          isLoading: true
+        }
+      }));
+    } else {
+      // If no data exists, create an entry showing it's loading
+      setSupplierProductsCache(prev => ({
+        ...prev,
+        [productId]: {
+          data: [],
+          timestamp: Date.now(),
+          isLoading: true
+        }
+      }));
+    }
+    
+    // Create a fetch promise that we can track
+    const fetchPromise = (async () => {
+      try {
+        console.log(`AppContext: Fetching linked suppliers directly for productID: ${productId}`);
+        const { data, error } = await supabase
+          .from('supplier_products')
+          .select(`
+            id,
+            supplier_id,
+            product_id,
+            cost,
+            moq,
+            lead_time,
+            payment_terms,
+            ean,
+            match_method,
+            product_name,
+            mpn,
+            suppliers (
+              id,
+              name
+            )
+          `)
+          .eq('product_id', productId);
+  
+        if (error) {
+          console.error('Error fetching linked suppliers for product:', error);
+          throw error;
+        }
+        
+        const result = (data || []) as SupplierProduct[];
+        console.log(`AppContext: Successfully fetched ${result.length} linked suppliers for productID: ${productId}`);
+        
+        // Update cache
+        setSupplierProductsCache(prev => ({
+          ...prev,
+          [productId]: {
+            data: result,
+            timestamp: Date.now(),
+            isLoading: false
+          }
+        }));
+        
+        // Remove from pending fetches
+        delete pendingSupplierFetches.current[productId];
+        
+        return result;
+      } catch (err) {
+        console.error('Error in fetchLinkedSuppliersForProduct:', err);
+        
+        // Mark as not loading on error
+        setSupplierProductsCache(prev => ({
+          ...prev,
+          [productId]: {
+            data: prev[productId]?.data || [],
+            timestamp: Date.now(),
+            isLoading: false
+          }
+        }));
+        
+        // Remove from pending fetches
+        delete pendingSupplierFetches.current[productId];
+        
+        return cachedData?.data || []; // Return cached data on error if available
+      }
+    })();
+    
+    // Store the promise so we can reuse it for duplicate requests
+    pendingSupplierFetches.current[productId] = fetchPromise;
+    
+    // Return the cached data immediately if available, otherwise wait for fetch
+    return cachedData?.data || fetchPromise;
+  }, [supplierProductsCache]);
 
   // Refresh all data
   const refreshData = useCallback(async () => {

@@ -5,13 +5,14 @@ import Button from '../../components/UI/Button';
 import ProductRow from '../../components/Products/ProductRow';
 import { Search, Filter, ChevronLeft, ChevronRight, RefreshCcw, X, ArrowDownAZ, ArrowDownUp, Briefcase, DollarSign, Loader2 } from 'lucide-react';
 import { useProducts, ProductFilters } from '../../hooks/useProducts';
+import { useAppContext } from '../../context/AppContext';
 
 type SortField = 'price' | 'units' | 'profit' | 'brand' | '';
 type SortOrder = 'asc' | 'desc';
 
 // Enhanced skeleton loader for product rows that looks more like real data
 const ProductRowSkeleton = () => (
-  <tr className="border-b animate-pulse transition-opacity duration-500 ease-in-out">
+  <tr className="border-b animate-pulse transition-all duration-500 ease-in-out">
     <td className="px-4 py-3">
       <div className="flex flex-col">
         <div className="h-5 bg-gray-200 rounded w-full mb-1 transition-all duration-500"></div>
@@ -24,15 +25,17 @@ const ProductRowSkeleton = () => (
     <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-700"></div></td>
     <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-600"></div></td>
     <td className="px-4 py-3">
-      <div className="flex flex-col space-y-1">
-        <div className="supplier-badge bg-gray-200 h-6 w-16 rounded-full transition-all duration-500"></div>
-        <div className="bg-gray-100 h-5 w-20 rounded-full transition-all duration-700"></div>
+      <div className="flex flex-col space-y-1 min-h-[44px]">
+        <div className="supplier-badge bg-gray-200 h-6 w-[90px] rounded-full transition-all duration-500"></div>
+        <div className="bg-gray-100 h-5 w-[40px] rounded transition-all duration-700"></div>
       </div>
     </td>
-    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-800"></div></td>
-    <td className="px-4 py-3">
-      <div className="font-medium h-5 bg-gray-200 rounded w-1/3 mb-1 transition-all duration-500"></div>
-      <div className="h-2 bg-gradient-to-r from-gray-300 via-gray-200 to-gray-300 rounded opacity-60 transition-all duration-700"></div>
+    <td className="px-4 py-3 min-w-[80px]"><div className="h-5 bg-gray-200 rounded w-[60px] transition-all duration-800"></div></td>
+    <td className="px-4 py-3 min-w-[100px]">
+      <div className="font-medium h-5 bg-gray-200 rounded w-[40px] mb-1 transition-all duration-500"></div>
+      <div className="h-2 bg-gradient-to-r from-gray-300 via-gray-200 to-gray-300 rounded opacity-60 transition-all duration-700">
+        <div className="profit-marker w-2.5 h-2.5 bg-gray-400 rounded-full relative -top-[3px] ml-[30%]"></div>
+      </div>
     </td>
     <td className="px-4 py-3">
       <div className="flex items-center">
@@ -44,6 +47,9 @@ const ProductRowSkeleton = () => (
 );
 
 const Products: React.FC = () => {
+  // Get AppContext and products hook
+  const { refreshData, fetchLinkedSuppliersForProduct } = useAppContext();
+  
   // Use our products hook
   const {
     products,
@@ -133,6 +139,9 @@ const Products: React.FC = () => {
       
       // First get products - this might come from cache initially
       await getProducts(1, itemsPerPage, getActiveFilters(), false);
+      
+      // Also refresh supplier products data to ensure we have the latest
+      await refreshData();
       
       // Then wait for metadata
       const [brandsData, categoriesData, priceRangeData] = await metadataPromise;
@@ -225,6 +234,9 @@ const Products: React.FC = () => {
       // Force refetch current page
       await getProducts(currentPage, itemsPerPage, getActiveFilters(), true);
       
+      // Also refresh supplier products to ensure they're up to date
+      await refreshData();
+      
       setLastRefreshed(new Date());
     } catch (error) {
       console.error('Error refreshing data:', error);
@@ -271,13 +283,17 @@ const Products: React.FC = () => {
         <ProductRow 
           key={product.id} 
           product={product} 
-          className="transition-opacity duration-500 ease-in-out opacity-100"
+          className="transition-all duration-500 ease-in-out"
         />
       ));
     }
     
+    // Use more skeletons for initial load to make the table look more substantial
+    // and to prevent layout shifts when real data loads
+    const skeletonCount = isInitialDataLoaded ? itemsPerPage : Math.max(10, itemsPerPage);
+    
     // Fallback to skeletons only when necessary
-    return Array(itemsPerPage).fill(0).map((_, index) => (
+    return Array(skeletonCount).fill(0).map((_, index) => (
       <ProductRowSkeleton key={index} />
     ));
   };
@@ -293,6 +309,51 @@ const Products: React.FC = () => {
       setTableHeight(Math.max(tableRef.current.clientHeight, 400)); // At least 400px
     }
   }, [tableRef.current, tableHeight]);
+
+  // Add a function to preload suppliers for all products on the current page
+  const preloadSuppliersForCurrentProducts = useCallback(async () => {
+    if (!products || products.length === 0) return;
+    
+    try {
+      console.log(`Preloading suppliers for ${products.length} products on current page`);
+      
+      // To reduce flickering, we'll create a small delay after products load
+      // before attempting to load all supplier data
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Using Promise.all but with a small concurrency limit to prevent UI jank
+      const batchSize = 5; // Process in batches of 5 for smoother UI
+      
+      // Create batches of products
+      const batches = [];
+      for (let i = 0; i < products.length; i += batchSize) {
+        batches.push(products.slice(i, i + batchSize));
+      }
+      
+      // Process each batch sequentially to reduce load on UI thread
+      for (const batch of batches) {
+        await Promise.all(batch.map(product => 
+          fetchLinkedSuppliersForProduct(product.id)
+        ));
+        // Small pause between batches to allow UI to breathe
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      
+      console.log('Completed preloading suppliers for current page');
+    } catch (error) {
+      console.error('Error preloading suppliers:', error);
+    }
+  }, [products, fetchLinkedSuppliersForProduct]);
+  
+  // Use effect to trigger supplier preloading when products change
+  useEffect(() => {
+    if (products.length > 0) {
+      // Use requestAnimationFrame to ensure UI updates first
+      requestAnimationFrame(() => {
+        preloadSuppliersForCurrentProducts();
+      });
+    }
+  }, [products, preloadSuppliersForCurrentProducts]);
 
   return (
     <div className="container mx-auto px-4 py-6">
@@ -515,11 +576,13 @@ const Products: React.FC = () => {
         </div>
 
         {/* Table container with guaranteed height */}
+        {/* Table container with guaranteed height and stability */}
         <div 
           ref={tableRef} 
           className="overflow-x-auto relative"
           style={{ 
-            minHeight: tableHeight ? `${tableHeight}px` : '400px'
+            minHeight: tableHeight ? `${tableHeight}px` : '600px', // Larger minimum height for better stability
+            transition: 'min-height 300ms ease-in-out' // Smooth transition for any height changes
           }}
         >
           <Table
@@ -534,6 +597,18 @@ const Products: React.FC = () => {
               'Best Cost', 
               'Profit Margin',
               'Actions'
+            ]}
+            columnWidths={[
+              '25%', // Product - larger for product names
+              '10%', // EAN
+              '10%', // Brand
+              '8%',  // Buy Box Price
+              '8%',  // Units Sold
+              '8%',  // FBA Fee
+              '10%', // Suppliers
+              '6%',  // Best Cost
+              '8%',  // Profit Margin
+              '7%'   // Actions
             ]}
           >
             {renderProductRows()}
