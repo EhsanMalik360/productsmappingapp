@@ -6,6 +6,7 @@ import Table from '../../components/UI/Table';
 import Button from '../../components/UI/Button';
 import Card from '../../components/UI/Card';
 import SupplierModal from './SupplierModal';
+import { supabase } from '../../lib/supabase';
 
 // Add CSS for animations
 import './Suppliers.css';
@@ -13,10 +14,10 @@ import './Suppliers.css';
 interface SupplierStats {
   productCount: number;
   avgCost: number;
-  bestValueCount: number;
+  matchedCount: number;
 }
 
-type SortField = 'name' | 'products' | 'cost' | 'bestValue' | '';
+type SortField = 'name' | 'products' | 'cost' | 'matched' | '';
 type SortOrder = 'asc' | 'desc';
 
 // Add skeleton loader for supplier rows
@@ -62,6 +63,7 @@ const Suppliers: React.FC = () => {
   // No longer need a loading state for counts - they update silently
   // const [loadingCounts, setLoadingCounts] = useState(false);
   const [supplierProductCounts, setSupplierProductCounts] = useState<{[key: string]: number}>({});
+  const [supplierProductsData, setSupplierProductsData] = useState<{[key: string]: any[]}>({});
   const [hasInitialData, setHasInitialData] = useState(false);
   const [hasAccurateCounts, setHasAccurateCounts] = useState(false);
   
@@ -79,60 +81,146 @@ const Suppliers: React.FC = () => {
     return supplierProducts.filter(sp => sp.supplier_id === supplierId).length;
   }, [supplierProducts, supplierProductCounts]);
   
-  // Fetch accurate product counts from the server for all suppliers
-  const fetchAccurateProductCounts = useCallback(async () => {
+  // Get supplier products data for accurate calculations
+  const getSupplierProductsData = useCallback((supplierId: string): any => {
+    // If we have fetched accurate statistics, use them
+    if (supplierProductsData[supplierId]) {
+      return supplierProductsData[supplierId];
+    }
+    // Otherwise fallback to client-side data
+    const clientProducts = supplierProducts.filter(sp => sp.supplier_id === supplierId);
+    return {
+      totalCount: clientProducts.length,
+      matchedCount: clientProducts.filter(sp => sp.product_id).length,
+      avgCost: clientProducts.length > 0 
+        ? clientProducts.reduce((sum, sp) => sum + (sp.cost || 0), 0) / clientProducts.length
+        : 0
+    };
+  }, [supplierProducts, supplierProductsData]);
+  
+  // Fetch accurate statistics from the server for all suppliers using optimized aggregation queries
+  const fetchAccurateSupplierData = useCallback(async () => {
     if (suppliers.length === 0) return;
     
     try {
-      // Create a batch request for all suppliers to get their counts at once
-      const fetchPromises = suppliers.map(supplier => 
-        fetchSupplierProducts(supplier.id, 1, 1)
-          .then(result => ({ id: supplier.id, count: result.count }))
-          .catch(error => {
-            console.error(`Error fetching count for supplier ${supplier.id}:`, error);
-            // Return the client-side count as fallback
-            return { 
-              id: supplier.id, 
-              count: supplierProducts.filter(sp => sp.supplier_id === supplier.id).length 
-            };
-          })
-      );
+      // Create a batch request for all suppliers to get their statistics using efficient aggregation
+      const fetchPromises = suppliers.map(async (supplier) => {
+        try {
+          console.log(`Fetching stats for supplier ${supplier.id}`);
+          
+          // Get total count
+          const { count: totalCount, error: countError } = await supabase
+            .from('supplier_products')
+            .select('*', { count: 'exact', head: true })
+            .eq('supplier_id', supplier.id);
+            
+          if (countError) throw countError;
+          
+          // Get matched count
+          const { count: matchedCount, error: matchedError } = await supabase
+            .from('supplier_products')
+            .select('*', { count: 'exact', head: true })
+            .eq('supplier_id', supplier.id)
+            .not('product_id', 'is', null);
+            
+          if (matchedError) throw matchedError;
+          
+          // Get average cost using a more efficient query
+          const { data: avgData, error: avgError } = await supabase
+            .from('supplier_products')
+            .select('cost')
+            .eq('supplier_id', supplier.id);
+            
+          if (avgError) throw avgError;
+          
+          const avgCost = avgData && avgData.length > 0 
+            ? avgData.reduce((sum, item) => sum + (item.cost || 0), 0) / avgData.length
+            : 0;
+          
+          return {
+            id: supplier.id,
+            totalCount: totalCount || 0,
+            matchedCount: matchedCount || 0,
+            avgCost: avgCost
+          };
+          
+        } catch (error) {
+          console.error(`Error fetching stats for supplier ${supplier.id}:`, error);
+          // Return the client-side data as fallback
+          const clientProducts = supplierProducts.filter(sp => sp.supplier_id === supplier.id);
+          const clientMatched = clientProducts.filter(sp => sp.product_id).length;
+          const clientAvgCost = clientProducts.length > 0 
+            ? clientProducts.reduce((sum, sp) => sum + (sp.cost || 0), 0) / clientProducts.length
+            : 0;
+            
+          return { 
+            id: supplier.id, 
+            totalCount: clientProducts.length,
+            matchedCount: clientMatched,
+            avgCost: clientAvgCost
+          };
+        }
+      });
       
       // Wait for all fetches to complete
       const results = await Promise.all(fetchPromises);
       
-      // Update all counts at once in a single state update for better performance
-      const newCounts = results.reduce((counts, item) => {
-        counts[item.id] = item.count;
-        return counts;
-      }, {} as {[key: string]: number});
+      // Update statistics
+      const newCounts: {[key: string]: number} = {};
+      const newProductsData: {[key: string]: any} = {};
+      
+      results.forEach(result => {
+        newCounts[result.id] = result.totalCount;
+        // Store the statistics instead of all product data
+        newProductsData[result.id] = {
+          totalCount: result.totalCount,
+          matchedCount: result.matchedCount,
+          avgCost: result.avgCost
+        };
+        console.log(`Supplier ${result.id}: ${result.totalCount} total, ${result.matchedCount} matched, $${result.avgCost.toFixed(2)} avg cost`);
+      });
       
       setSupplierProductCounts(prev => ({...prev, ...newCounts}));
-      // Indicate that we now have accurate counts
+      setSupplierProductsData(prev => ({...prev, ...newProductsData}));
+      // Indicate that we now have accurate data
       setHasAccurateCounts(true);
     } catch (error) {
-      console.error('Error fetching product counts:', error);
+      console.error('Error fetching supplier statistics:', error);
       // Even on error, mark as loaded to show client-side data
       setHasAccurateCounts(true);
     }
-  }, [suppliers, fetchSupplierProducts, supplierProducts]);
+  }, [suppliers, supplierProducts]);
   
-  // Pre-populate all counts client-side as soon as data is available
+  // Pre-populate all data client-side as soon as data is available
   useEffect(() => {
     if (suppliers.length > 0) {
-      // Immediately calculate and show all counts from client data
-      const initialCounts = suppliers.reduce((counts, supplier) => {
-        counts[supplier.id] = supplierProducts.filter(sp => sp.supplier_id === supplier.id).length;
-        return counts;
-      }, {} as {[key: string]: number});
+      // Immediately calculate and show all statistics from client data
+      const initialCounts: {[key: string]: number} = {};
+      const initialProductsData: {[key: string]: any} = {};
       
-      // Set all counts at once in a single update
+      suppliers.forEach(supplier => {
+        const clientProducts = supplierProducts.filter(sp => sp.supplier_id === supplier.id);
+        const matchedCount = clientProducts.filter(sp => sp.product_id).length;
+        const avgCost = clientProducts.length > 0 
+          ? clientProducts.reduce((sum, sp) => sum + (sp.cost || 0), 0) / clientProducts.length
+          : 0;
+          
+        initialCounts[supplier.id] = clientProducts.length;
+        initialProductsData[supplier.id] = {
+          totalCount: clientProducts.length,
+          matchedCount: matchedCount,
+          avgCost: avgCost
+        };
+      });
+      
+      // Set all data at once in a single update
       setSupplierProductCounts(initialCounts);
+      setSupplierProductsData(initialProductsData);
       
-      // Then fetch accurate counts in the background without affecting display
-      fetchAccurateProductCounts();
+      // Then fetch accurate data in the background without affecting display
+      fetchAccurateSupplierData();
     }
-  }, [suppliers, supplierProducts, fetchAccurateProductCounts]);
+  }, [suppliers, supplierProducts, fetchAccurateSupplierData]);
   
   // Get product count range for all suppliers - using accurate counts
   const productCountStats = useMemo(() => {
@@ -156,7 +244,7 @@ const Suppliers: React.FC = () => {
       setHasAccurateCounts(false);
       await refreshData();
       // After data is refreshed, update the counts
-      await fetchAccurateProductCounts();
+      await fetchAccurateSupplierData();
     } catch (error) {
       console.error('Error refreshing data:', error);
     } finally {
@@ -213,59 +301,49 @@ const Suppliers: React.FC = () => {
     return {
       productCount: getProductCount(supplierId),
       avgCost: calculateAverageCost(supplierId),
-      bestValueCount: calculateBestValueCount(supplierId)
+      matchedCount: calculateMatchedCount(supplierId)
     };
   };
   
-  // Calculate average cost for a supplier's products
+  // Calculate average cost for a supplier's products - using pre-calculated statistics
   const calculateAverageCost = (supplierId: string): number => {
-    const supplierProductsList = supplierProducts.filter(sp => 
-      sp.supplier_id === supplierId
-    );
+    const stats = getSupplierProductsData(supplierId);
     
+    // If we have pre-calculated stats, use them
+    if (typeof stats.avgCost === 'number') {
+      return stats.avgCost;
+    }
+    
+    // Otherwise fall back to client-side calculation
+    const supplierProductsList = supplierProducts.filter(sp => sp.supplier_id === supplierId);
     if (supplierProductsList.length === 0) return 0;
     
-    const totalCost = supplierProductsList.reduce((sum, sp) => sum + sp.cost, 0);
+    const totalCost = supplierProductsList.reduce((sum, sp) => sum + (sp.cost || 0), 0);
     return totalCost / supplierProductsList.length;
   };
   
-  // Calculate how many times this supplier offers the best value (lowest cost)
-  const calculateBestValueCount = (supplierId: string): number => {
-    let bestValueCount = 0;
+  // Calculate how many products are matched - using pre-calculated statistics
+  const calculateMatchedCount = (supplierId: string): number => {
+    const stats = getSupplierProductsData(supplierId);
     
-    // Group supplier products by product_id to compare costs
-    const productGroups = new Map<string, typeof supplierProducts>();
+    // If we have pre-calculated stats, use them
+    if (typeof stats.matchedCount === 'number') {
+      return stats.matchedCount;
+    }
     
-    supplierProducts.forEach(sp => {
-      if (sp.product_id) {  // Only include products with valid product_id
-        if (!productGroups.has(sp.product_id)) {
-          productGroups.set(sp.product_id, []);
-        }
-        const group = productGroups.get(sp.product_id);
-        if (group) {
-          group.push(sp);
-        }
-      }
-    });
-    
-    // Count products where this supplier has the lowest cost
-    productGroups.forEach((group) => {
-      if (group.length > 0) {
-        const lowestCostSupplier = group.reduce((lowest, current) => 
-          current.cost < lowest.cost ? current : lowest
-        );
-        
-        if (lowestCostSupplier.supplier_id === supplierId) {
-          bestValueCount++;
-        }
-      }
-    });
-    
-    return bestValueCount;
+    // Otherwise fall back to client-side calculation
+    return supplierProducts.filter(sp => sp.supplier_id === supplierId && sp.product_id).length;
   };
 
-  // Check if supplier has matched products
+  // Check if supplier has matched products - using accurate data
   const hasMatches = (supplierId: string): boolean => {
+    // Use accurate matched count if available
+    const stats = getSupplierProductsData(supplierId);
+    if (typeof stats.matchedCount === 'number') {
+      return stats.matchedCount > 0;
+    }
+    
+    // Fallback to client-side data
     return supplierProducts.some(sp => 
       sp.supplier_id === supplierId && sp.product_id !== null
     );
@@ -294,7 +372,7 @@ const Suppliers: React.FC = () => {
       
       return matchesSearch && matchesProductCount && matchesHasMatched;
     });
-  }, [suppliers, searchTerm, productCountFilter, hasMatchedProducts, supplierProducts, getSupplierStats, hasInitialData]);
+  }, [suppliers, searchTerm, productCountFilter, hasMatchedProducts, hasInitialData, hasAccurateCounts, supplierProductsData, getSupplierStats, hasMatches]);
 
   // Apply sorting
   const sortedSuppliers = useMemo(() => {
@@ -315,8 +393,8 @@ const Suppliers: React.FC = () => {
         case 'cost':
           comparison = statsA.avgCost - statsB.avgCost;
           break;
-        case 'bestValue':
-          comparison = statsA.bestValueCount - statsB.bestValueCount;
+        case 'matched':
+          comparison = statsA.matchedCount - statsB.matchedCount;
           break;
         default:
           break;
@@ -429,7 +507,7 @@ const Suppliers: React.FC = () => {
             <td className="px-4 py-4">
               {hasAccurateCounts ? (
                 <span className="transition-all duration-500 ease-in-out opacity-100">
-                  {stats.bestValueCount}
+                  {stats.matchedCount}
                 </span>
               ) : (
                 <div className="inline-block w-10 h-5 bg-gray-100 animate-pulse rounded transition-all duration-500 ease-in-out"></div>
@@ -701,13 +779,13 @@ const Suppliers: React.FC = () => {
                     {sortField === 'cost' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                   </Button>
                   <Button 
-                    variant={sortField === 'bestValue' ? 'primary' : 'secondary'} 
+                    variant={sortField === 'matched' ? 'primary' : 'secondary'} 
                     className="flex items-center text-xs px-2 py-1"
-                    onClick={() => handleSort('bestValue')}
+                    onClick={() => handleSort('matched')}
                   >
                     <ShoppingCart className="w-3 h-3 mr-1" /> 
-                    Best Value
-                    {sortField === 'bestValue' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                    Matched Products
+                    {sortField === 'matched' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                   </Button>
                   
                   {getActiveFilterCount() > 0 && (
@@ -739,7 +817,7 @@ const Suppliers: React.FC = () => {
           {/* Only render table if we have data or should show skeletons */}
           {(!hasInitialData || filteredSuppliers.length > 0) && (
             <Table
-              headers={['Name', 'Products', 'Avg. Cost', 'Best Value', 'Actions']}
+              headers={['Name', 'Products', 'Avg. Cost', 'Matched Products', 'Actions']}
             >
               {renderSupplierRows()}
             </Table>

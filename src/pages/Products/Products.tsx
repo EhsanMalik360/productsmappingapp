@@ -3,7 +3,7 @@ import Card from '../../components/UI/Card';
 import Table from '../../components/UI/Table';
 import Button from '../../components/UI/Button';
 import ProductRow from '../../components/Products/ProductRow';
-import { Search, Filter, ChevronLeft, ChevronRight, RefreshCcw, X, ArrowDownAZ, ArrowDownUp, Briefcase, DollarSign, Loader2 } from 'lucide-react';
+import { Search, Filter, ChevronLeft, ChevronRight, RefreshCcw, X, ArrowDownAZ, DollarSign, Loader2 } from 'lucide-react';
 import { useProducts, ProductFilters } from '../../hooks/useProducts';
 import { useAppContext } from '../../context/AppContext';
 

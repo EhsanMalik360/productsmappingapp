@@ -50,6 +50,11 @@ const SupplierDetail: React.FC = () => {
   const [dataFetched, setDataFetched] = useState(false);
   const [totalProductCount, setTotalProductCount] = useState(0);
   const [hasAccurateCount, setHasAccurateCount] = useState(false);
+  const [accurateStats, setAccurateStats] = useState<{
+    totalCount: number;
+    matchedCount: number;
+    avgCost: number;
+  } | null>(null);
   
   // Add states for visual transitions
   const [isContentVisible, setIsContentVisible] = useState(true);
@@ -152,9 +157,20 @@ const SupplierDetail: React.FC = () => {
     return supplierProducts.filter(sp => sp.supplier_id === normalizedId);
   }, [supplierProducts, normalizedId, prefetchedProducts, supplierCache]);
   
-  // Calculate statistics with smooth transitions
+  // Calculate statistics with smooth transitions - now using accurate database data
   const stats = useMemo(() => {
-    // Use client-side data for immediate display
+    // If we have accurate stats from database, use them
+    if (accurateStats && hasAccurateCount) {
+      return {
+        productCount: accurateStats.totalCount,
+        matchedCount: accurateStats.matchedCount,
+        unmatchedCount: accurateStats.totalCount - accurateStats.matchedCount,
+        matchedPercent: accurateStats.totalCount > 0 ? Math.round((accurateStats.matchedCount / accurateStats.totalCount) * 100) : 0,
+        avgCost: accurateStats.avgCost
+      };
+    }
+    
+    // Fallback to client-side data for immediate display
     const clientCount = supplierProductsList.length;
     const matched = supplierProductsList.filter(sp => sp.product_id).length;
     const count = totalProductCount || clientCount;
@@ -170,10 +186,10 @@ const SupplierDetail: React.FC = () => {
       unmatchedCount: count - matched,
       matchedPercent: count > 0 ? Math.round((matched / count) * 100) : 0,
       avgCost: clientCount > 0 
-        ? supplierProductsList.reduce((sum, sp) => sum + sp.cost, 0) / clientCount
+        ? supplierProductsList.reduce((sum, sp) => sum + (sp.cost || 0), 0) / clientCount
         : 0
     };
-  }, [supplierProductsList, totalProductCount, hasAccurateCount]);
+  }, [supplierProductsList, totalProductCount, hasAccurateCount, accurateStats]);
   
   // Calculate profit metrics
   const productsWithDetails = useMemo(() => {
@@ -224,21 +240,56 @@ const SupplierDetail: React.FC = () => {
     if (!normalizedId) return;
     
     try {
-      // Use the optimized fetch method with direct database access
-      const result = await fetchSupplierProducts(normalizedId, 1, 1);
+      console.log(`Fetching accurate stats for supplier ${normalizedId}`);
       
-      // Apply transition when updating the count
+      // Get total count
+      const { count: totalCount, error: countError } = await supabase
+        .from('supplier_products')
+        .select('*', { count: 'exact', head: true })
+        .eq('supplier_id', normalizedId);
+        
+      if (countError) throw countError;
+      
+      // Get matched count
+      const { count: matchedCount, error: matchedError } = await supabase
+        .from('supplier_products')
+        .select('*', { count: 'exact', head: true })
+        .eq('supplier_id', normalizedId)
+        .not('product_id', 'is', null);
+        
+      if (matchedError) throw matchedError;
+      
+      // Get average cost using the same approach as Suppliers page
+      const { data: avgData, error: avgError } = await supabase
+        .from('supplier_products')
+        .select('cost')
+        .eq('supplier_id', normalizedId);
+        
+      if (avgError) throw avgError;
+      
+      const avgCost = avgData && avgData.length > 0 
+        ? avgData.reduce((sum, item) => sum + (item.cost || 0), 0) / avgData.length
+        : 0;
+      
+      // Apply transition when updating the data
       setIsContentVisible(false);
       setTimeout(() => {
-        setTotalProductCount(result.count);
+        setTotalProductCount(totalCount || 0);
+        setAccurateStats({
+          totalCount: totalCount || 0,
+          matchedCount: matchedCount || 0,
+          avgCost: avgCost
+        });
         setHasAccurateCount(true);
         setIsContentVisible(true);
+        
+        console.log(`Supplier ${normalizedId}: ${totalCount} total, ${matchedCount} matched, $${avgCost.toFixed(2)} avg cost`);
       }, 150);
     } catch (err) {
-      console.error('Error fetching count:', err);
+      console.error('Error fetching accurate stats:', err);
       setHasAccurateCount(true); // Show client-side data on error
     }
-  }, [normalizedId, fetchSupplierProducts]);
+  }, [normalizedId]);
 
   // Add a flag to track if we're coming back from product details
   const [isReturningFromProduct, setIsReturningFromProduct] = useState(false);
@@ -295,7 +346,7 @@ const SupplierDetail: React.FC = () => {
         }
       }
       
-      // Stage 4: Get accurate count in background regardless of data source
+      // Stage 4: Get accurate statistics in background regardless of data source
       fetchTotalProductCount();
       
       // Check if supplier exists
@@ -388,6 +439,7 @@ const SupplierDetail: React.FC = () => {
       setIsContentVisible(false);
       setIsRefreshing(true);
       setHasAccurateCount(false);
+      setAccurateStats(null);
       
       // Clear prefetched data to force reload
       setPrefetchedProducts([]);
@@ -469,7 +521,7 @@ const SupplierDetail: React.FC = () => {
   // Loading state handling
   const isLoading = isRefreshing || !dataFetched;
   const showSkeleton = isLoading && !supplier;
-  
+
   return (
     <div className="p-6 content-wrapper">
       {/* Header Section */}
