@@ -70,7 +70,7 @@ export function useProducts() {
   const applyFiltersToQuery = useCallback((query: any, filters: ProductFilters) => {
     if (filters.searchTerm) {
       query = query.or(
-        `title.ilike.%${filters.searchTerm}%,ean.ilike.%${filters.searchTerm}%,brand.ilike.%${filters.searchTerm}%,mpn.ilike.%${filters.searchTerm}%`
+        `title.ilike.%${filters.searchTerm}%,ean.ilike.%${filters.searchTerm}%,brand.ilike.%${filters.searchTerm}%,mpn.ilike.%${filters.searchTerm}%,asin.ilike.%${filters.searchTerm}%`
       );
     }
     

@@ -384,7 +384,7 @@ const Products: React.FC = () => {
             <form onSubmit={handleSearch} className="flex w-full md:w-auto relative">
               <input
                 type="text"
-                placeholder="Search products by name, EAN, MPN, or brand..."
+                placeholder="Search products by name, EAN, ASIN, MPN, or brand..."
                 className="border pl-9 pr-4 py-2 rounded w-full md:w-80 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300 transition-all duration-200"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
