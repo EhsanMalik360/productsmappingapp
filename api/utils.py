@@ -225,7 +225,29 @@ def fetch_products(filters=None, limit=50, offset=0):
     Fetch products from Supabase with optional filtering
     """
     supabase = get_supabase_client()
-    query = supabase.table('products').select('*')
+    
+    # Handle hasSuppliers filter with subquery
+    if filters and 'hasSuppliers' in filters:
+        has_suppliers = filters['hasSuppliers']
+        
+        if has_suppliers is True:
+            # Products WITH suppliers - use inner join
+            query = supabase.table('products').select('''
+                *,
+                supplier_products!inner(id)
+            ''')
+        elif has_suppliers is False:
+            # Products WITHOUT suppliers - use left join and filter for null
+            query = supabase.table('products').select('''
+                *,
+                supplier_products(id)
+            ''').is_('supplier_products.id', 'null')
+        else:
+            # hasSuppliers is null - show all products
+            query = supabase.table('products').select('*')
+    else:
+        # No hasSuppliers filter - show all products
+        query = supabase.table('products').select('*')
     
     if filters:
         for key, value in filters.items():
@@ -236,6 +258,7 @@ def fetch_products(filters=None, limit=50, offset=0):
                 query = query.ilike('category', f'%{value}%')
             elif key == 'brand':
                 query = query.ilike('brand', f'%{value}%')
+            # Skip hasSuppliers as it's already handled above
     
     # Add pagination
     query = query.range(offset, offset + limit - 1)

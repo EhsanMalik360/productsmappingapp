@@ -90,16 +90,27 @@ export function useProducts() {
         .lte('buy_box_price', filters.priceRange.max);
     }
     
-    // Handle hasSuppliers filter if needed
-    if (filters.hasSuppliers !== null) {
-      // Implement based on your data structure
-      // For example, if you have a suppliers_count column:
-      // query = filters.hasSuppliers 
-      //   ? query.gt('suppliers_count', 0)
-      //   : query.eq('suppliers_count', 0);
-    }
-    
     return query;
+  }, []);
+  
+  // Special function to build query with hasSuppliers filter
+  const buildQueryWithSupplierFilter = useCallback((filters: ProductFilters) => {
+    if (filters.hasSuppliers === true) {
+      // Products WITH suppliers - use the view
+      return supabase
+        .from('products_with_suppliers')
+        .select('*');
+    } else if (filters.hasSuppliers === false) {
+      // Products WITHOUT suppliers - use the view
+      return supabase
+        .from('products_without_suppliers')
+        .select('*');
+    } else {
+      // No hasSuppliers filter or null - show all products
+      return supabase
+        .from('products')
+        .select('*');
+    }
   }, []);
   
   // Modify getAccurateCount to update display count only when genuinely accurate
@@ -117,13 +128,30 @@ export function useProducts() {
     setIsCountReady(false); // Reset count ready status
     
     try {
-      // Run count query
-      const countQuery = supabase
-        .from('products')
-        .select('id', { count: 'exact', head: true });
+      // Build count query with supplier filter if needed
+      let countQuery;
+      if (filters.hasSuppliers !== null && filters.hasSuppliers !== undefined) {
+        if (filters.hasSuppliers === true) {
+          // Count products WITH suppliers using view
+          countQuery = supabase
+            .from('products_with_suppliers')
+            .select('id', { count: 'exact', head: true });
+        } else {
+          // Count products WITHOUT suppliers using view
+          countQuery = supabase
+            .from('products_without_suppliers')
+            .select('id', { count: 'exact', head: true });
+        }
+      } else {
+        countQuery = supabase
+          .from('products')
+          .select('id', { count: 'exact', head: true });
+      }
       
-      // Apply filters to count query
-      applyFiltersToQuery(countQuery, filters);
+      // Apply other filters to count query (excluding hasSuppliers as it's already handled)
+      const filtersWithoutSuppliers = { ...filters };
+      delete filtersWithoutSuppliers.hasSuppliers;
+      applyFiltersToQuery(countQuery, filtersWithoutSuppliers);
       
       // Execute count query  
       const { count, error } = await countQuery;
@@ -210,13 +238,20 @@ export function useProducts() {
       const start = (page - 1) * pageSize;
       const end = start + pageSize - 1;
       
-      // Build query for data
-      let query = supabase
-        .from('products')
-        .select('*'); // Remove count: 'exact' from main query, we already get it separately
+      // Build query for data with supplier filter if needed
+      let query;
+      if (filters.hasSuppliers !== null && filters.hasSuppliers !== undefined) {
+        query = buildQueryWithSupplierFilter(filters);
+      } else {
+        query = supabase
+          .from('products')
+          .select('*'); // Remove count: 'exact' from main query, we already get it separately
+      }
         
-      // Apply filters to main query
-      query = applyFiltersToQuery(query, filters);
+      // Apply other filters to main query (excluding hasSuppliers as it's already handled)
+      const filtersWithoutSuppliers = { ...filters };
+      delete filtersWithoutSuppliers.hasSuppliers;
+      query = applyFiltersToQuery(query, filtersWithoutSuppliers);
       
       // Apply sort
       if (filters.sortField) {
@@ -307,7 +342,7 @@ export function useProducts() {
         count: displayCount
       };
     }
-  }, [productsCache, internalCount, isInitialLoad, getCacheKey, transformProductData, getAccurateCount, applyFiltersToQuery, isCountReady]);
+  }, [productsCache, internalCount, isInitialLoad, getCacheKey, transformProductData, getAccurateCount, applyFiltersToQuery, isCountReady, buildQueryWithSupplierFilter]);
 
   // Prefetch data for a page without updating current view
   const prefetchProducts = useCallback(async (
@@ -327,13 +362,20 @@ export function useProducts() {
       const start = (page - 1) * pageSize;
       const end = start + pageSize - 1;
       
-      // Build query quietly in background
-      let query = supabase
-        .from('products')
-        .select('*');
+      // Build query quietly in background with supplier filter if needed
+      let query;
+      if (filters.hasSuppliers !== null && filters.hasSuppliers !== undefined) {
+        query = buildQueryWithSupplierFilter(filters);
+      } else {
+        query = supabase
+          .from('products')
+          .select('*');
+      }
       
-      // Apply same filters as main query
-      query = applyFiltersToQuery(query, filters);
+      // Apply other filters (excluding hasSuppliers as it's already handled)
+      const filtersWithoutSuppliers = { ...filters };
+      delete filtersWithoutSuppliers.hasSuppliers;
+      query = applyFiltersToQuery(query, filtersWithoutSuppliers);
       
       // Apply sort
       if (filters.sortField) {
@@ -391,7 +433,7 @@ export function useProducts() {
       // Silently handle prefetch errors
       console.warn('Error prefetching products:', err);
     }
-  }, [productsCache, getCacheKey, transformProductData, applyFiltersToQuery]);
+  }, [productsCache, getCacheKey, transformProductData, applyFiltersToQuery, buildQueryWithSupplierFilter]);
 
   // Mark all cache entries as stale
   const invalidateCache = useCallback(() => {

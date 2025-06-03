@@ -132,6 +132,7 @@ def product_list(request):
         search_query = request.query_params.get('search', '')
         category = request.query_params.get('category', '')
         brand = request.query_params.get('brand', '')
+        has_suppliers_param = request.query_params.get('hasSuppliers', None)
         page_size = int(request.query_params.get('page_size', 50))
         page = int(request.query_params.get('page', 1))
         offset = (page - 1) * page_size
@@ -143,6 +144,14 @@ def product_list(request):
             filters['category'] = category
         if brand:
             filters['brand'] = brand
+        
+        # Handle hasSuppliers filter
+        if has_suppliers_param is not None:
+            if has_suppliers_param.lower() == 'true':
+                filters['hasSuppliers'] = True
+            elif has_suppliers_param.lower() == 'false':
+                filters['hasSuppliers'] = False
+            # If it's any other value, we don't add it to filters (show all)
             
         # Use Supabase client instead of Django ORM
         result = fetch_products(filters, limit=page_size, offset=offset)
