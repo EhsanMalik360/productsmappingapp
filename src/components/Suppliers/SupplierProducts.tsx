@@ -16,7 +16,7 @@ interface SupplierProductsProps {
 }
 
 type FilterOption = 'all' | 'matched' | 'unmatched';
-type SortField = 'name' | 'cost' | 'price' | 'profit' | 'margin' | '';
+type SortField = 'name' | 'cost' | 'price' | 'profit' | 'margin' | 'brand' | '';
 type SortOrder = 'asc' | 'desc';
 
 const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initialCachedProducts }) => {
@@ -31,6 +31,8 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
   const [costRange, setCostRange] = useState<{min: number, max: number}>({min: 0, max: 1000});
   const [userModifiedCostRange, setUserModifiedCostRange] = useState(false);
   const [matchMethodFilter, setMatchMethodFilter] = useState<string | null>(null);
+  const [selectedBrand, setSelectedBrand] = useState<string>('');
+  const [brands, setBrands] = useState<string[]>([]);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
   const [isLoading, setIsLoading] = useState(false);
@@ -181,6 +183,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
         searchTerm,
         filterOption: filterOption,
         matchMethodFilter,
+        selectedBrand,
         sortField,
         sortOrder
       };
@@ -191,7 +194,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
 
       // Create a cache key for storing filter results
       // Only cache if no search term or custom filters to save memory
-      const shouldCache = !searchTerm && !userModifiedCostRange && !matchMethodFilter && !sortField;
+      const shouldCache = !searchTerm && !userModifiedCostRange && !matchMethodFilter && !selectedBrand && !sortField;
       const cacheKey = shouldCache ? `filter_${filterOption}_${supplierId}` : null;
 
       // Fetch data with server-side pagination
@@ -241,7 +244,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
       setIsLoading(false);
       setIsBackgroundRefreshing(false);
     }
-  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, userModifiedCostRange, costRange, matchMethodFilter, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters, updateDisplayData, supplierProductsData.length]);
+  }, [supplierId, currentPage, itemsPerPage, searchTerm, filterOption, userModifiedCostRange, costRange, matchMethodFilter, selectedBrand, sortField, sortOrder, fetchSupplierProducts, hasInitializedFilters, updateDisplayData, supplierProductsData.length]);
   
   // Load filter statistics (match stats, cost range, match methods)
   const loadFilterStats = useCallback(async () => {
@@ -266,44 +269,99 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
         unmatched: unmatchedResult.count
       });
       
-      // Fetch min/max cost (we'll need a special query for this)
-      const { data: costData, error: costError } = await fetch(`/api/supplier-product-stats/${supplierId}`)
-        .then(res => res.json());
+      // Fetch cost range from the actual data - use a larger sample to get accurate min/max
+      console.log('Fetching cost range stats...');
+      const costRangeResult = await fetchSupplierProducts(supplierId, 1, 1000, { 
+        filterOption: 'all'
+      });
+      
+      if (costRangeResult.data && costRangeResult.data.length > 0) {
+        // Calculate min/max from actual data
+        const costs = costRangeResult.data.map(item => parseFloat(String(item.cost)) || 0).filter(cost => cost > 0);
         
-      if (!costError && costData) {
-        const newCostStats = {
-          min: costData.minCost || 0,
-          max: costData.maxCost || 1000
-        };
-        
-        setCostStats(newCostStats);
+        if (costs.length > 0) {
+          const minCost = Math.min(...costs);
+          const maxCost = Math.max(...costs);
+          
+          const newCostStats = {
+            min: Math.floor(minCost), // Round down for min
+            max: Math.ceil(maxCost)   // Round up for max
+          };
+          
+          console.log('Cost range calculated from data:', newCostStats);
+          
+          setCostStats(newCostStats);
 
-        // Only initialize the cost range control with these values, but don't apply 
-        // as a filter until user interaction
+          // Only initialize the cost range control with these values if user hasn't modified it
+          if (!userModifiedCostRange) {
+            setCostRange(newCostStats);
+          }
+        } else {
+          // Fallback if no valid costs found
+          const fallbackStats = { min: 0, max: 100 };
+          setCostStats(fallbackStats);
+          if (!userModifiedCostRange) {
+            setCostRange(fallbackStats);
+          }
+        }
+      } else {
+        // Fallback if no data
+        const fallbackStats = { min: 0, max: 100 };
+        setCostStats(fallbackStats);
         if (!userModifiedCostRange) {
-          setCostRange(newCostStats);
+          setCostRange(fallbackStats);
         }
       }
       
       // Fetch unique match methods
-      const { data: methodsData } = await fetch(`/api/supplier-product-methods/${supplierId}`)
-        .then(res => res.json());
+      const uniqueMethods = [...new Set(
+        totalResult.data
+          ?.filter(item => item.match_method)
+          ?.map(item => item.match_method)
+          ?.filter(Boolean) // Filter out undefined values
+      )] as string[];
+      
+      if (uniqueMethods.length > 0) {
+        setMatchMethods(uniqueMethods);
+      }
+      
+      // Fetch unique brands from supplier products data
+      console.log('Fetching brands for supplier products...');
+      const brandsResult = await fetchSupplierProducts(supplierId, 1, 1000, { 
+        filterOption: 'all'
+      });
+      
+      if (brandsResult.data && brandsResult.data.length > 0) {
+        const uniqueBrands = [...new Set(
+          brandsResult.data
+            ?.filter(item => item.brand != null && String(item.brand).trim() !== '')
+            ?.map(item => String(item.brand).trim())
+            ?.filter(Boolean) // Filter out undefined values
+        )] as string[];
         
-      if (methodsData && methodsData.matchMethods) {
-        setMatchMethods(methodsData.matchMethods);
+        if (uniqueBrands.length > 0) {
+          setBrands(uniqueBrands.sort()); // Sort alphabetically
+          console.log('Loaded brands for supplier products:', uniqueBrands.length, 'unique brands');
+        }
       }
       
       setHasInitializedFilters(true);
     } catch (error) {
       console.error('Error loading filter stats:', error);
+      // Set fallback values on error
+      const fallbackStats = { min: 0, max: 100 };
+      setCostStats(fallbackStats);
+      if (!userModifiedCostRange) {
+        setCostRange(fallbackStats);
+      }
+      setHasInitializedFilters(true);
     }
-  }, [supplierId, fetchSupplierProducts]);
+  }, [supplierId, fetchSupplierProducts, userModifiedCostRange]);
 
-  // Improve loading behavior to prevent unnecessary re-renders
   // Optimized data loading with state tracking to prevent visual flickering
   useEffect(() => {
     // Create an identifier for the current filter state to prevent redundant loads
-    const filterStateKey = `${filterOption}-${currentPage}-${itemsPerPage}-${sortField}-${sortOrder}-${searchTerm}-${matchMethodFilter}`;
+    const filterStateKey = `${filterOption}-${currentPage}-${itemsPerPage}-${sortField}-${sortOrder}-${searchTerm}-${matchMethodFilter}-${selectedBrand}-${userModifiedCostRange ? `${costRange.min}-${costRange.max}` : 'default'}`;
     
     const loadDataWithParams = async () => {
       // Avoid redundant loads by comparing filter states
@@ -345,7 +403,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
         clearTimeout(dataUpdateTimeoutRef.current);
       }
     };
-  }, [loadData, currentPage, itemsPerPage, filterOption, sortField, sortOrder, userModifiedCostRange && costRange, matchMethodFilter, searchTerm, supplierProductsData.length]);
+  }, [loadData, currentPage, itemsPerPage, filterOption, sortField, sortOrder, userModifiedCostRange, costRange.min, costRange.max, matchMethodFilter, searchTerm, supplierProductsData.length, selectedBrand]);
 
   // Join with product data for additional information
   const productsWithDetails = useMemo(() => {
@@ -371,6 +429,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
             productName: product.title || sp.product_name || '-',
             productEan: product.ean || sp.ean || '-',
             productMpn: product.mpn || sp.mpn || '-',
+            productBrand: product.brand || sp.brand || '-',
             profitPerUnit,
             profitMargin
           };
@@ -387,6 +446,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
             productName: sp.product_name || '-',
             productEan: sp.ean || '-',
             productMpn: sp.mpn || '-',
+            productBrand: sp.brand || '-',
             profitPerUnit: 0,
             profitMargin: 0
           };
@@ -400,6 +460,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
         productName: sp.product_name || '-',
         productEan: sp.ean || '-',
         productMpn: sp.mpn || '-',
+        productBrand: sp.brand || '-',
         profitPerUnit: 0,
         profitMargin: 0
       };
@@ -409,7 +470,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
   // Determine the headers based on the current filter
   const tableHeaders = useMemo(() => {
     // Show the same headers for all view types for consistency
-    return ['Product Name', 'EAN', 'MPN', 'Cost', 'Match Status', 'Sale Price', 'Profit', 'Margin', 'Actions'];
+    return ['Product Name', 'EAN', 'Brand', 'MPN', 'Cost', 'Match Status', 'Sale Price', 'Profit', 'Margin', 'Actions'];
   }, []);
 
   // Handle view details for unmatched products
@@ -445,14 +506,11 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
     
     // Clear all filters
     setSearchTerm('');
-    if (costStats) {
-      setCostRange(costStats);
-    } else {
-      setCostRange({min: 0, max: 1000});
-    }
+    setCostRange(costStats);
     // Reset the userModifiedCostRange flag when clearing filters
     setUserModifiedCostRange(false);
     setMatchMethodFilter(null);
+    setSelectedBrand('');
     setSortField('');
     setSortOrder('asc');
     setCurrentPage(1);
@@ -479,6 +537,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
     // Only count cost range filter if user has modified it
     if (userModifiedCostRange && (costRange.min !== costStats.min || costRange.max !== costStats.max)) count++;
     if (matchMethodFilter !== null) count++;
+    if (selectedBrand) count++;
     if (sortField) count++;
     return count;
   };
@@ -790,6 +849,16 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
               </span>
             )}
           </Button>
+          
+          {getActiveFilterCount() > 0 && (
+            <Button 
+              variant="secondary" 
+              className="flex items-center text-xs px-2 py-1.5 border-red-300 text-red-700 hover:bg-red-50"
+              onClick={handleClearFilters}
+            >
+              <X size={14} className="mr-1" /> Clear Filters
+            </Button>
+          )}
         </div>
       </div>
       
@@ -799,31 +868,50 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
             <>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Cost Range</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Cost Range (${costRange.min} - ${costRange.max})
+                  </label>
                   <div className="flex items-center gap-2">
                     <input
-                      type="number"
-                      className="w-24 border p-2 rounded"
+                      type="range"
+                      min={costStats.min}
+                      max={costStats.max}
                       value={costRange.min}
                       onChange={(e) => {
                         setCostRange({...costRange, min: Number(e.target.value)});
                         setUserModifiedCostRange(true);
                       }}
-                      min={0}
+                      className="w-full"
                     />
-                    <span className="text-gray-600">to</span>
                     <input
-                      type="number"
-                      className="w-24 border p-2 rounded"
+                      type="range"
+                      min={costStats.min}
+                      max={costStats.max}
                       value={costRange.max}
                       onChange={(e) => {
                         setCostRange({...costRange, max: Number(e.target.value)});
                         setUserModifiedCostRange(true);
                       }}
-                      min={costRange.min}
+                      className="w-full"
                     />
                   </div>
                 </div>
+                
+                {brands.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
+                    <select 
+                      className="w-full border p-2 rounded bg-white"
+                      value={selectedBrand}
+                      onChange={(e) => setSelectedBrand(e.target.value)}
+                    >
+                      <option value="">All Brands</option>
+                      {brands.map(brand => (
+                        <option key={brand} value={brand}>{brand}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 
                 {matchMethods.length > 0 && (
                   <div>
@@ -853,6 +941,15 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                     <ArrowDownAZ size={14} className="mr-1" /> 
                     Name
                     {sortField === 'name' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                  </Button>
+                  <Button 
+                    variant={sortField === 'brand' ? 'primary' : 'secondary'} 
+                    className="flex items-center text-xs px-2 py-1"
+                    onClick={() => handleSort('brand')}
+                  >
+                    <ArrowDownAZ size={14} className="mr-1" /> 
+                    Brand
+                    {sortField === 'brand' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                   </Button>
                   <Button 
                     variant={sortField === 'cost' ? 'primary' : 'secondary'} 
@@ -961,6 +1058,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                     {item.productName}
                   </td>
                   <td className="px-4 py-3">{item.productEan || '-'}</td>
+                  <td className="px-4 py-3">{item.productBrand || '-'}</td>
                   <td className="px-4 py-3">{item.product?.mpn || item.mpn || '-'}</td>
                   <td className="px-4 py-3">${item.cost.toFixed(2)}</td>
                   <td className="px-4 py-3">
@@ -1028,7 +1126,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                   {/* Only show details panel for truly unmatched products */}
                 {!item.product && selectedUnmatchedProduct === item.id && (
                   <tr>
-                    <td colSpan={9} className="px-0 py-0 border-t border-blue-100">
+                    <td colSpan={10} className="px-0 py-0 border-t border-blue-100">
                       <div className="bg-gradient-to-b from-blue-50 to-white p-4 rounded-md shadow-inner">
                         <div className="flex items-center justify-between mb-3">
                           <h4 className="text-base font-semibold text-blue-900 flex items-center">

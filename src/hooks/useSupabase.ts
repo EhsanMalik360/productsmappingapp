@@ -536,7 +536,7 @@ export function useSuppliers(dataInitialized: boolean = false) {
   }
 
   return {
-    suppliers: initialSuppliers, // Return initialSuppliers instead of suppliers
+    suppliers: !loading && suppliers.length > initialSuppliers.length ? suppliers : initialSuppliers, // Return full suppliers when background loading is complete
     loading,
     initialLoading,
     error,

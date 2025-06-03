@@ -31,6 +31,7 @@ export interface SupplierProduct {
   product_id: string | null;
   cost: number;
   ean: string;
+  brand?: string | null;
   moq?: number | null;
   lead_time?: string | null;
   payment_terms?: string | null;
@@ -106,6 +107,7 @@ interface AppContextType {
       filterOption?: 'all' | 'matched' | 'unmatched',
       costRange?: { min: number, max: number },
       matchMethodFilter?: string | null,
+      selectedBrand?: string,
       sortField?: string,
       sortOrder?: 'asc' | 'desc'
     }
@@ -829,6 +831,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             lead_time,
             payment_terms,
             ean,
+            brand,
             match_method,
             product_name,
             mpn,
@@ -906,6 +909,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           lead_time,
           payment_terms,
           ean,
+          brand,
           match_method,
           product_name,
           mpn,
@@ -985,6 +989,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       filterOption?: 'all' | 'matched' | 'unmatched',
       costRange?: { min: number, max: number },
       matchMethodFilter?: string | null,
+      selectedBrand?: string,
       sortField?: string,
       sortOrder?: 'asc' | 'desc'
     } = {}
@@ -1026,6 +1031,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           lead_time,
           payment_terms,
           ean,
+          brand,
           match_method,
           product_name,
           mpn,
@@ -1062,6 +1068,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Apply match method filter
       if (filters.matchMethodFilter) {
         query = query.eq('match_method', filters.matchMethodFilter);
+      }
+      
+      // Apply brand filter
+      if (filters.selectedBrand) {
+        query = query.ilike('brand', `%${filters.selectedBrand}%`);
       }
       
       // Apply sorting
