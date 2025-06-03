@@ -57,8 +57,8 @@ const Products: React.FC = () => {
     hasAccurateCount,
     getProducts,
     invalidateCache,
+    clearMetadataCache,
     getBrands,
-    getCategories,
     getPriceRange
   } = useProducts();
 
@@ -66,7 +66,6 @@ const Products: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [selectedBrand, setSelectedBrand] = useState<string>('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('');
   const [priceRange, setPriceRange] = useState<{min: number, max: number}>({min: 0, max: 1000});
   const [hasSuppliers, setHasSuppliers] = useState<boolean | null>(null);
   const [sortField, setSortField] = useState<SortField>('');
@@ -76,7 +75,6 @@ const Products: React.FC = () => {
   const [, setLastRefreshed] = useState<Date | null>(null);
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
   const [brands, setBrands] = useState<string[]>([]);
-  const [categories, setCategories] = useState<string[]>([]);
   const [priceStats, setPriceStats] = useState<{min: number, max: number}>({min: 0, max: 1000});
   // Track if we've done initial data loading with accurate count
   const [isInitialDataLoaded, setIsInitialDataLoaded] = useState(false);
@@ -90,13 +88,12 @@ const Products: React.FC = () => {
     return {
       searchTerm,
       brand: selectedBrand,
-      category: selectedCategory,
       priceRange,
       hasSuppliers,
       sortField,
       sortOrder
     };
-  }, [searchTerm, selectedBrand, selectedCategory, priceRange, hasSuppliers, sortField, sortOrder]);
+  }, [searchTerm, selectedBrand, priceRange, hasSuppliers, sortField, sortOrder]);
   
   // Load initial data
   useEffect(() => {
@@ -120,7 +117,7 @@ const Products: React.FC = () => {
     startTransition(() => {
       loadData();
     });
-  }, [currentPage, itemsPerPage, searchTerm, selectedBrand, selectedCategory, priceRange, hasSuppliers, sortField, sortOrder, isInitialDataLoaded]);
+  }, [currentPage, itemsPerPage, searchTerm, selectedBrand, priceRange, hasSuppliers, sortField, sortOrder, isInitialDataLoaded]);
 
   // Load metadata and initial data
   const loadInitialData = async () => {
@@ -133,7 +130,6 @@ const Products: React.FC = () => {
       // Start metadata loading in parallel with products
       const metadataPromise = Promise.all([
         getBrands(),
-        getCategories(),
         getPriceRange()
       ]);
       
@@ -144,11 +140,12 @@ const Products: React.FC = () => {
       await refreshData();
       
       // Then wait for metadata
-      const [brandsData, categoriesData, priceRangeData] = await metadataPromise;
+      const [brandsData, priceRangeData] = await metadataPromise;
+      
+      console.log('Loaded brands for dropdown:', brandsData.length, 'brands:', brandsData.slice(0, 10));
       
       // Only update UI when we have everything
       setBrands(brandsData);
-      setCategories(categoriesData);
       setPriceStats(priceRangeData);
       setPriceRange(priceRangeData);
       
@@ -220,15 +217,16 @@ const Products: React.FC = () => {
       // Invalidate cache to force fresh data fetch
       invalidateCache();
       
+      // Clear metadata caches to force fresh brands/price data
+      clearMetadataCache();
+      
       // Reload metadata
-      const [brandsData, categoriesData, priceRangeData] = await Promise.all([
+      const [brandsData, priceRangeData] = await Promise.all([
         getBrands(),
-        getCategories(),
         getPriceRange()
       ]);
       
       setBrands(brandsData);
-      setCategories(categoriesData);
       setPriceStats(priceRangeData);
       
       // Force refetch current page
@@ -248,7 +246,6 @@ const Products: React.FC = () => {
   const handleClearFilters = () => {
     startTransition(() => {
       setSelectedBrand('');
-      setSelectedCategory('');
       setSearchTerm('');
       setPriceRange(priceStats);
       setHasSuppliers(null);
@@ -261,7 +258,6 @@ const Products: React.FC = () => {
   const getActiveFilterCount = () => {
     let count = 0;
     if (selectedBrand) count++;
-    if (selectedCategory) count++;
     if (priceRange.min > priceStats.min || priceRange.max < priceStats.max) count++;
     if (hasSuppliers !== null) count++;
     if (sortField) count++;
@@ -434,7 +430,7 @@ const Products: React.FC = () => {
           {/* Expanded filters section with smoother animation */}
           {showFilters && (
             <div className="p-3 bg-gray-50 rounded-md mb-3 border border-gray-200 animate-slideDown">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Brand</label>
                   <select 
@@ -445,20 +441,6 @@ const Products: React.FC = () => {
                     <option value="">All Brands</option>
                     {brands.map(brand => (
                       <option key={brand} value={brand}>{brand}</option>
-                    ))}
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-                  <select 
-                    className="border p-2 rounded w-full bg-white"
-                    value={selectedCategory}
-                    onChange={(e) => setSelectedCategory(e.target.value)}
-                  >
-                    <option value="">All Categories</option>
-                    {categories.map(category => (
-                      <option key={category} value={category}>{category}</option>
                     ))}
                   </select>
                 </div>
@@ -541,24 +523,6 @@ const Products: React.FC = () => {
                     <DollarSign size={14} className="mr-1" /> 
                     Price
                     {sortField === 'price' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                  </Button>
-                  <Button 
-                    variant={sortField === 'units' ? 'primary' : 'secondary'} 
-                    className="flex items-center text-xs px-2 py-1"
-                    onClick={() => handleSort('units')}
-                  >
-                    <ArrowDownUp size={14} className="mr-1" /> 
-                    Units Sold
-                    {sortField === 'units' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
-                  </Button>
-                  <Button 
-                    variant={sortField === 'profit' ? 'primary' : 'secondary'} 
-                    className="flex items-center text-xs px-2 py-1"
-                    onClick={() => handleSort('profit')}
-                  >
-                    <Briefcase size={14} className="mr-1" /> 
-                    Profit
-                    {sortField === 'profit' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                   </Button>
                   {getActiveFilterCount() > 0 && (
                     <Button 

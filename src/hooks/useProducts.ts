@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase';
 export interface ProductFilters {
   searchTerm?: string;
   brand?: string;
-  category?: string;
   priceRange?: { min: number; max: number };
   hasSuppliers?: boolean | null;
   sortField?: string;
@@ -39,7 +38,6 @@ export function useProducts() {
   
   // Metadata caches
   const [brandsCache, setBrandsCache] = useState<string[]>([]);
-  const [categoriesCache, setCategoriesCache] = useState<string[]>([]);
   const [priceRangeCache, setPriceRangeCache] = useState<{min: number, max: number}>({min: 0, max: 1000});
   
   // Helper function to transform DB data to UI format (snake_case to camelCase)
@@ -78,10 +76,6 @@ export function useProducts() {
     
     if (filters.brand) {
       query = query.eq('brand', filters.brand);
-    }
-    
-    if (filters.category) {
-      query = query.eq('category', filters.category);
     }
     
     if (filters.priceRange) {
@@ -450,6 +444,12 @@ export function useProducts() {
     });
   }, []);
 
+  // Clear metadata caches to force refresh of brands, categories, and price range
+  const clearMetadataCache = useCallback(() => {
+    setBrandsCache([]);
+    setPriceRangeCache({min: 0, max: 1000});
+  }, []);
+
   // Clear specific cache entries or all cache
   const clearCache = useCallback((specificKey?: string) => {
     // Reset accurate count flag when clearing cache
@@ -470,19 +470,39 @@ export function useProducts() {
   const getBrands = useCallback(async () => {
     // Return cached brands if available
     if (brandsCache.length > 0) {
+      console.log('Returning cached brands:', brandsCache.length, 'brands');
       return brandsCache;
     }
     
     try {
+      console.log('Fetching brands from database...');
+      
+      // Use the efficient RPC function to get distinct brands from ALL records
+      const { data: rpcData, error: rpcError } = await supabase
+        .rpc('get_distinct_brands');
+      
+      if (!rpcError && rpcData && Array.isArray(rpcData)) {
+        console.log('Unique brands from RPC:', rpcData.length, 'brands:', rpcData.slice(0, 10));
+        setBrandsCache(rpcData);
+        return rpcData;
+      }
+      
+      // Fallback to regular query without limits if RPC fails
+      console.log('RPC failed, falling back to regular query for ALL records...');
       const { data, error } = await supabase
         .from('products')
         .select('brand')
+        .not('brand', 'is', null) // Exclude null brands
         .order('brand');
       
       if (error) throw error;
       
+      console.log('Raw brand data from database:', data?.length, 'records');
+      
       // Extract unique brands
       const brands = [...new Set(data?.map(p => p.brand))].filter(Boolean);
+      console.log('Unique brands found:', brands.length, 'brands:', brands.slice(0, 10)); // Show first 10 brands
+      
       setBrandsCache(brands);
       return brands;
     } catch (err) {
@@ -490,31 +510,6 @@ export function useProducts() {
       return [];
     }
   }, [brandsCache]);
-  
-  // Get unique categories with caching
-  const getCategories = useCallback(async () => {
-    // Return cached categories if available
-    if (categoriesCache.length > 0) {
-      return categoriesCache;
-    }
-    
-    try {
-      const { data, error } = await supabase
-        .from('products')
-        .select('category')
-        .order('category');
-      
-      if (error) throw error;
-      
-      // Extract unique categories
-      const categories = [...new Set(data?.map(p => p.category))].filter(Boolean);
-      setCategoriesCache(categories);
-      return categories;
-    } catch (err) {
-      console.error('Error fetching categories:', err);
-      return [];
-    }
-  }, [categoriesCache]);
   
   // Get price range with caching
   const getPriceRange = useCallback(async () => {
@@ -578,8 +573,8 @@ export function useProducts() {
     prefetchProducts,
     invalidateCache,
     clearCache,
+    clearMetadataCache,
     getBrands,
-    getCategories,
     getPriceRange
   };
 } 
