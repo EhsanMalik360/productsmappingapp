@@ -13,24 +13,23 @@ type SortOrder = 'asc' | 'desc';
 // Enhanced skeleton loader for product rows that looks more like real data
 const ProductRowSkeleton = () => (
   <tr className="border-b animate-pulse transition-all duration-500 ease-in-out">
+    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-3/4 transition-all duration-600"></div></td>
     <td className="px-4 py-3">
       <div className="flex flex-col">
         <div className="h-5 bg-gray-200 rounded w-full mb-1 transition-all duration-500"></div>
         <div className="h-4 bg-gray-100 rounded w-2/3 transition-all duration-700"></div>
       </div>
     </td>
-    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-4/5 transition-all duration-600"></div></td>
+    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-4/5 transition-all duration-650"></div></td>
     <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-2/3 transition-all duration-800"></div></td>
     <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-500"></div></td>
     <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-700"></div></td>
-    <td className="px-4 py-3"><div className="h-5 bg-gray-200 rounded w-1/2 transition-all duration-600"></div></td>
     <td className="px-4 py-3">
       <div className="flex flex-col space-y-1 min-h-[44px]">
         <div className="supplier-badge bg-gray-200 h-6 w-[90px] rounded-full transition-all duration-500"></div>
         <div className="bg-gray-100 h-5 w-[40px] rounded transition-all duration-700"></div>
       </div>
     </td>
-    <td className="px-4 py-3 min-w-[80px]"><div className="h-5 bg-gray-200 rounded w-[60px] transition-all duration-800"></div></td>
     <td className="px-4 py-3 min-w-[100px]">
       <div className="font-medium h-5 bg-gray-200 rounded w-[40px] mb-1 transition-all duration-500"></div>
       <div className="h-2 bg-gradient-to-r from-gray-300 via-gray-200 to-gray-300 rounded opacity-60 transition-all duration-700">
@@ -524,6 +523,15 @@ const Products: React.FC = () => {
                     Price
                     {sortField === 'price' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                   </Button>
+                  <Button 
+                    variant={sortField === 'units' ? 'primary' : 'secondary'} 
+                    className="flex items-center text-xs px-2 py-1"
+                    onClick={() => handleSort('units')}
+                  >
+                    <ArrowDownAZ size={14} className="mr-1" /> 
+                    Units Sold
+                    {sortField === 'units' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                  </Button>
                   {getActiveFilterCount() > 0 && (
                     <Button 
                       variant="secondary" 
@@ -551,28 +559,26 @@ const Products: React.FC = () => {
         >
           <Table
             headers={[
+              'ASIN',
               'Product', 
               'EAN', 
               'Brand', 
               'Buy Box Price', 
               'Units Sold', 
-              'FBA Fee', 
               'Suppliers', 
-              'Best Cost', 
               'Profit Margin',
               'Actions'
             ]}
             columnWidths={[
-              '25%', // Product - larger for product names
-              '10%', // EAN
-              '10%', // Brand
-              '8%',  // Buy Box Price
-              '8%',  // Units Sold
-              '8%',  // FBA Fee
-              '10%', // Suppliers
-              '6%',  // Best Cost
-              '8%',  // Profit Margin
-              '7%'   // Actions
+              '12%', // ASIN - first column, slightly larger
+              '28%', // Product - larger since we removed Best Cost
+              '12%', // EAN
+              '12%', // Brand
+              '10%', // Buy Box Price
+              '10%', // Units Sold
+              '12%', // Suppliers
+              '10%', // Profit Margin
+              '8%'   // Actions
             ]}
           >
             {renderProductRows()}

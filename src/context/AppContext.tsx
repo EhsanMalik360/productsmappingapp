@@ -8,6 +8,7 @@ export interface Product {
   id: string;
   title: string;
   ean: string;
+  asin?: string | null;
   brand: string;
   salePrice: number;
   unitsSold: number;
@@ -161,6 +162,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     id: dbProduct.id || '',
     title: dbProduct.title || 'Untitled Product',
     ean: dbProduct.ean || '',
+    asin: dbProduct.asin || null,
     brand: dbProduct.brand || '',
     salePrice: typeof dbProduct.sale_price === 'number' ? dbProduct.sale_price : 0,
     unitsSold: typeof dbProduct.units_sold === 'number' ? dbProduct.units_sold : 0,

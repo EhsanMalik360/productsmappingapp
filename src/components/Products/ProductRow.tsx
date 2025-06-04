@@ -122,24 +122,30 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, className = '' }) => {
   
   return (
     <tr className={`border-b hover:bg-gray-50 ${className}`} style={{opacity: isVisible ? 1 : 0, transition: 'opacity 150ms ease-in-out'}}>
+      <td className="px-4 py-3">
+        {product.asin ? (
+          <a 
+            href={`https://www.amazon.com/dp/${product.asin}`} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 hover:underline transition-colors duration-200"
+          >
+            {product.asin}
+          </a>
+        ) : (
+          <span className="text-gray-400">-</span>
+        )}
+      </td>
       <td className="px-4 py-3 font-medium">{product.title}</td>
       <td className="px-4 py-3">{product.ean}</td>
       <td className="px-4 py-3">{product.brand}</td>
       <td className="px-4 py-3">${product.buyBoxPrice && typeof product.buyBoxPrice === 'number' ? product.buyBoxPrice.toFixed(2) : '0.00'}</td>
       <td className="px-4 py-3">{product.unitsSold && typeof product.unitsSold === 'number' ? product.unitsSold.toLocaleString() : '0'}</td>
-      <td className="px-4 py-3">${product.amazonFee && typeof product.amazonFee === 'number' ? product.amazonFee.toFixed(2) : '0.00'}</td>
       <td className="px-4 py-3">
         <div className="flex flex-col space-y-1 min-h-[44px]">
           {renderSuppliersBadge()}
           {renderMatchBadge()}
         </div>
-      </td>
-      <td className="px-4 py-3 min-w-[80px]">
-        {loadingState === 'loading' ? (
-          <div className="bg-gray-100 text-gray-400 px-2 py-1 rounded opacity-70 min-w-[60px] inline-block">-</div>
-        ) : (
-          bestCost
-        )}
       </td>
       <td className="px-4 py-3 min-w-[100px]">
         <div className="font-medium">

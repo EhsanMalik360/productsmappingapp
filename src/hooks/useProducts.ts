@@ -46,6 +46,7 @@ export function useProducts() {
       id: item.id,
       title: item.title,
       ean: item.ean,
+      asin: item.asin,
       brand: item.brand,
       salePrice: item.sale_price,
       unitsSold: item.units_sold,

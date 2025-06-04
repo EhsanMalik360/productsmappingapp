@@ -178,6 +178,7 @@ const ProductDetail: React.FC = () => {
         id: data.id,
         title: data.title || 'Untitled Product',
         ean: data.ean || '',
+        asin: data.asin || null,
         brand: data.brand || '',
         salePrice: typeof data.sale_price === 'number' ? data.sale_price : 0,
         unitsSold: typeof data.units_sold === 'number' ? data.units_sold : 0,
@@ -231,6 +232,7 @@ const ProductDetail: React.FC = () => {
         ...safeProduct,
         title: safeProduct.title,
         ean: safeProduct.ean,
+        asin: safeProduct.asin || '',
         brand: safeProduct.brand,
         mpn: safeProduct.mpn || '',
         salePrice: safeProduct.salePrice,
@@ -480,6 +482,7 @@ const ProductDetail: React.FC = () => {
         ...safeProduct,
         title: safeProduct.title,
         ean: safeProduct.ean,
+        asin: safeProduct.asin || '',
         brand: safeProduct.brand,
         mpn: safeProduct.mpn || '',
         salePrice: safeProduct.salePrice,
@@ -706,6 +709,15 @@ const ProductDetail: React.FC = () => {
                         />
                       </div>
                       <div className="text-sm">
+                        <span className="text-gray-500 mr-1">ASIN:</span>
+                        <input
+                          type="text"
+                          value={editedProduct?.asin || ''}
+                          onChange={(e) => handleEditChange('asin', e.target.value)}
+                          className="border p-1 rounded text-sm w-32"
+                        />
+                      </div>
+                      <div className="text-sm">
                         <span className="text-gray-500 mr-1">Brand:</span>
                         <input
                           type="text"
@@ -727,6 +739,20 @@ const ProductDetail: React.FC = () => {
                   ) : (
                     <>
                       <div className="text-sm text-gray-500">EAN: {safeProduct?.ean || '...'}</div>
+                      <div className="text-sm text-gray-500">
+                        ASIN: {safeProduct?.asin ? (
+                          <a 
+                            href={`https://www.amazon.com/dp/${safeProduct.asin}`} 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="text-blue-600 hover:text-blue-800 hover:underline transition-colors duration-200"
+                          >
+                            {safeProduct.asin}
+                          </a>
+                        ) : (
+                          <span className="text-gray-400">-</span>
+                        )}
+                      </div>
                       <div className="text-sm text-gray-500">Brand: {safeProduct?.brand || '...'}</div>
                       {safeProduct?.mpn && <div className="text-sm text-gray-500">MPN: {safeProduct.mpn}</div>}
                     </>
@@ -1318,6 +1344,23 @@ const ProductDetail: React.FC = () => {
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">EAN</td>
                         <td className="px-2 py-1.5">{safeProduct.ean}</td>
+                      </tr>
+                      <tr className="border-b border-gray-200">
+                        <td className="px-2 py-1.5 font-medium">ASIN</td>
+                        <td className="px-2 py-1.5">
+                          {safeProduct?.asin ? (
+                            <a 
+                              href={`https://www.amazon.com/dp/${safeProduct.asin}`} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="text-blue-600 hover:text-blue-800 hover:underline transition-colors duration-200"
+                            >
+                              {safeProduct.asin}
+                            </a>
+                          ) : (
+                            'N/A'
+                          )}
+                        </td>
                       </tr>
                       <tr className="border-b border-gray-200">
                         <td className="px-2 py-1.5 font-medium">Brand</td>
