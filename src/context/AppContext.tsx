@@ -40,6 +40,15 @@ export interface SupplierProduct {
   mpn?: string | null;
   product_name?: string | null;
   suppliers?: Supplier | any;
+  products?: Array<{
+    id: string;
+    asin?: string;
+    units_sold?: number;
+    buy_box_price?: number;
+    amazon_fee?: number;
+    referral_fee?: number;
+    title?: string;
+  }> | null;
 }
 
 export interface CustomAttribute {
@@ -195,6 +204,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             suppliers (
               id,
               name
+            ),
+            products!product_id (
+              id,
+              asin,
+              units_sold,
+              title
             )
           `)
           .limit(5000);
@@ -840,6 +855,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             suppliers (
               id,
               name
+            ),
+            products!product_id (
+              id,
+              asin,
+              units_sold,
+              title
             )
           `)
           .eq('product_id', productId);
@@ -920,6 +941,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           suppliers (
             id,
             name
+          ),
+          products!product_id (
+            id,
+            asin,
+            units_sold,
+            title
           )
         `)
         .limit(5000);
@@ -1017,11 +1044,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       console.log(`Fetching supplier products for supplier ${supplierId}, page ${page}, size ${pageSize}`);
       
-      // Calculate start and end for pagination
+      // Check if we need to fetch all data for client-side sorting
+      const needsClientSorting = filters.sortField && ['units_sold', 'margin'].includes(filters.sortField);
+      
+      // Calculate start and end for pagination (only if not doing client-side sorting)
       const start = (page - 1) * pageSize;
       const end = start + pageSize - 1;
       
-      // Build query
+      // Build query - first get supplier products, then manually fetch product data
       let query = supabase
         .from('supplier_products')
         .select(`
@@ -1077,8 +1107,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         query = query.ilike('brand', `%${filters.selectedBrand}%`);
       }
       
-      // Apply sorting
-      if (filters.sortField) {
+      // Apply sorting for fields that exist in supplier_products table
+      if (filters.sortField && ['name', 'cost', 'brand'].includes(filters.sortField)) {
         let sortColumn: string;
         
         switch (filters.sortField) {
@@ -1088,8 +1118,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           case 'cost':
             sortColumn = 'cost';
             break;
-          // For other fields like price, profit and margin we need client-side sorting
-          // since they depend on joined data
+          case 'brand':
+            sortColumn = 'brand';
+            break;
           default:
             sortColumn = 'created_at';
             break;
@@ -1099,12 +1130,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ascending: filters.sortOrder === 'asc' 
         });
       } else {
-        // Default sort
+        // Default sort for fields that don't require special sorting
+        // For units_sold and margin, we'll sort client-side after data enrichment
         query = query.order('created_at', { ascending: false });
       }
       
-      // Apply pagination
-      query = query.range(start, end);
+      // Apply pagination only if not doing client-side sorting
+      if (!needsClientSorting) {
+        query = query.range(start, end);
+      }
       
       // Execute the query
       const { data, error, count } = await query;
@@ -1113,16 +1147,106 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       
       console.log(`Fetched ${data?.length || 0} supplier products (total count: ${count})`);
       
+      // Manually fetch product data for matched supplier products
+      let enrichedData = data || [];
+      if (data && data.length > 0) {
+        const productIds = data
+          .filter(sp => sp.product_id)
+          .map(sp => sp.product_id);
+          
+        if (productIds.length > 0) {
+          console.log(`Fetching product data for ${productIds.length} matched products`);
+          
+          // Split into chunks to avoid URL length limits (Supabase has limits on query complexity)
+          const chunkSize = 500; // Process 500 IDs at a time
+          let allProductsData: any[] = [];
+          
+          for (let i = 0; i < productIds.length; i += chunkSize) {
+            const chunk = productIds.slice(i, i + chunkSize);
+            console.log(`Fetching chunk ${Math.floor(i / chunkSize) + 1}/${Math.ceil(productIds.length / chunkSize)} (${chunk.length} products)`);
+            
+            const { data: chunkData, error: chunkError } = await supabase
+              .from('products')
+              .select('id, asin, units_sold, buy_box_price, amazon_fee, referral_fee, title')
+              .in('id', chunk);
+              
+            if (chunkError) {
+              console.error('Error fetching products data chunk:', chunkError);
+              // Continue with next chunk instead of failing completely
+            } else {
+              allProductsData.push(...(chunkData || []));
+            }
+          }
+          
+          console.log(`Found ${allProductsData.length} products with ASIN/units_sold data`);
+          // Add product data to supplier products
+          enrichedData = data.map(sp => {
+            if (sp.product_id) {
+              const productData = allProductsData.find(p => p.id === sp.product_id);
+              return {
+                ...sp,
+                products: productData ? [productData] : null
+              };
+            }
+            return {
+              ...sp,
+              products: null
+            };
+          });
+        }
+      }
+      
+      // Apply client-side sorting for fields that require product data or calculations
+      if (filters.sortField && ['units_sold', 'margin'].includes(filters.sortField)) {
+        enrichedData.sort((a: any, b: any) => {
+          let comparison = 0;
+          
+          if (filters.sortField === 'units_sold') {
+            const unitsA = a.products?.[0]?.units_sold || 0;
+            const unitsB = b.products?.[0]?.units_sold || 0;
+            comparison = unitsA - unitsB;
+          } else if (filters.sortField === 'margin') {
+            // Calculate margin for both items using same logic as ProductDetail
+            const calculateMargin = (item: any) => {
+              if (!item.products?.[0]?.buy_box_price || !item.cost) return -Infinity;
+              
+              const buyBoxPrice = parseFloat(item.products[0].buy_box_price);
+              const amazonFee = parseFloat(item.products[0].amazon_fee || 0);
+              const referralFee = parseFloat(item.products[0].referral_fee || 0);
+              const cost = parseFloat(item.cost);
+              
+              const margin = buyBoxPrice - amazonFee - referralFee - cost;
+              return buyBoxPrice > 0 ? (margin / buyBoxPrice) * 100 : -Infinity;
+            };
+            
+            const marginA = calculateMargin(a);
+            const marginB = calculateMargin(b);
+            comparison = marginA - marginB;
+          }
+          
+          return filters.sortOrder === 'asc' ? comparison : -comparison;
+        });
+        
+        // Apply pagination after client-side sorting
+        const totalCount = enrichedData.length;
+        enrichedData = enrichedData.slice(start, start + pageSize);
+        
+        return {
+          data: enrichedData as SupplierProduct[] || [],
+          count: totalCount
+        };
+      }
+      
       // After fetching, update cache for default requests
       if (isDefaultRequest) {
         updateSupplierCache(supplierId, {
-          products: data, // Use the result data
+          products: enrichedData, // Use the enriched data
           count: count ?? 0 // Use nullish coalescing to ensure count is a number
         });
       }
       
       return {
-        data: data as SupplierProduct[] || [],
+        data: enrichedData as SupplierProduct[] || [],
         count: count || 0
       };
     } catch (err) {

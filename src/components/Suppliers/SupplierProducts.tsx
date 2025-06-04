@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Package, ExternalLink, Link, Info, Search, Filter, X, ArrowDownAZ, DollarSign, TrendingUp, Tag, ChevronLeft, ChevronRight, RefreshCcw } from 'lucide-react';
+import { Package, ExternalLink, Link, Info, Search, Filter, X, ArrowDownAZ, DollarSign, TrendingUp, Tag, ChevronLeft, ChevronRight, RefreshCcw, BarChart3, Percent } from 'lucide-react';
 import Card from '../UI/Card';
 import Table from '../UI/Table';
 import Button from '../UI/Button';
@@ -16,7 +16,7 @@ interface SupplierProductsProps {
 }
 
 type FilterOption = 'all' | 'matched' | 'unmatched';
-type SortField = 'name' | 'cost' | 'price' | 'profit' | 'margin' | 'brand' | '';
+type SortField = 'name' | 'cost' | 'price' | 'margin' | 'brand' | 'units_sold' | '';
 type SortOrder = 'asc' | 'desc';
 
 const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initialCachedProducts }) => {
@@ -411,6 +411,37 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
       return [];
     }
     
+    // Log sample data to verify backend structure
+    if (supplierProductsData.length > 0) {
+      console.log('Sample supplier product data from backend:', supplierProductsData[0]);
+      console.log('Available keys:', Object.keys(supplierProductsData[0]));
+      console.log('Products relation data:', supplierProductsData[0].products);
+      console.log('Type of products:', typeof supplierProductsData[0].products);
+      console.log('Is products null?', supplierProductsData[0].products === null);
+      console.log('Is products array?', Array.isArray(supplierProductsData[0].products));
+      console.log('Product ID:', supplierProductsData[0].product_id);
+      console.log('Has product_id:', !!supplierProductsData[0].product_id);
+      
+      // Test if we have any products with ASIN
+      const withProducts = supplierProductsData.filter(sp => sp.products && sp.products.length > 0);
+      console.log(`${withProducts.length} out of ${supplierProductsData.length} supplier products have joined product data`);
+      
+      if (withProducts.length > 0) {
+        console.log('Sample product with joined data:', withProducts[0].products[0]);
+        console.log('Product buy_box_price:', withProducts[0].products[0]?.buy_box_price);
+      }
+      
+      // Find the specific AXAGON product for debugging
+      const axagonProduct = supplierProductsData.find(sp => 
+        sp.product_name?.includes('AXAGON') || sp.productName?.includes('AXAGON')
+      );
+      if (axagonProduct) {
+        console.log('AXAGON product data:', axagonProduct);
+        console.log('AXAGON product_id:', axagonProduct.product_id);
+        console.log('AXAGON products relation:', axagonProduct.products);
+      }
+    }
+    
     // Use the transformed data instead of the original data
     return supplierProductsData.map(sp => {
       // Normal processing for non-transformed records
@@ -470,7 +501,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
   // Determine the headers based on the current filter
   const tableHeaders = useMemo(() => {
     // Show the same headers for all view types for consistency
-    return ['Product Name', 'EAN', 'Brand', 'MPN', 'Cost', 'Match Status', 'Sale Price', 'Profit', 'Margin', 'Actions'];
+    return ['Product Name', 'EAN', 'ASIN', 'Brand', 'MPN', 'Cost', 'Match Status', 'Buy Box Price', 'Units Sold', 'Margin', 'Actions'];
   }, []);
 
   // Handle view details for unmatched products
@@ -970,14 +1001,24 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                     {sortField === 'price' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                   </Button>
                   <Button 
-                    variant={sortField === 'profit' ? 'primary' : 'secondary'} 
+                    variant={sortField === 'units_sold' ? 'primary' : 'secondary'} 
                     className="flex items-center text-xs px-2 py-1"
-                    onClick={() => handleSort('profit')}
+                    onClick={() => handleSort('units_sold')}
                   >
-                    <TrendingUp size={14} className="mr-1" /> 
-                    Profit
-                    {sortField === 'profit' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                    <BarChart3 size={14} className="mr-1" /> 
+                    Units Sold
+                    {sortField === 'units_sold' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
                   </Button>
+                  <Button 
+                    variant={sortField === 'margin' ? 'primary' : 'secondary'} 
+                    className="flex items-center text-xs px-2 py-1"
+                    onClick={() => handleSort('margin')}
+                  >
+                    <Percent size={14} className="mr-1" /> 
+                    Margin
+                    {sortField === 'margin' && <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>}
+                  </Button>
+
                   {getActiveFilterCount() > 0 && (
                     <Button 
                       variant="secondary" 
@@ -1058,6 +1099,21 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                     {item.productName}
                   </td>
                   <td className="px-4 py-3">{item.productEan || '-'}</td>
+                  <td className="px-4 py-3">
+                    {item.products?.[0]?.asin ? (
+                      <a 
+                        href={`https://www.amazon.com/dp/${item.products[0].asin}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-blue-600 hover:text-blue-800 hover:underline transition-colors duration-200"
+                        title={`Open Amazon page for ASIN: ${item.products[0].asin}`}
+                      >
+                        {item.products[0].asin}
+                      </a>
+                    ) : (
+                      <span className="text-gray-400" title="No ASIN data available for this product">-</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">{item.productBrand || '-'}</td>
                   <td className="px-4 py-3">{item.product?.mpn || item.mpn || '-'}</td>
                   <td className="px-4 py-3">${item.cost.toFixed(2)}</td>
@@ -1067,13 +1123,46 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                   
                   {/* Display finance data for all products, with placeholders for unmatched */}
                   <td className="px-4 py-3">
-                      {item.product && !item.isPlaceholderProduct ? `$${item.product.salePrice.toFixed(2)}` : '-'}
+                    {item.products?.[0]?.buy_box_price !== undefined ? (
+                      <span title={`Current Buy Box Price: $${item.products[0].buy_box_price || 0}`}>
+                        ${item.products[0].buy_box_price ? item.products[0].buy_box_price.toFixed(2) : '0.00'}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400" title="No buy box price data available for this product">-</span>
+                    )}
                   </td>
-                    <td className={`px-4 py-3 ${item.product && !item.isPlaceholderProduct ? (item.profitPerUnit >= 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
-                      {item.product && !item.isPlaceholderProduct ? `$${item.profitPerUnit.toFixed(2)}` : '-'}
+                  <td className="px-4 py-3">
+                    {item.products?.[0]?.units_sold !== undefined ? (
+                      <span title={`Units sold in the last 30 days: ${item.products[0].units_sold || 0}`}>
+                        {item.products[0].units_sold ? item.products[0].units_sold.toLocaleString() : '0'}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400" title="No units sold data available for this product">-</span>
+                    )}
                   </td>
-                    <td className={`px-4 py-3 ${item.product && !item.isPlaceholderProduct ? (item.profitMargin >= 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
-                      {item.product && !item.isPlaceholderProduct ? `${item.profitMargin.toFixed(1)}%` : '-'}
+                    <td className={`px-4 py-3`}>
+                      {item.products?.[0]?.buy_box_price && item.cost ? (() => {
+                        const buyBoxPrice = parseFloat(item.products[0].buy_box_price);
+                        const amazonFee = parseFloat(item.products[0].amazon_fee || 0);
+                        const referralFee = parseFloat(item.products[0].referral_fee || 0);
+                        const cost = parseFloat(item.cost);
+                        
+                        // Use same calculation as ProductDetail page
+                        const margin = buyBoxPrice - amazonFee - referralFee - cost;
+                        const profitMargin = buyBoxPrice > 0 ? (margin / buyBoxPrice) * 100 : 0;
+                        
+                        const isPositive = profitMargin >= 0;
+                        return (
+                          <span 
+                            className={isPositive ? 'text-green-600' : 'text-red-600'}
+                            title={`Margin: ${profitMargin.toFixed(1)}% (Buy Box: $${buyBoxPrice.toFixed(2)} - Amazon Fee: $${amazonFee.toFixed(2)} - Referral Fee: $${referralFee.toFixed(2)} - Cost: $${cost.toFixed(2)})`}
+                          >
+                            {profitMargin.toFixed(1)}%
+                          </span>
+                        );
+                      })() : (
+                        <span className="text-gray-400" title="No margin data available - missing buy box price">-</span>
+                      )}
                   </td>
                   
                   <td className="px-4 py-3">
@@ -1126,7 +1215,7 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                   {/* Only show details panel for truly unmatched products */}
                 {!item.product && selectedUnmatchedProduct === item.id && (
                   <tr>
-                    <td colSpan={10} className="px-0 py-0 border-t border-blue-100">
+                    <td colSpan={11} className="px-0 py-0 border-t border-blue-100">
                       <div className="bg-gradient-to-b from-blue-50 to-white p-4 rounded-md shadow-inner">
                         <div className="flex items-center justify-between mb-3">
                           <h4 className="text-base font-semibold text-blue-900 flex items-center">
@@ -1153,6 +1242,10 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                               <div>
                                 <p className="text-xs text-gray-500 uppercase mb-0.5">MPN</p>
                                 <p className="font-mono text-xs bg-gray-50 p-1 rounded">{item.mpn || '-'}</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-500 uppercase mb-0.5">ASIN</p>
+                                <p className="font-mono text-xs bg-gray-50 p-1 rounded">{item.products?.[0]?.asin || item.asin || '-'}</p>
                               </div>
                             </div>
                           </div>

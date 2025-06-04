@@ -285,15 +285,21 @@ def fetch_suppliers(filters=None, limit=50, offset=0):
 def fetch_supplier_products(supplier_id=None, product_id=None, limit=50, offset=0):
     """
     Fetch supplier products with optional filtering by supplier or product
+    Include ASIN and units_sold from the related products table for matched products
     """
     supabase = get_supabase_client()
-    query = supabase.table('supplier_products').select('*')
+    # Left join with products table to get ASIN and units_sold data for matched products
+    # This will include both matched and unmatched products
+    query = supabase.table('supplier_products').select('''
+        *,
+        products(asin, units_sold)
+    ''')
     
     if supplier_id:
-        query = query.eq('supplier', supplier_id)
+        query = query.eq('supplier_id', supplier_id)
     
     if product_id:
-        query = query.eq('product', product_id)
+        query = query.eq('product_id', product_id)
     
     # Add pagination
     query = query.range(offset, offset + limit - 1)
