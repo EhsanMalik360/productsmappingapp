@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Eye } from 'lucide-react';
 import { useAppContext, Product, SupplierProduct } from '../../context/AppContext';
 import ProductMatchBadge from './ProductMatchBadge';
@@ -163,13 +162,15 @@ const ProductRow: React.FC<ProductRowProps> = ({ product, className = '' }) => {
         </div>
       </td>
       <td className="px-4 py-3">
-        <Link 
-          to={`/products/${product.id}`} 
-          state={{ product }} 
-          className="text-blue-600 hover:underline flex items-center"
+        <button
+          onClick={() => {
+            const url = `/products/${product.id}`;
+            window.open(url, '_blank');
+          }}
+          className="text-blue-600 hover:underline flex items-center bg-transparent border-none cursor-pointer p-0"
         >
           <Eye size={16} className="mr-1" /> View
-        </Link>
+        </button>
       </td>
     </tr>
   );

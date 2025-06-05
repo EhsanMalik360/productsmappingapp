@@ -1171,20 +1171,12 @@ const SupplierProducts: React.FC<SupplierProductsProps> = ({ supplierId, initial
                           onClick={() => {
                             // Get product ID - this will always be valid for matched products
                             const productId = item.product.id;
-                            const currentSupplierObject = supplierCache[supplierId]?.supplier || suppliers.find(s => s.id === supplierId);
                             
-                            // First navigate immediately to prevent click delays
-                            navigate(`/products/${productId}`, {
-                              state: {
-                                product: item.product,
-                                supplier: currentSupplierObject, // Pass the full supplier object if found
-                                from: 'supplierDetail',
-                                supplierId: supplierId // Keep supplierId as a fallback
-                              }
-                            });
+                            // Open the product detail page in a new tab
+                            const url = `/products/${productId}`;
+                            window.open(url, '_blank');
                             
-                            // Then optionally refresh data in the background if needed
-                            // This prevents multiple clicks and UI freezing
+                            // Optionally refresh data in the background if needed
                             if (!item.product.buyBoxPrice || item.product.salePrice === 0) {
                               setTimeout(() => {
                                 refreshData().catch(err => {
